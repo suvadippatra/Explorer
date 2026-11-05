@@ -74,6 +74,21 @@ object SettingsManager {
     private const val KEY_DEFAULT_HEADER_SIZE = "default_header_size"
     private const val KEY_DEFAULT_HEADER_TYPE = "default_header_type"
     private const val KEY_DEFAULT_GRID_ZOOM = "default_grid_zoom"
+    private const val KEY_DEFAULT_GRID_COLUMNS = "default_grid_columns"
+
+    private val _isFullScreenTabBarHidden = mutableStateOf(false)
+    val isFullScreenTabBarHidden: State<Boolean> = _isFullScreenTabBarHidden
+
+    fun setFullScreenTabBarHidden(hidden: Boolean) {
+        _isFullScreenTabBarHidden.value = hidden
+    }
+
+    fun toggleFullScreenTabBar() {
+        _isFullScreenTabBarHidden.value = !_isFullScreenTabBarHidden.value
+    }
+
+    private val _defaultGridColumns = mutableIntStateOf(3)
+    val defaultGridColumns: State<Int> = _defaultGridColumns
 
     private const val KEY_HOVER_PREVIEW_ENABLED = "hover_preview_enabled"
     private const val KEY_SIDEBAR_SWIPE_GESTURE = "sidebar_swipe_gesture"

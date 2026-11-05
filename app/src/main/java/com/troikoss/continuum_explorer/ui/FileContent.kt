@@ -440,7 +440,7 @@ private fun FileLayout(
 
         if (viewMode == ViewMode.DETAILS) {
             Box(modifier = Modifier
-                .padding(horizontal = 16.dp)
+                .fillMaxWidth()
                 .onGloballyPositioned { headerHeightPx = it.size.height.toFloat() }
             ) {
                 DetailsHeader(appState = appState, scrollState = hScrollState)
@@ -510,7 +510,7 @@ private fun FileLayout(
             VerticalScrollbar(
                 gridState = gridState,
                 isNearEdge = showVertical,
-                modifier = Modifier.align(Alignment.CenterEnd).padding(end = 12.dp)
+                modifier = Modifier.align(Alignment.CenterEnd).padding(end = 4.dp)
             )
 
             if (viewMode == ViewMode.DETAILS) {
@@ -520,7 +520,7 @@ private fun FileLayout(
                     isRecentlyScrolled = isHScrollActive,
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
-                        .padding(horizontal = 16.dp, vertical = 12.dp)
+                        .padding(horizontal = 8.dp, vertical = 8.dp)
                 )
             }
         }
@@ -553,19 +553,21 @@ private fun FileGrid(
         }
     }
 
+    val configuredCols = appState.folderConfigs.gridColumnCount.coerceIn(2, 8)
+
     LazyVerticalGrid(
         state = gridState,
         columns = when (viewMode) {
-            ViewMode.GRID -> GridCells.Fixed(3)
-            ViewMode.GALLERY -> GridCells.Adaptive(minSize = appState.folderConfigs.gridItemSize.dp)
+            ViewMode.GRID -> GridCells.Fixed(configuredCols)
+            ViewMode.GALLERY -> GridCells.Fixed(configuredCols)
             else -> GridCells.Fixed(1)
         },
-        modifier = if (viewMode == ViewMode.DETAILS) Modifier.fillMaxSize().padding(horizontal = 16.dp)
-                   else if (viewMode == ViewMode.GRID) Modifier.fillMaxSize().padding(horizontal = 8.dp)
-                   else Modifier.fillMaxSize().padding(horizontal = 32.dp),
-        contentPadding = if (viewMode == ViewMode.DETAILS) PaddingValues(0.dp)
-                         else if (viewMode == ViewMode.GRID) PaddingValues(8.dp)
-                         else PaddingValues(16.dp)
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = when (viewMode) {
+            ViewMode.DETAILS -> PaddingValues(0.dp)
+            ViewMode.CONTENT -> PaddingValues(horizontal = 4.dp, vertical = 2.dp)
+            else -> PaddingValues(horizontal = 6.dp, vertical = 6.dp)
+        }
     ) {
         items(
             items = appState.displayItems,

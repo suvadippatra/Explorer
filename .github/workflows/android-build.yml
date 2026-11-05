@@ -1,0 +1,209 @@
+name: Manual Android APK & AAB Builder
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_target:
+        description: 'Select Architecture / Package Format to Build'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - universal-apk
+          - arm64-v8a-apk
+          - armeabi-v7a-apk
+          - x86_64-apk
+          - x86-apk
+          - aab
+      build_variant:
+        description: 'Select Build Variant (release or debug)'
+        required: true
+        default: 'release'
+        type: choice
+        options:
+          - release
+          - debug
+      create_release:
+        description: 'Create a public GitHub Release with compiled files?'
+        required: false
+        default: false
+        type: boolean
+      release_tag:
+        description: 'Release version or increment number x (blank = auto 0.0.x+1, e.g. 0.0.1 -> 0.0.2)'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-android:
+    name: Build (${{ inputs.build_target }} - ${{ inputs.build_variant }})
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Setup Gradle 9.3.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
+
+      - name: Resolve App Version (Base 0.0.1 -> 0.0.x+1)
+        id: version_step
+        run: |
+          RAW_INPUT="${{ inputs.release_tag }}"
+          RUN_NUM="${{ github.run_number }}"
+          if [ -z "$RAW_INPUT" ]; then
+            VERSION_NAME="0.0.${RUN_NUM}"
+            VERSION_CODE="${RUN_NUM}"
+          elif [[ "$RAW_INPUT" =~ ^[0-9]+$ ]]; then
+            NEXT_PATCH=$((RAW_INPUT + 1))
+            VERSION_NAME="0.0.${NEXT_PATCH}"
+            VERSION_CODE="${NEXT_PATCH}"
+          else
+            CLEAN_VER="${RAW_INPUT#v}"
+            VERSION_NAME="${CLEAN_VER}"
+            VERSION_CODE="${RUN_NUM}"
+          fi
+          echo "VERSION_NAME=${VERSION_NAME}" >> $GITHUB_ENV
+          echo "VERSION_CODE=${VERSION_CODE}" >> $GITHUB_ENV
+          echo "Resolved Version: ${VERSION_NAME} (versionCode=${VERSION_CODE})"
+
+      - name: Prepare Signing Keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          STORE_PASSWORD_SECRET: ${{ secrets.STORE_PASSWORD }}
+          KEY_PASSWORD_SECRET: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          if [ -f "debug.keystore.base64" ] && [ ! -f "debug.keystore" ]; then
+            base64 -d debug.keystore.base64 > debug.keystore
+          elif [ ! -f "debug.keystore" ]; then
+            keytool -genkeypair -v \
+              -keystore debug.keystore \
+              -storepass android \
+              -alias androiddebugkey \
+              -keypass android \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+          fi
+
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > my-upload-key.jks
+            echo "KEYSTORE_PATH=${GITHUB_WORKSPACE}/my-upload-key.jks" >> $GITHUB_ENV
+            echo "STORE_PASSWORD=${STORE_PASSWORD_SECRET}" >> $GITHUB_ENV
+            echo "KEY_PASSWORD=${KEY_PASSWORD_SECRET}" >> $GITHUB_ENV
+          else
+            keytool -genkeypair -v \
+              -keystore my-upload-key.jks \
+              -storepass androidrelease \
+              -alias upload \
+              -keypass androidrelease \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=Continuum Explorer,O=OpenSource,C=US"
+            echo "KEYSTORE_PATH=${GITHUB_WORKSPACE}/my-upload-key.jks" >> $GITHUB_ENV
+            echo "STORE_PASSWORD=androidrelease" >> $GITHUB_ENV
+            echo "KEY_PASSWORD=androidrelease" >> $GITHUB_ENV
+          fi
+
+      - name: Execute Gradle Build for Selected Architecture(s)
+        run: |
+          mkdir -p build_outputs
+          TARGET="${{ inputs.build_target }}"
+          VARIANT="${{ inputs.build_variant }}"
+
+          if [ "$VARIANT" == "release" ]; then
+            CAP_VARIANT="Release"
+            SUBDIR="release"
+          else
+            CAP_VARIANT="Debug"
+            SUBDIR="debug"
+          fi
+
+          GRADLE_VER_ARGS="-PversionName=${VERSION_NAME} -PversionCode=${VERSION_CODE} --no-daemon"
+
+          build_abi_apk() {
+            ABI=$1
+            echo "Building ${ABI} ${VARIANT} APK..."
+            gradle assemble${CAP_VARIANT} -PabiTarget=${ABI} ${GRADLE_VER_ARGS}
+            APK_FILE=$(find app/build/outputs/apk/${SUBDIR} -name "*.apk" | head -n 1)
+            cp "$APK_FILE" "build_outputs/ContinuumExplorer-v${VERSION_NAME}-${ABI}-${VARIANT}.apk"
+          }
+
+          build_universal_apk() {
+            echo "Building Universal ${VARIANT} APK..."
+            gradle assemble${CAP_VARIANT} -PabiTarget=universal ${GRADLE_VER_ARGS}
+            APK_FILE=$(find app/build/outputs/apk/${SUBDIR} -name "*.apk" | head -n 1)
+            cp "$APK_FILE" "build_outputs/ContinuumExplorer-v${VERSION_NAME}-universal-${VARIANT}.apk"
+          }
+
+          build_aab() {
+            echo "Building ${VARIANT} App Bundle (AAB)..."
+            gradle bundle${CAP_VARIANT} -PabiTarget=universal ${GRADLE_VER_ARGS}
+            AAB_FILE=$(find app/build/outputs/bundle/${SUBDIR} -name "*.aab" | head -n 1)
+            cp "$AAB_FILE" "build_outputs/ContinuumExplorer-v${VERSION_NAME}-${VARIANT}.aab"
+          }
+
+          case "$TARGET" in
+            "arm64-v8a-apk")
+              build_abi_apk "arm64-v8a"
+              ;;
+            "armeabi-v7a-apk")
+              build_abi_apk "armeabi-v7a"
+              ;;
+            "x86_64-apk")
+              build_abi_apk "x86_64"
+              ;;
+            "x86-apk")
+              build_abi_apk "x86"
+              ;;
+            "universal-apk")
+              build_universal_apk
+              ;;
+            "aab")
+              build_aab
+              ;;
+            "all")
+              build_abi_apk "arm64-v8a"
+              build_abi_apk "armeabi-v7a"
+              build_abi_apk "x86_64"
+              build_abi_apk "x86"
+              build_universal_apk
+              build_aab
+              ;;
+          esac
+
+          ls -lh build_outputs/
+
+      - name: Upload Compiled Artifacts to Workflow Summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: ContinuumExplorer-v${{ env.VERSION_NAME }}-${{ inputs.build_target }}-${{ inputs.build_variant }}
+          path: build_outputs/*
+          retention-days: 30
+
+      - name: Publish GitHub Release (Optional)
+        if: ${{ inputs.create_release == true }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.VERSION_NAME }}
+          name: Continuum Explorer v${{ env.VERSION_NAME }} (${{ inputs.build_variant }})
+          body: |
+            Automated build of **Continuum Explorer v${{ env.VERSION_NAME }}**.
+            - **Target:** `${{ inputs.build_target }}`
+            - **Variant:** `${{ inputs.build_variant }}`
+            - **Version Code:** `${{ env.VERSION_CODE }}`
+          files: build_outputs/*
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

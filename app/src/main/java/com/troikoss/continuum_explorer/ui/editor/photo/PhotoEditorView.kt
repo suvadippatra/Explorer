@@ -90,45 +90,119 @@ fun PhotoEditorView(
         FilterEngine.applyFilter(baseBitmap, engine.activeFilterPreset, engine.colorAdjustments)
     }
 
-    val configuration = LocalConfiguration.current
-    val isTabletWideScreen = configuration.screenWidthDp >= 600
+    BoxWithConstraints(modifier = modifier.fillMaxSize()) {
+        val isTabletWideScreen = maxWidth >= 600.dp
 
-    Scaffold(
-        topBar = {
-            PhotoEditorEngineTopBar(
-                engine = engine,
-                onExit = onExit,
-                onSaveClick = { showExportDialog = true },
-                isSaving = isSaving
-            )
-        },
-        bottomBar = {
-            if (!isTabletWideScreen) {
-                PhotoEditorEngineToolPalette(
+        Scaffold(
+            topBar = {
+                PhotoEditorEngineTopBar(
                     engine = engine,
-                    onAddText = {
-                        editingTextGraphic = TextGraphic(
-                            position = Offset(canvasWidth / 2f, canvasHeight / 2f)
-                        )
-                        showTextDialog = true
-                    }
+                    onExit = onExit,
+                    onSaveClick = { showExportDialog = true },
+                    isSaving = isSaving
                 )
-            }
-        },
-        modifier = modifier.fillMaxSize()
-    ) { innerPadding ->
-        if (isTabletWideScreen) {
-            Row(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding)
-                    .background(MaterialTheme.colorScheme.background)
-            ) {
-                // Left Pane: Image Canvas
+            },
+            bottomBar = {
+                if (!isTabletWideScreen) {
+                    PhotoEditorEngineToolPalette(
+                        engine = engine,
+                        onAddText = {
+                            editingTextGraphic = TextGraphic(
+                                position = Offset(canvasWidth / 2f, canvasHeight / 2f)
+                            )
+                            showTextDialog = true
+                        }
+                    )
+                }
+            },
+            modifier = Modifier.fillMaxSize()
+        ) { innerPadding ->
+            if (isTabletWideScreen) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(innerPadding)
+                        .background(MaterialTheme.colorScheme.background)
+                ) {
+                    // Left Pane: Image Canvas
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .padding(8.dp)
+                            .onGloballyPositioned { coordinates ->
+                                canvasWidth = coordinates.size.width.toFloat()
+                                canvasHeight = coordinates.size.height.toFloat()
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        PhotoEditorCanvasLayers(
+                            engine = engine,
+                            previewFilteredBitmap = previewFilteredBitmap,
+                            fileName = fileName,
+                            canvasWidth = canvasWidth,
+                            canvasHeight = canvasHeight,
+                            isSaving = isSaving,
+                            onEditTextGraphic = {
+                                editingTextGraphic = it
+                                showTextDialog = true
+                            }
+                        )
+                    }
+
+                    VerticalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outlineVariant)
+
+                    // Right Pane: PhotoEditor Controls & Sliders Docked on Right Side
+                    Surface(
+                        modifier = Modifier
+                            .width(320.dp)
+                            .fillMaxHeight(),
+                        color = MaterialTheme.colorScheme.surfaceContainerLow,
+                        tonalElevation = 2.dp
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .verticalScroll(rememberScrollState())
+                                .padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "PhotoEditor Controls",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Text(
+                                    text = "${baseBitmap.width}×${baseBitmap.height}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            PhotoEditorEngineToolContent(
+                                engine = engine,
+                                onAddText = {
+                                    editingTextGraphic = TextGraphic(
+                                        position = Offset(canvasWidth / 2f, canvasHeight / 2f)
+                                    )
+                                    showTextDialog = true
+                                }
+                            )
+                        }
+                    }
+                }
+            } else {
+                // Mobile Layout: Canvas on top, Bottom Tool Palette
                 Box(
                     modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight()
+                        .fillMaxSize()
+                        .padding(innerPadding)
+                        .background(MaterialTheme.colorScheme.background)
                         .onGloballyPositioned { coordinates ->
                             canvasWidth = coordinates.size.width.toFloat()
                             canvasHeight = coordinates.size.height.toFloat()
@@ -148,66 +222,6 @@ fun PhotoEditorView(
                         }
                     )
                 }
-
-                // Right Pane: Tablet Photo Studio Card with Controls
-                Card(
-                    modifier = Modifier
-                        .width(360.dp)
-                        .fillMaxHeight()
-                        .padding(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-                    shape = RoundedCornerShape(20.dp),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .verticalScroll(rememberScrollState())
-                            .padding(14.dp)
-                    ) {
-                        Text(
-                            text = "Photo Studio",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(bottom = 12.dp)
-                        )
-                        PhotoEditorEngineToolContent(
-                            engine = engine,
-                            onAddText = {
-                                editingTextGraphic = TextGraphic(
-                                    position = Offset(canvasWidth / 2f, canvasHeight / 2f)
-                                )
-                                showTextDialog = true
-                            }
-                        )
-                    }
-                }
-            }
-        } else {
-            // Mobile Layout: Canvas on top, Bottom Tool Palette
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding)
-                    .background(MaterialTheme.colorScheme.background)
-                    .onGloballyPositioned { coordinates ->
-                        canvasWidth = coordinates.size.width.toFloat()
-                        canvasHeight = coordinates.size.height.toFloat()
-                    },
-                contentAlignment = Alignment.Center
-            ) {
-                PhotoEditorCanvasLayers(
-                    engine = engine,
-                    previewFilteredBitmap = previewFilteredBitmap,
-                    fileName = fileName,
-                    canvasWidth = canvasWidth,
-                    canvasHeight = canvasHeight,
-                    isSaving = isSaving,
-                    onEditTextGraphic = {
-                        editingTextGraphic = it
-                        showTextDialog = true
-                    }
-                )
             }
         }
     }
@@ -265,7 +279,7 @@ fun PhotoEditorView(
 }
 
 /**
- * Top bar for PhotoEditorView with Undo/Redo, Revert, and High-Res Save button.
+ * Top bar for PhotoEditorView with Undo/Redo, Revert, Fullscreen Toggle, and High-Res Save button.
  */
 @Composable
 private fun PhotoEditorEngineTopBar(
@@ -274,6 +288,7 @@ private fun PhotoEditorEngineTopBar(
     onSaveClick: () -> Unit,
     isSaving: Boolean
 ) {
+    val isFullScreen by com.troikoss.continuum_explorer.managers.SettingsManager.isFullScreenTabBarHidden
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         tonalElevation = 3.dp
@@ -281,54 +296,70 @@ private fun PhotoEditorEngineTopBar(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .statusBarsPadding()
-                .height(56.dp)
+                .height(48.dp)
                 .padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onExit, enabled = !isSaving) {
+                IconButton(onClick = onExit, enabled = !isSaving, modifier = Modifier.size(36.dp)) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Exit Editor")
                 }
+                Spacer(modifier = Modifier.width(4.dp))
                 Text(
                     text = "Photo Editor",
-                    style = MaterialTheme.typography.titleMedium,
+                    style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Bold
                 )
             }
 
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                 IconButton(
                     onClick = { engine.undo() },
-                    enabled = engine.canUndo && !isSaving
+                    enabled = engine.canUndo && !isSaving,
+                    modifier = Modifier.size(36.dp)
                 ) {
-                    Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = "Undo")
+                    Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = "Undo", modifier = Modifier.size(19.dp))
                 }
 
                 IconButton(
                     onClick = { engine.redo() },
-                    enabled = engine.canRedo && !isSaving
+                    enabled = engine.canRedo && !isSaving,
+                    modifier = Modifier.size(36.dp)
                 ) {
-                    Icon(Icons.AutoMirrored.Filled.Redo, contentDescription = "Redo")
+                    Icon(Icons.AutoMirrored.Filled.Redo, contentDescription = "Redo", modifier = Modifier.size(19.dp))
                 }
 
                 IconButton(
                     onClick = { engine.resetAll() },
-                    enabled = !isSaving
+                    enabled = !isSaving,
+                    modifier = Modifier.size(36.dp)
                 ) {
-                    Icon(Icons.Default.Refresh, contentDescription = "Reset All")
+                    Icon(Icons.Default.Refresh, contentDescription = "Reset All", modifier = Modifier.size(19.dp))
+                }
+
+                IconButton(
+                    onClick = { com.troikoss.continuum_explorer.managers.SettingsManager.toggleFullScreenTabBar() },
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        imageVector = if (isFullScreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
+                        contentDescription = if (isFullScreen) "Exit Full Screen" else "Full Screen",
+                        tint = if (isFullScreen) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.size(19.dp)
+                    )
                 }
 
                 Button(
                     onClick = onSaveClick,
                     enabled = !isSaving,
                     shape = RoundedCornerShape(10.dp),
-                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                    modifier = Modifier.height(34.dp)
                 ) {
-                    Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Save", fontWeight = FontWeight.SemiBold)
+                    Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(15.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Save", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
                 }
             }
         }

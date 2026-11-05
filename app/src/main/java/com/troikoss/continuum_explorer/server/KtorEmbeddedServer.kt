@@ -3,13 +3,17 @@ package com.troikoss.continuum_explorer.server
 import android.content.Context
 import android.os.Environment
 import android.util.Log
+import com.troikoss.continuum_explorer.managers.FtpBucketManager
+import com.troikoss.continuum_explorer.managers.FtpHostedMode
+import com.troikoss.continuum_explorer.managers.SettingsManager
 import io.ktor.http.*
+import io.ktor.http.content.*
 import io.ktor.server.application.*
 import io.ktor.server.engine.*
 import io.ktor.server.html.*
-import io.ktor.server.http.content.*
 import io.ktor.server.netty.*
 import io.ktor.server.plugins.cors.routing.*
+import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import io.ktor.server.websocket.*
@@ -19,24 +23,27 @@ import kotlinx.html.*
 import java.io.File
 import java.net.URLDecoder
 import java.net.URLEncoder
+import java.text.SimpleDateFormat
 import java.time.Duration
-
-import io.ktor.server.request.*
-import io.ktor.http.content.*
-import com.troikoss.continuum_explorer.managers.SettingsManager
+import java.util.Date
+import java.util.Locale
 
 /**
  * KtorEmbeddedServer
  *
- * Lightweight, Netty-backed Ktor HTTP & WebSocket server operating on port 8080.
- * Serves an interactive HTML5 Continuum Dashboard, downloadable files from storage,
- * file upload handler with security password verification,
- * and a live low-latency /screencast WebSocket stream.
+ * Lightweight, Netty-backed Ktor HTTP, Static Website & WebSocket server operating on port 8080.
+ * - In Self-Hosted Website Mode (FtpHostedMode.CUSTOM_FOLDER): Serves the selected HTML file or
+ *   static web repository (e.g. cloned/downloaded from GitHub) with full relative CSS/JS/media/font
+ *   asset resolution and SPA routing fallback.
+ * - In FTP & File Share Mode: Serves a minimalist, responsive Web Portal with configurable
+ *   Desktop (split table), Mobile (touch cards), and Screen Mirroring (live WebSocket theatre) layouts.
  */
 class KtorEmbeddedServer(
     private val context: Context,
     private val port: Int = 8080,
     private val rootDirectory: File = Environment.getExternalStorageDirectory(),
+    private val hostedMode: FtpHostedMode = SettingsManager.ftpHostedMode.value,
+    private val entryHtmlFile: File? = null,
     private val getScreenCastManager: () -> ScreenCastManager?
 ) {
     companion object {
@@ -48,7 +55,18 @@ class KtorEmbeddedServer(
     fun start() {
         if (engine != null) return
 
-        val effectiveRootDir = if (rootDirectory.exists()) rootDirectory else Environment.getExternalStorageDirectory()
+        val effectiveRootDir = when {
+            rootDirectory.exists() && rootDirectory.isDirectory -> rootDirectory
+            rootDirectory.exists() && rootDirectory.isFile -> rootDirectory.parentFile ?: Environment.getExternalStorageDirectory()
+            else -> Environment.getExternalStorageDirectory()
+        }
+
+        val resolvedEntryHtml = entryHtmlFile ?: if (rootDirectory.exists() && rootDirectory.isFile) {
+            rootDirectory
+        } else {
+            File(effectiveRootDir, "index.html").takeIf { it.exists() && it.isFile }
+                ?: File(effectiveRootDir, "index.htm").takeIf { it.exists() && it.isFile }
+        }
 
         try {
             engine = embeddedServer(Netty, port = port, host = "0.0.0.0") {
@@ -65,63 +83,103 @@ class KtorEmbeddedServer(
                 }
 
                 routing {
-                    // HTML5 Dashboard & Static HTML Server Interface
+                    // 1. Root Route: Self-Hosted Website OR Continuum Web Portal
                     get("/") {
                         val clientIp = try { call.request.local.remoteHost } catch (_: Exception) { "Client" }
                         val forceExplorer = call.parameters["explorer"] == "true"
                         val requestedPath = call.parameters["path"]?.let {
                             URLDecoder.decode(it, "UTF-8")
                         }
-                        val rootDir = effectiveRootDir
-                        val currentDir = if (!requestedPath.isNullOrEmpty()) {
-                            val f = File(requestedPath)
-                            if (f.exists() && f.isDirectory && f.canonicalPath.startsWith(rootDir.canonicalPath)) {
-                                f
-                            } else {
-                                rootDir
+
+                        // If in Self-Hosted Website mode and not explicitly opening ?explorer=true or ?path=...
+                        if (hostedMode == FtpHostedMode.CUSTOM_FOLDER && !forceExplorer && requestedPath.isNullOrEmpty()) {
+                            val htmlTarget = resolvedEntryHtml
+                                ?: effectiveRootDir.listFiles()?.firstOrNull {
+                                    it.isFile && (it.name.endsWith(".html", ignoreCase = true) || it.name.endsWith(".htm", ignoreCase = true))
+                                }
+                            if (htmlTarget != null && htmlTarget.exists() && htmlTarget.isFile) {
+                                ContinuumHubService.addLog(
+                                    clientIp,
+                                    "Website",
+                                    "Served ${htmlTarget.name}",
+                                    effectiveRootDir.name,
+                                    bytes = htmlTarget.length()
+                                )
+                                call.respondFile(htmlTarget)
+                                return@get
                             }
-                        } else {
-                            rootDir
                         }
 
-                        val indexHtml = File(currentDir, "index.html")
-                        if (!forceExplorer && requestedPath.isNullOrEmpty() && indexHtml.exists() && indexHtml.isFile) {
-                            ContinuumHubService.addLog(clientIp, "Website", "Served index.html", indexHtml.name, bytes = indexHtml.length())
-                            call.respondFile(indexHtml)
+                        // Otherwise render the responsive Web Portal / File Browser
+                        val currentDir = if (!requestedPath.isNullOrEmpty()) {
+                            val candidate = File(requestedPath)
+                            if (candidate.exists() && candidate.isDirectory && isAllowedPath(candidate, effectiveRootDir)) {
+                                candidate
+                            } else {
+                                effectiveRootDir
+                            }
                         } else {
-                            ContinuumHubService.addLog(clientIp, "Website", "Browsed directory", currentDir.name)
-                            val files = currentDir.listFiles()?.sortedWith(
+                            effectiveRootDir
+                        }
+
+                        val files: List<File> = if (
+                            hostedMode == FtpHostedMode.BATCH_FILES &&
+                            requestedPath.isNullOrEmpty() &&
+                            FtpBucketManager.bucketItems.isNotEmpty()
+                        ) {
+                            FtpBucketManager.bucketItems.filter { it.exists() }.sortedWith(
+                                compareBy({ !it.isDirectory }, { it.name.lowercase() })
+                            )
+                        } else {
+                            currentDir.listFiles()?.sortedWith(
                                 compareBy({ !it.isDirectory }, { it.name.lowercase() })
                             ) ?: emptyList()
+                        }
 
-                            call.respondHtml(HttpStatusCode.OK) {
-                                renderDashboard(currentDir, rootDir, files)
-                            }
+                        ContinuumHubService.addLog(clientIp, "HTTP", "Browsed portal", currentDir.name)
+
+                        call.respondHtml(HttpStatusCode.OK) {
+                            renderDashboard(
+                                currentDir = currentDir,
+                                rootDir = effectiveRootDir,
+                                files = files,
+                                isRootView = requestedPath.isNullOrEmpty(),
+                                hasWebsiteEntry = resolvedEntryHtml?.exists() == true
+                            )
                         }
                     }
 
-                    // Direct File Download / Stream route
+                    // 2. Direct File Download / Inline Preview Route
                     get("/download") {
                         val clientIp = try { call.request.local.remoteHost } catch (_: Exception) { "Client" }
                         val filePath = call.parameters["file"]?.let {
                             URLDecoder.decode(it, "UTF-8")
                         }
+                        val inlinePreview = call.parameters["inline"] == "true"
+
                         if (filePath.isNullOrEmpty()) {
                             call.respond(HttpStatusCode.BadRequest, "Missing file parameter")
                             return@get
                         }
 
                         val file = File(filePath)
-                        val rootDir = effectiveRootDir
-                        if (file.exists() && file.isFile && (file.canonicalPath.startsWith(rootDir.canonicalPath) || file.canonicalPath.startsWith(Environment.getExternalStorageDirectory().canonicalPath))) {
-                            ContinuumHubService.addLog(clientIp, "HTTP", "Downloaded ${file.name}", "${file.length()} bytes", bytes = file.length())
-                            call.response.header(
-                                HttpHeaders.ContentDisposition,
-                                ContentDisposition.Attachment.withParameter(
-                                    ContentDisposition.Parameters.FileName,
-                                    file.name
-                                ).toString()
+                        if (file.exists() && file.isFile && isAllowedPath(file, effectiveRootDir)) {
+                            ContinuumHubService.addLog(
+                                clientIp,
+                                "HTTP",
+                                if (inlinePreview) "Previewed ${file.name}" else "Downloaded ${file.name}",
+                                "${file.length() / 1024} KB",
+                                bytes = file.length()
                             )
+                            if (!inlinePreview) {
+                                call.response.header(
+                                    HttpHeaders.ContentDisposition,
+                                    ContentDisposition.Attachment.withParameter(
+                                        ContentDisposition.Parameters.FileName,
+                                        file.name
+                                    ).toString()
+                                )
+                            }
                             call.respondFile(file)
                         } else {
                             ContinuumHubService.addLog(clientIp, "HTTP", "404 Not Found", filePath)
@@ -129,11 +187,11 @@ class KtorEmbeddedServer(
                         }
                     }
 
-                    // Live Screen Sharing WebSocket Route
+                    // 3. Live Screen Sharing WebSocket Route
                     webSocket("/screencast") {
                         val screenCast = getScreenCastManager()
                         if (screenCast == null) {
-                            send(Frame.Text("ERROR: Screen capture is not active. Grant permission in Explorer app."))
+                            send(Frame.Text("INACTIVE"))
                             close(CloseReason(CloseReason.Codes.CANNOT_ACCEPT, "MediaProjection inactive"))
                             return@webSocket
                         }
@@ -160,27 +218,38 @@ class KtorEmbeddedServer(
                         }
                     }
 
-                    // API Status route
+                    // 4. API Status Route
                     get("/api/status") {
                         val hasScreencast = getScreenCastManager() != null
+                        val activeFtpPort = ContinuumHubService.activeFtpPort
+                        val modeName = hostedMode.name
                         call.respondText(
-                            """{"status":"online","port":$port,"screencast":$hasScreencast}""",
+                            """{"status":"online","httpPort":$port,"ftpPort":$activeFtpPort,"mode":"$modeName","screencast":$hasScreencast}""",
                             ContentType.Application.Json
                         )
                     }
 
-                    // Security Password-Gated Multipart File Upload Route
+                    // 5. Security Password-Gated Multipart File Upload Route
                     post("/upload") {
+                        val clientIp = try { call.request.local.remoteHost } catch (_: Exception) { "Client" }
                         val expectedPass = SettingsManager.ftpUploadPassword.value
                         val isUploadAllowed = SettingsManager.ftpAllowUpload.value
 
                         if (!isUploadAllowed) {
-                            call.respondText("""{"success":false,"message":"Uploads are disabled by host"}""", ContentType.Application.Json, HttpStatusCode.Forbidden)
+                            call.respondText(
+                                """{"success":false,"message":"Web uploads are disabled on the host device"}""",
+                                ContentType.Application.Json,
+                                HttpStatusCode.Forbidden
+                            )
                             return@post
                         }
 
                         var providedPass = call.request.headers["X-Upload-Password"] ?: ""
-                        var targetFolderPath = effectiveRootDir.absolutePath
+                        var targetFolderPath = if (hostedMode == FtpHostedMode.BATCH_FILES) {
+                            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS).absolutePath
+                        } else {
+                            effectiveRootDir.absolutePath
+                        }
                         val multipart = call.receiveMultipart()
                         var savedFilesCount = 0
 
@@ -191,22 +260,30 @@ class KtorEmbeddedServer(
                                         providedPass = part.value
                                     } else if (part.name == "targetDir" && part.value.isNotBlank()) {
                                         val f = File(part.value)
-                                        if (f.exists() && f.isDirectory) {
+                                        if (f.exists() && f.isDirectory && !f.absolutePath.contains("ftp_hosted_bucket")) {
                                             targetFolderPath = f.absolutePath
                                         }
                                     }
                                 }
                                 is PartData.FileItem -> {
-                                    if (providedPass == expectedPass) {
+                                    val passValid = expectedPass.isBlank() || providedPass == expectedPass
+                                    if (passValid) {
                                         val originalName = part.originalFileName ?: "uploaded_${System.currentTimeMillis()}"
-                                        val saveFile = File(targetFolderPath, originalName)
+                                        val destFolder = File(targetFolderPath).apply { if (!exists()) mkdirs() }
+                                        val saveFile = File(destFolder, originalName)
                                         part.streamProvider().use { input ->
                                             saveFile.outputStream().use { output ->
                                                 input.copyTo(output)
                                             }
                                         }
                                         savedFilesCount++
-                                        ContinuumHubService.recordTransfer(saveFile.length(), isUpload = true)
+                                        ContinuumHubService.addLog(
+                                            clientIp,
+                                            "Upload",
+                                            "Uploaded ${saveFile.name}",
+                                            "${saveFile.length() / 1024} KB",
+                                            bytes = saveFile.length()
+                                        )
                                     }
                                 }
                                 else -> {}
@@ -214,24 +291,104 @@ class KtorEmbeddedServer(
                             part.dispose()
                         }
 
-                        if (providedPass != expectedPass) {
-                            call.respondText("""{"success":false,"message":"Incorrect upload password"}""", ContentType.Application.Json, HttpStatusCode.Unauthorized)
+                        val passValid = expectedPass.isBlank() || providedPass == expectedPass
+                        if (!passValid) {
+                            call.respondText(
+                                """{"success":false,"message":"Incorrect upload security password"}""",
+                                ContentType.Application.Json,
+                                HttpStatusCode.Unauthorized
+                            )
                         } else {
-                            call.respondText("""{"success":true,"message":"Successfully uploaded $savedFilesCount file(s)"}""", ContentType.Application.Json, HttpStatusCode.OK)
+                            call.respondText(
+                                """{"success":true,"message":"Uploaded $savedFilesCount file(s)"}""",
+                                ContentType.Application.Json,
+                                HttpStatusCode.OK
+                            )
                         }
+                    }
+
+                    // 6. Catch-All Static Website Asset Route (CSS, JS, Images, Fonts, Sub-pages & SPA fallback)
+                    get("/{staticPath...}") {
+                        val clientIp = try { call.request.local.remoteHost } catch (_: Exception) { "Client" }
+                        val segments = call.parameters.getAll("staticPath")?.filter { it.isNotBlank() } ?: emptyList()
+                        if (segments.isEmpty()) {
+                            call.respondRedirect("/")
+                            return@get
+                        }
+
+                        val relPath = segments.joinToString(File.separator)
+                        val candidate = File(effectiveRootDir, relPath)
+
+                        if (candidate.exists() && isAllowedPath(candidate, effectiveRootDir)) {
+                            if (candidate.isFile) {
+                                ContinuumHubService.addLog(
+                                    clientIp,
+                                    "Asset",
+                                    candidate.name,
+                                    "${candidate.length() / 1024} KB",
+                                    bytes = candidate.length()
+                                )
+                                call.respondFile(candidate)
+                                return@get
+                            } else if (candidate.isDirectory) {
+                                val subIndex = File(candidate, "index.html").takeIf { it.exists() && it.isFile }
+                                    ?: File(candidate, "index.htm").takeIf { it.exists() && it.isFile }
+                                if (subIndex != null) {
+                                    ContinuumHubService.addLog(
+                                        clientIp,
+                                        "Website",
+                                        "Served ${subIndex.name}",
+                                        candidate.name,
+                                        bytes = subIndex.length()
+                                    )
+                                    call.respondFile(subIndex)
+                                    return@get
+                                }
+                            }
+                        }
+
+                        // SPA Client-Side Routing Fallback in Self-Hosted Website mode
+                        val acceptHeader = call.request.header(HttpHeaders.Accept).orEmpty()
+                        if (
+                            hostedMode == FtpHostedMode.CUSTOM_FOLDER &&
+                            acceptHeader.contains("text/html", ignoreCase = true) &&
+                            resolvedEntryHtml != null &&
+                            resolvedEntryHtml.exists()
+                        ) {
+                            call.respondFile(resolvedEntryHtml)
+                            return@get
+                        }
+
+                        call.respond(HttpStatusCode.NotFound, "Asset not found: /$relPath")
                     }
                 }
             }.start(wait = false)
 
-            Log.i(TAG, "Ktor Server started on port $port")
+            Log.i(TAG, "Ktor Server started on port $port (mode=$hostedMode)")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start Ktor Server", e)
         }
     }
 
+    private fun isAllowedPath(file: File, effectiveRootDir: File): Boolean {
+        return try {
+            val canonical = file.canonicalPath
+            val rootCanonical = effectiveRootDir.canonicalPath
+            val extCanonical = Environment.getExternalStorageDirectory().canonicalPath
+            canonical.startsWith(rootCanonical) ||
+                canonical.startsWith(extCanonical) ||
+                canonical.startsWith("/storage/") ||
+                FtpBucketManager.bucketItems.any { item ->
+                    item.exists() && canonical.startsWith(item.canonicalPath)
+                }
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     fun stop() {
         try {
-            engine?.stop(1000, 2000)
+            engine?.stop(500, 1000)
             engine = null
             Log.i(TAG, "Ktor Server stopped")
         } catch (e: Exception) {
@@ -239,265 +396,558 @@ class KtorEmbeddedServer(
         }
     }
 
-    private fun HTML.renderDashboard(currentDir: File, rootDir: File, files: List<File>) {
+    private fun formatBytes(bytes: Long): String {
+        if (bytes < 1024L) return "$bytes B"
+        val kb = bytes / 1024.0
+        if (kb < 1024.0) return String.format(Locale.US, "%.1f KB", kb)
+        val mb = kb / 1024.0
+        if (mb < 1024.0) return String.format(Locale.US, "%.2f MB", mb)
+        val gb = mb / 1024.0
+        return String.format(Locale.US, "%.2f GB", gb)
+    }
+
+    private fun HTML.renderDashboard(
+        currentDir: File,
+        rootDir: File,
+        files: List<File>,
+        isRootView: Boolean,
+        hasWebsiteEntry: Boolean
+    ) {
+        val hasScreencast = getScreenCastManager() != null
+        val allowUploads = SettingsManager.ftpAllowUpload.value
+        val requireUploadPass = SettingsManager.ftpUploadPassword.value.isNotBlank()
+        val ftpPort = ContinuumHubService.activeFtpPort
+        val dateFormat = SimpleDateFormat("MMM dd, yyyy HH:mm", Locale.US)
+
         head {
-            title("Explorer Continuum Hub")
+            title("Continuum Server Portal")
             meta(name = "viewport", content = "width=device-width, initial-scale=1.0")
             style {
                 unsafe {
                     raw("""
                         :root {
-                            --bg: #121212;
-                            --surface: #1E1E1E;
-                            --surface-hover: #292929;
-                            --primary: #4CAF50;
-                            --accent: #00E676;
-                            --text: #E0E0E0;
-                            --text-secondary: #9E9E9E;
-                            --border: #333333;
-                            --screencast-bg: #0A0A0A;
+                            --bg: #0f1115;
+                            --surface: #171a21;
+                            --surface-elevated: #1f242d;
+                            --surface-hover: #262c36;
+                            --primary: #6366f1;
+                            --primary-hover: #4f46e5;
+                            --accent: #10b981;
+                            --text: #f3f4f6;
+                            --text-muted: #9ca3af;
+                            --border: #2a303c;
+                            --danger: #ef4444;
                         }
                         * { box-sizing: border-box; margin: 0; padding: 0; }
                         body {
-                            background-color: var(--bg);
+                            background: var(--bg);
                             color: var(--text);
-                            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-                            font-size: 13px;
+                            font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
+                            font-size: 13.5px;
+                            min-height: 100vh;
                             display: flex;
                             flex-direction: column;
-                            min-height: 100vh;
                         }
                         header {
                             background: var(--surface);
                             border-bottom: 1px solid var(--border);
-                            padding: 12px 18px;
+                            padding: 12px 20px;
                             display: flex;
                             align-items: center;
                             justify-content: space-between;
                             flex-wrap: wrap;
+                            gap: 12px;
+                            position: sticky;
+                            top: 0;
+                            z-index: 50;
+                        }
+                        .brand {
+                            display: flex;
+                            align-items: center;
                             gap: 10px;
                         }
-                        .brand { display: flex; align-items: center; gap: 10px; }
-                        .brand h1 { font-size: 1.05rem; font-weight: 600; color: #FFF; }
-                        .badge {
-                            background: rgba(0, 230, 118, 0.15);
+                        .brand-title {
+                            font-size: 1rem;
+                            font-weight: 700;
+                            letter-spacing: -0.01em;
+                            color: #fff;
+                        }
+                        .status-pill {
+                            background: rgba(16, 185, 129, 0.14);
                             color: var(--accent);
-                            font-size: 0.7rem;
+                            border: 1px solid rgba(16, 185, 129, 0.3);
+                            font-size: 0.72rem;
                             font-weight: 600;
-                            padding: 3px 6px;
-                            border-radius: 4px;
-                            border: 1px solid rgba(0, 230, 118, 0.3);
+                            padding: 3px 8px;
+                            border-radius: 999px;
                         }
-                        .container {
+                        .toolbar {
                             display: flex;
-                            flex-direction: column;
-                            gap: 16px;
-                            padding: 16px;
-                            flex: 1;
+                            align-items: center;
+                            gap: 8px;
+                            flex-wrap: wrap;
                         }
-                        .screen-pane-hidden {
-                            display: none !important;
-                        }
-                        @media (max-width: 768px) {
-                            .container { padding: 10px; gap: 12px; }
-                            header { padding: 10px 12px; }
-                            .brand h1 { font-size: 0.95rem; }
-                        }
-                        .card {
-                            background: var(--surface);
+                        .segmented {
+                            display: inline-flex;
+                            background: var(--bg);
                             border: 1px solid var(--border);
                             border-radius: 8px;
-                            overflow: hidden;
-                            display: flex;
-                            flex-direction: column;
+                            padding: 2px;
+                            gap: 2px;
                         }
-                        .card-header {
-                            padding: 10px 14px;
-                            background: #252525;
-                            border-bottom: 1px solid var(--border);
-                            font-weight: 600;
-                            font-size: 0.85rem;
-                            display: flex;
-                            justify-content: space-between;
-                            align-items: center;
-                        }
-                        .card-body { padding: 12px; flex: 1; overflow-y: auto; }
-                        .path-bar {
-                            background: #181818;
-                            padding: 8px 12px;
-                            font-family: monospace;
-                            font-size: 0.78rem;
-                            color: var(--text-secondary);
-                            border-bottom: 1px solid var(--border);
-                            word-break: break-all;
-                        }
-                        .file-list { list-style: none; }
-                        .file-item {
-                            display: flex;
-                            align-items: center;
-                            justify-content: space-between;
-                            padding: 10px 14px;
-                            border-bottom: 1px solid #282828;
-                            transition: background 0.15s;
-                        }
-                        .file-item:hover { background: var(--surface-hover); }
-                        .file-link {
-                            color: var(--text);
-                            text-decoration: none;
-                            display: flex;
-                            align-items: center;
-                            gap: 10px;
-                            overflow: hidden;
-                            text-overflow: ellipsis;
-                            white-space: nowrap;
-                        }
-                        .file-link:hover { color: var(--accent); }
-                        .btn-download {
-                            background: #333;
-                            color: #FFF;
-                            text-decoration: none;
-                            padding: 4px 10px;
-                            border-radius: 4px;
-                            font-size: 0.8rem;
-                        }
-                        .btn-download:hover { background: var(--primary); }
-                        
-                        /* Desktop vs Mobile View Grid mode */
-                        .view-grid {
-                            display: grid;
-                            grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
-                            gap: 10px;
-                            list-style: none;
-                        }
-                        .view-grid .file-item {
-                            flex-direction: column;
-                            align-items: center;
-                            text-align: center;
-                            padding: 14px 8px;
-                            background: #222;
-                            border-radius: 6px;
-                            border: 1px solid #2A2A2A;
-                        }
-                        .view-grid .file-link {
-                            flex-direction: column;
-                            white-space: normal;
-                            max-width: 100%;
-                            word-break: break-word;
-                            font-size: 0.8rem;
-                        }
-                        .view-grid .btn-download {
-                            margin-top: 8px;
-                        }
-
-                        .canvas-container {
-                            background: var(--screencast-bg);
-                            display: flex;
-                            justify-content: center;
-                            align-items: center;
-                            min-height: 380px;
-                            position: relative;
-                        }
-                        canvas {
-                            max-width: 100%;
-                            height: auto;
-                            border-radius: 4px;
-                            box-shadow: 0 4px 12px rgba(0,0,0,0.5);
-                        }
-                        .stream-status {
-                            position: absolute;
-                            top: 10px;
-                            right: 10px;
-                            padding: 4px 8px;
-                            font-size: 0.75rem;
-                            border-radius: 4px;
-                            background: rgba(0,0,0,0.7);
-                            color: #FFF;
-                        }
-                        .header-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-                        .btn-header {
-                            background: #4CAF50;
-                            color: #FFF;
+                        .seg-btn {
+                            background: transparent;
+                            color: var(--text-muted);
                             border: none;
-                            padding: 6px 12px;
+                            padding: 5px 10px;
+                            font-size: 0.78rem;
+                            font-weight: 600;
                             border-radius: 6px;
-                            font-size: 0.82rem;
+                            cursor: pointer;
+                            transition: all 0.15s;
+                        }
+                        .seg-btn.active {
+                            background: var(--primary);
+                            color: #fff;
+                        }
+                        .btn {
+                            background: var(--surface-elevated);
+                            color: var(--text);
+                            border: 1px solid var(--border);
+                            padding: 6px 12px;
+                            border-radius: 8px;
+                            font-size: 0.8rem;
                             font-weight: 600;
                             cursor: pointer;
                             text-decoration: none;
                             display: inline-flex;
                             align-items: center;
                             gap: 6px;
+                            transition: background 0.15s, border-color 0.15s;
                         }
-                        .btn-header:hover { background: #388E3C; }
-                        .btn-screen { background: #00897B; }
-                        .btn-screen:hover { background: #00695C; }
-                        .btn-viewmode { background: #37474F; }
-                        .btn-viewmode:hover { background: #455A64; }
-                        .modal-overlay {
-                            position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
-                            background: rgba(0,0,0,0.75); display: none; justify-content: center; align-items: center; z-index: 1000;
+                        .btn:hover { background: var(--surface-hover); }
+                        .btn-primary {
+                            background: var(--primary);
+                            border-color: var(--primary);
+                            color: #fff;
                         }
-                        .modal-card {
-                            background: #222; border: 1px solid #444; border-radius: 12px; padding: 24px;
-                            width: 90%; max-width: 420px; display: flex; flex-direction: column; gap: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.8);
+                        .btn-primary:hover { background: var(--primary-hover); }
+
+                        /* Workspace container adapts to selected layout mode */
+                        .workspace {
+                            flex: 1;
+                            padding: 16px 20px;
+                            display: grid;
+                            gap: 16px;
+                            max-width: 1600px;
+                            width: 100%;
+                            margin: 0 auto;
                         }
-                        .modal-card h2 { font-size: 1.1rem; color: #FFF; }
-                        .modal-card input {
-                            background: #111; border: 1px solid #444; border-radius: 6px; padding: 10px; color: #FFF; font-size: 0.9rem;
+                        body[data-layout="desktop"] .workspace.with-cast {
+                            grid-template-columns: minmax(340px, 44%) 1fr;
+                            align-items: start;
                         }
-                        .modal-actions { display: flex; justify-content: flex-end; gap: 10px; }
-                        .btn-cancel { background: #444; color: #CCC; border: none; padding: 8px 14px; border-radius: 6px; cursor: pointer; }
+                        body[data-layout="mobile"] .workspace {
+                            grid-template-columns: 1fr;
+                            max-width: 640px;
+                            padding: 10px 12px;
+                        }
+                        body[data-layout="mirror"] .workspace {
+                            grid-template-columns: 1fr;
+                        }
+                        .panel {
+                            background: var(--surface);
+                            border: 1px solid var(--border);
+                            border-radius: 12px;
+                            overflow: hidden;
+                            display: flex;
+                            flex-direction: column;
+                        }
+                        .panel-header {
+                            padding: 12px 16px;
+                            background: var(--surface-elevated);
+                            border-bottom: 1px solid var(--border);
+                            display: flex;
+                            align-items: center;
+                            justify-content: space-between;
+                            gap: 10px;
+                            flex-wrap: wrap;
+                        }
+                        .panel-title {
+                            font-weight: 600;
+                            font-size: 0.88rem;
+                            display: flex;
+                            align-items: center;
+                            gap: 8px;
+                        }
+                        .subbar {
+                            padding: 10px 16px;
+                            background: #13161c;
+                            border-bottom: 1px solid var(--border);
+                            display: flex;
+                            align-items: center;
+                            justify-content: space-between;
+                            gap: 12px;
+                            flex-wrap: wrap;
+                        }
+                        .path-text {
+                            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+                            font-size: 0.78rem;
+                            color: var(--text-muted);
+                            word-break: break-all;
+                        }
+                        .search-input {
+                            background: var(--surface);
+                            border: 1px solid var(--border);
+                            color: var(--text);
+                            padding: 6px 10px;
+                            border-radius: 7px;
+                            font-size: 0.8rem;
+                            min-width: 200px;
+                        }
+
+                        /* Desktop Table View */
+                        .file-table {
+                            width: 100%;
+                            border-collapse: collapse;
+                        }
+                        .file-table th {
+                            text-align: left;
+                            padding: 10px 16px;
+                            font-size: 0.74rem;
+                            text-transform: uppercase;
+                            letter-spacing: 0.04em;
+                            color: var(--text-muted);
+                            border-bottom: 1px solid var(--border);
+                            background: #14171d;
+                        }
+                        .file-table td {
+                            padding: 10px 16px;
+                            border-bottom: 1px solid #1e232c;
+                            vertical-align: middle;
+                        }
+                        .file-table tr:hover td {
+                            background: var(--surface-hover);
+                        }
+                        .item-link {
+                            color: var(--text);
+                            text-decoration: none;
+                            font-weight: 500;
+                            display: inline-flex;
+                            align-items: center;
+                            gap: 10px;
+                            word-break: break-word;
+                        }
+                        .item-link:hover { color: #818cf8; }
+
+                        /* Mobile Card View (Activated when data-layout="mobile") */
+                        body[data-layout="mobile"] .file-table thead {
+                            display: none;
+                        }
+                        body[data-layout="mobile"] .file-table,
+                        body[data-layout="mobile"] .file-table tbody {
+                            display: block;
+                            width: 100%;
+                        }
+                        body[data-layout="mobile"] .file-table tr {
+                            display: flex;
+                            align-items: center;
+                            justify-content: space-between;
+                            padding: 10px 14px;
+                            border-bottom: 1px solid var(--border);
+                            gap: 10px;
+                        }
+                        body[data-layout="mobile"] .file-table td {
+                            padding: 0;
+                            border: none;
+                        }
+                        body[data-layout="mobile"] .col-type,
+                        body[data-layout="mobile"] .col-date {
+                            display: none;
+                        }
+
+                        /* Screen Mirroring Canvas Area */
+                        .cast-stage {
+                            background: #050608;
+                            min-height: 360px;
+                            max-height: 82vh;
+                            display: flex;
+                            align-items: center;
+                            justify-content: center;
+                            position: relative;
+                            padding: 12px;
+                            overflow: hidden;
+                        }
+                        body[data-layout="mirror"] .cast-stage {
+                            min-height: 74vh;
+                        }
+                        #screenCanvas {
+                            max-width: 100%;
+                            max-height: 76vh;
+                            width: auto;
+                            height: auto;
+                            border-radius: 8px;
+                            box-shadow: 0 8px 30px rgba(0,0,0,0.65);
+                            transition: transform 0.2s ease;
+                        }
+                        .hidden { display: none !important; }
+
+                        /* Upload Modal */
+                        .modal-backdrop {
+                            position: fixed;
+                            inset: 0;
+                            background: rgba(0, 0, 0, 0.72);
+                            display: none;
+                            align-items: center;
+                            justify-content: center;
+                            z-index: 200;
+                            padding: 16px;
+                        }
+                        .modal {
+                            background: var(--surface);
+                            border: 1px solid var(--border);
+                            border-radius: 14px;
+                            padding: 20px;
+                            width: 100%;
+                            max-width: 420px;
+                            display: flex;
+                            flex-direction: column;
+                            gap: 14px;
+                        }
+                        .modal input[type="password"],
+                        .modal input[type="file"] {
+                            background: var(--bg);
+                            border: 1px solid var(--border);
+                            color: var(--text);
+                            padding: 10px;
+                            border-radius: 8px;
+                            width: 100%;
+                        }
                     """)
                 }
             }
         }
         body {
+            attributes["data-layout"] = "desktop"
+
             header {
                 div("brand") {
-                    h1 { +"Explorer Continuum Hub" }
-                    span("badge") { +"ACTIVE" }
+                    span("brand-title") { +"Continuum Hub" }
+                    span("status-pill") { +"FTP :$ftpPort • HTTP :$port" }
+                    if (hasWebsiteEntry) {
+                        a(href = "/", classes = "btn") {
+                            +"🌐 View Hosted Site"
+                        }
+                    }
                 }
-                div("header-actions") {
-                    val hasScreencast = getScreenCastManager() != null
-                    if (hasScreencast) {
-                        button(classes = "btn-header btn-screen") {
-                            onClick = "toggleScreenShare()"
-                            id = "btnToggleScreen"
-                            +"📺 Show Screen"
+
+                div("toolbar") {
+                    // Layout Mode Segmented Switcher (Desktop / Mobile / Mirror Theatre)
+                    div("segmented") {
+                        button(classes = "seg-btn active") {
+                            id = "btnLayoutDesktop"
+                            onClick = "setPortalLayout('desktop')"
+                            +"💻 Desktop"
+                        }
+                        button(classes = "seg-btn") {
+                            id = "btnLayoutMobile"
+                            onClick = "setPortalLayout('mobile')"
+                            +"📱 Mobile"
+                        }
+                        button(classes = "seg-btn") {
+                            id = "btnLayoutMirror"
+                            onClick = "setPortalLayout('mirror')"
+                            +"📺 Mirror View"
                         }
                     }
-                    button(classes = "btn-header btn-viewmode") {
-                        onClick = "toggleViewMode()"
-                        id = "btnToggleView"
-                        +"📱 Mobile View"
-                    }
-                    if (SettingsManager.ftpAllowUpload.value) {
-                        button(classes = "btn-header") {
+
+                    if (allowUploads) {
+                        button(classes = "btn btn-primary") {
                             onClick = "openUploadModal()"
-                            +"⬆ Upload Files"
+                            +"⬆ Upload"
                         }
-                    }
-                    span {
-                        style = "font-size: 0.85rem; color: #9E9E9E; margin-left: 8px;"
-                        +"HTTP: $port | FTP: 2121"
                     }
                 }
             }
 
-            // Hidden Modal Dialog for File Upload
-            div {
-                id = "uploadModal"
-                classes = setOf("modal-overlay")
-                div("modal-card") {
-                    h2 { +"⬆ Security File Upload" }
-                    p {
-                        style = "font-size: 0.8rem; color: #AAA;"
-                        +"Enter host security password to upload files to ${currentDir.name}"
+            // Main Workspace
+            div(classes = if (hasScreencast) "workspace with-cast" else "workspace") {
+                id = "mainWorkspace"
+
+                // Live Screen Mirroring Panel
+                div(classes = if (hasScreencast) "panel" else "panel hidden") {
+                    id = "castPanel"
+                    div("panel-header") {
+                        div("panel-title") {
+                            +"📺 Live Device Screen Mirror"
+                            span("status-pill") {
+                                id = "castStatusBadge"
+                                +if (hasScreencast) "CONNECTING" else "STANDBY"
+                            }
+                        }
+                        div("toolbar") {
+                            button(classes = "btn") {
+                                onClick = "rotateClientCanvas()"
+                                +"↻ Rotate"
+                            }
+                            button(classes = "btn") {
+                                onClick = "fullscreenCanvas()"
+                                +"⛶ Fullscreen"
+                            }
+                        }
                     }
-                    input {
-                        id = "uploadPasswordInput"
-                        type = InputType.password
-                        placeholder = "Upload Security Password"
+                    div("cast-stage") {
+                        id = "castStage"
+                        canvas {
+                            id = "screenCanvas"
+                            width = "1280"
+                            height = "720"
+                        }
+                    }
+                }
+
+                // File Explorer & Download Panel
+                div("panel") {
+                    id = "explorerPanel"
+                    div("panel-header") {
+                        div("panel-title") {
+                            +when (hostedMode) {
+                                FtpHostedMode.BATCH_FILES -> "Shared Files & Folders Bucket (${files.size})"
+                                FtpHostedMode.CUSTOM_FOLDER -> "Website Assets (${currentDir.name})"
+                                FtpHostedMode.FULL_STORAGE -> "Device Storage (${currentDir.name})"
+                            }
+                        }
+                        div("toolbar") {
+                            if (!isRootView && currentDir.parentFile != null) {
+                                val parentEncoded = URLEncoder.encode(currentDir.parentFile.absolutePath, "UTF-8")
+                                a(href = "/?explorer=true&path=$parentEncoded", classes = "btn") {
+                                    +"↑ Up Folder"
+                                }
+                            }
+                            if (!isRootView) {
+                                a(href = "/?explorer=true", classes = "btn") {
+                                    +"⌂ Root"
+                                }
+                            }
+                        }
+                    }
+
+                    div("subbar") {
+                        span("path-text") {
+                            +if (hostedMode == FtpHostedMode.BATCH_FILES && isRootView && FtpBucketManager.bucketItems.isNotEmpty()) {
+                                "Virtual Bucket (${FtpBucketManager.bucketItems.size} selected items)"
+                            } else {
+                                currentDir.absolutePath
+                            }
+                        }
+                        input {
+                            id = "fileSearchInput"
+                            classes = setOf("search-input")
+                            type = InputType.search
+                            placeholder = "Filter files in folder..."
+                            onInput = "filterPortalFiles(this.value)"
+                        }
+                    }
+
+                    table("file-table") {
+                        thead {
+                            tr {
+                                th { +"Name" }
+                                th(classes = "col-type") { +"Type" }
+                                th { +"Size" }
+                                th(classes = "col-date") { +"Modified" }
+                                th {
+                                    style = "text-align: right;"
+                                    +"Actions"
+                                }
+                            }
+                        }
+                        tbody {
+                            id = "fileTableBody"
+                            if (files.isEmpty()) {
+                                tr {
+                                    td {
+                                        colSpan = "5"
+                                        style = "text-align: center; padding: 32px; color: var(--text-muted);"
+                                        +"This directory is empty."
+                                    }
+                                }
+                            } else {
+                                for (file in files) {
+                                    val encodedPath = URLEncoder.encode(file.absolutePath, "UTF-8")
+                                    val isDir = file.isDirectory
+                                    val ext = file.extension.uppercase(Locale.US).ifBlank { "FILE" }
+                                    tr(classes = "file-row") {
+                                        attributes["data-name"] = file.name.lowercase(Locale.US)
+                                        td {
+                                            if (isDir) {
+                                                a(classes = "item-link", href = "/?explorer=true&path=$encodedPath") {
+                                                    +"📁 ${file.name}"
+                                                }
+                                            } else {
+                                                a(classes = "item-link", href = "/download?file=$encodedPath&inline=true", target = "_blank") {
+                                                    +"📄 ${file.name}"
+                                                }
+                                            }
+                                        }
+                                        td(classes = "col-type") {
+                                            style = "color: var(--text-muted); font-size: 0.78rem;"
+                                            +if (isDir) "Folder" else ext
+                                        }
+                                        td {
+                                            style = "color: var(--text-muted); font-size: 0.8rem;"
+                                            +if (isDir) {
+                                                val count = try { file.list()?.size ?: 0 } catch (_: Exception) { 0 }
+                                                "$count items"
+                                            } else {
+                                                formatBytes(file.length())
+                                            }
+                                        }
+                                        td(classes = "col-date") {
+                                            style = "color: var(--text-muted); font-size: 0.78rem;"
+                                            +dateFormat.format(Date(file.lastModified()))
+                                        }
+                                        td {
+                                            style = "text-align: right;"
+                                            if (isDir) {
+                                                a(classes = "btn", href = "/?explorer=true&path=$encodedPath") {
+                                                    +"Open"
+                                                }
+                                            } else {
+                                                a(classes = "btn", href = "/download?file=$encodedPath") {
+                                                    +"⬇ Download"
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Upload Modal Dialog
+            div("modal-backdrop") {
+                id = "uploadModal"
+                div("modal") {
+                    h3 { +"Upload Files to Host" }
+                    p {
+                        style = "font-size: 0.8rem; color: var(--text-muted);"
+                        +"Destination: ${currentDir.name}"
+                    }
+                    if (requireUploadPass) {
+                        input {
+                            id = "uploadPasswordInput"
+                            type = InputType.password
+                            placeholder = "Upload Security Password"
+                        }
+                    } else {
+                        input {
+                            id = "uploadPasswordInput"
+                            type = InputType.hidden
+                            value = ""
+                        }
                     }
                     input {
                         id = "uploadFilesInput"
@@ -509,146 +959,91 @@ class KtorEmbeddedServer(
                         type = InputType.hidden
                         value = currentDir.absolutePath
                     }
-                    div("modal-actions") {
-                        button(classes = "btn-cancel") {
+                    div {
+                        style = "display: flex; justify-content: flex-end; gap: 8px;"
+                        button(classes = "btn") {
                             onClick = "closeUploadModal()"
                             +"Cancel"
                         }
-                        button(classes = "btn-header") {
+                        button(classes = "btn btn-primary") {
                             onClick = "submitFileUpload()"
-                            +"Upload Now"
+                            +"Upload"
                         }
                     }
                     span {
                         id = "uploadStatusNotice"
-                        style = "font-size: 0.8rem; color: #00E676;"
+                        style = "font-size: 0.8rem;"
                     }
                 }
             }
 
-            div("container") {
-                // Screencast Pane (hidden by default, toggled via screen button)
-                div("card screen-pane-hidden") {
-                    id = "screenCard"
-                    div("card-header") {
-                        span { +"Live Screen Cast" }
-                        div {
-                            span("badge") { id = "cast-status"; +"Connecting..." }
-                            button(classes = "btn-header btn-screen") {
-                                style = "margin-left: 10px; padding: 2px 8px; font-size: 0.75rem;"
-                                onClick = "toggleScreenShare()"
-                                +"✕ Hide"
-                            }
-                        }
-                    }
-                    div("canvas-container") {
-                        canvas {
-                            id = "screenCanvas"
-                            width = "1280"
-                            height = "720"
-                        }
-                    }
-                }
-
-                // File Explorer & Downloads Pane
-                div("card") {
-                    div("card-header") {
-                        span { +"Storage & Downloads" }
-                        if (currentDir.canonicalPath != rootDir.canonicalPath && currentDir.parentFile != null) {
-                            val parentEncoded = URLEncoder.encode(currentDir.parentFile.absolutePath, "UTF-8")
-                            a(href = "/?path=$parentEncoded") {
-                                style = "color: #4CAF50; text-decoration: none; font-size: 0.85rem;"
-                                +"↑ Parent Folder"
-                            }
-                        }
-                    }
-                    div("path-bar") {
-                        +currentDir.absolutePath
-                    }
-                    div("card-body") {
-                        ul("file-list") {
-                            id = "mainFileList"
-                            for (file in files) {
-                                val encodedPath = URLEncoder.encode(file.absolutePath, "UTF-8")
-                                li("file-item") {
-                                    if (file.isDirectory) {
-                                        a(classes = "file-link", href = "/?path=$encodedPath") {
-                                            +"📁 ${file.name}"
-                                        }
-                                        span {
-                                            style = "color: #777; font-size: 0.8rem;"
-                                            +"Folder"
-                                        }
-                                    } else {
-                                        div {
-                                            span("file-link") {
-                                                +"📄 ${file.name}"
-                                            }
-                                            span {
-                                                style = "color: #666; font-size: 0.75rem; margin-left: 24px;"
-                                                +"${file.length() / 1024} KB"
-                                            }
-                                        }
-                                        a(classes = "btn-download", href = "/download?file=$encodedPath") {
-                                            +"Download"
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // JavaScript WebSocket Receiver & Upload Manager
             script {
                 unsafe {
                     raw("""
-                        window.toggleScreenShare = function() {
-                            const card = document.getElementById('screenCard');
-                            const btn = document.getElementById('btnToggleScreen');
-                            if (!card) return;
-                            const isHidden = card.classList.contains('screen-pane-hidden');
-                            if (isHidden) {
-                                card.classList.remove('screen-pane-hidden');
-                                if (btn) btn.innerText = '📺 Hide Screen';
-                                card.scrollIntoView({ behavior: 'smooth' });
-                            } else {
-                                card.classList.add('screen-pane-hidden');
-                                if (btn) btn.innerText = '📺 Show Screen';
-                            }
-                        };
+                        let canvasRotation = 0;
 
-                        let isDesktopView = true;
-                        window.toggleViewMode = function() {
-                            const list = document.getElementById('mainFileList');
-                            const btn = document.getElementById('btnToggleView');
-                            if (!list) return;
-                            isDesktopView = !isDesktopView;
-                            if (isDesktopView) {
-                                list.classList.remove('view-grid');
-                                if (btn) btn.innerText = '📱 Mobile View';
-                            } else {
-                                list.classList.add('view-grid');
-                                if (btn) btn.innerText = '💻 Desktop View';
-                            }
-                        };
+                        function setPortalLayout(mode) {
+                            document.body.setAttribute('data-layout', mode);
+                            document.getElementById('btnLayoutDesktop').classList.toggle('active', mode === 'desktop');
+                            document.getElementById('btnLayoutMobile').classList.toggle('active', mode === 'mobile');
+                            document.getElementById('btnLayoutMirror').classList.toggle('active', mode === 'mirror');
 
-                        window.openUploadModal = function() {
+                            const castPanel = document.getElementById('castPanel');
+                            const ws = document.getElementById('mainWorkspace');
+                            if (mode === 'mirror') {
+                                castPanel.classList.remove('hidden');
+                                ws.classList.remove('with-cast');
+                            }
+                        }
+
+                        // Auto-select Mobile layout on narrow viewports initially
+                        if (window.innerWidth < 768) {
+                            setPortalLayout('mobile');
+                        }
+
+                        function filterPortalFiles(query) {
+                            const q = (query || '').toLowerCase().trim();
+                            const rows = document.querySelectorAll('.file-row');
+                            rows.forEach(row => {
+                                const name = row.getAttribute('data-name') || '';
+                                row.style.display = (!q || name.includes(q)) ? '' : 'none';
+                            });
+                        }
+
+                        function rotateClientCanvas() {
+                            canvasRotation = (canvasRotation + 90) % 360;
+                            const canvas = document.getElementById('screenCanvas');
+                            if (canvas) {
+                                canvas.style.transform = 'rotate(' + canvasRotation + 'deg)';
+                            }
+                        }
+
+                        function fullscreenCanvas() {
+                            const stage = document.getElementById('castStage');
+                            if (stage && stage.requestFullscreen) {
+                                stage.requestFullscreen();
+                            }
+                        }
+
+                        function openUploadModal() {
                             document.getElementById('uploadModal').style.display = 'flex';
-                        };
-                        window.closeUploadModal = function() {
+                        }
+                        function closeUploadModal() {
                             document.getElementById('uploadModal').style.display = 'none';
                             document.getElementById('uploadStatusNotice').innerText = '';
-                        };
-                        window.submitFileUpload = async function() {
-                            const pass = document.getElementById('uploadPasswordInput').value;
+                        }
+
+                        async function submitFileUpload() {
+                            const passEl = document.getElementById('uploadPasswordInput');
+                            const pass = passEl ? passEl.value : '';
                             const filesInput = document.getElementById('uploadFilesInput');
                             const targetDir = document.getElementById('currentTargetDir').value;
-                            const statusNotice = document.getElementById('uploadStatusNotice');
+                            const notice = document.getElementById('uploadStatusNotice');
 
-                            if (!pass) { alert('Please enter upload security password'); return; }
-                            if (!filesInput.files || filesInput.files.length === 0) { alert('Please select at least one file to upload'); return; }
+                            if (!filesInput.files || filesInput.files.length === 0) {
+                                alert('Select at least one file to upload.');
+                                return;
+                            }
 
                             const formData = new FormData();
                             formData.append('password', pass);
@@ -657,59 +1052,64 @@ class KtorEmbeddedServer(
                                 formData.append('file_' + i, filesInput.files[i]);
                             }
 
-                            statusNotice.innerText = 'Uploading files... Please wait.';
-                            statusNotice.style.color = '#FFA726';
+                            notice.innerText = 'Uploading...';
+                            notice.style.color = '#fbbf24';
 
                             try {
-                                const response = await fetch('/upload', { method: 'POST', body: formData });
-                                const result = await response.json();
-                                if (response.ok && result.success) {
-                                    statusNotice.innerText = 'Upload successful!';
-                                    statusNotice.style.color = '#00E676';
-                                    setTimeout(() => { window.location.reload(); }, 1200);
+                                const res = await fetch('/upload', { method: 'POST', body: formData });
+                                const data = await res.json();
+                                if (res.ok && data.success) {
+                                    notice.innerText = data.message || 'Upload complete!';
+                                    notice.style.color = '#10b981';
+                                    setTimeout(() => window.location.reload(), 900);
                                 } else {
-                                    alert('Upload failed: ' + (result.message || 'Incorrect password'));
-                                    statusNotice.innerText = 'Failed: ' + (result.message || 'Incorrect password');
-                                    statusNotice.style.color = '#EF5350';
+                                    notice.innerText = data.message || 'Upload failed';
+                                    notice.style.color = '#ef4444';
                                 }
                             } catch (e) {
-                                alert('Upload error: ' + e.message);
-                                statusNotice.innerText = 'Error: ' + e.message;
-                                statusNotice.style.color = '#EF5350';
+                                notice.innerText = 'Error: ' + e.message;
+                                notice.style.color = '#ef4444';
                             }
-                        };
+                        }
 
+                        // Live Screen Mirroring WebSocket Receiver
                         (function() {
                             const canvas = document.getElementById('screenCanvas');
-                            const ctx = canvas.getContext('2d');
-                            const status = document.getElementById('cast-status');
+                            const ctx = canvas ? canvas.getContext('2d') : null;
+                            const badge = document.getElementById('castStatusBadge');
+                            const castPanel = document.getElementById('castPanel');
+                            const workspace = document.getElementById('mainWorkspace');
+
+                            if (!canvas || !ctx) return;
 
                             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
                             const wsUrl = protocol + '//' + window.location.host + '/screencast';
 
-                            function connectWebSocket() {
-                                if (!status) return;
-                                status.innerText = 'Connecting...';
-                                status.style.color = '#FFA726';
-
+                            function connectCast() {
                                 const socket = new WebSocket(wsUrl);
                                 socket.binaryType = 'arraybuffer';
 
                                 socket.onopen = function() {
-                                    status.innerText = 'STREAMING';
-                                    status.style.color = '#00E676';
+                                    if (badge) {
+                                        badge.innerText = 'LIVE STREAM';
+                                        badge.style.color = '#10b981';
+                                    }
+                                    if (castPanel) castPanel.classList.remove('hidden');
+                                    if (workspace && document.body.getAttribute('data-layout') === 'desktop') {
+                                        workspace.classList.add('with-cast');
+                                    }
                                 };
 
-                                socket.onmessage = function(event) {
-                                    if (typeof event.data === 'string') {
-                                        console.log('Server info:', event.data);
+                                socket.onmessage = function(ev) {
+                                    if (typeof ev.data === 'string') {
+                                        if (ev.data === 'INACTIVE' && badge) {
+                                            badge.innerText = 'STANDBY';
+                                        }
                                         return;
                                     }
-
-                                    const blob = new Blob([event.data], { type: 'image/jpeg' });
+                                    const blob = new Blob([ev.data], { type: 'image/jpeg' });
                                     const img = new Image();
                                     const url = URL.createObjectURL(blob);
-
                                     img.onload = function() {
                                         if (canvas.width !== img.width || canvas.height !== img.height) {
                                             canvas.width = img.width;
@@ -722,17 +1122,15 @@ class KtorEmbeddedServer(
                                 };
 
                                 socket.onclose = function() {
-                                    status.innerText = 'Disconnected';
-                                    status.style.color = '#EF5350';
-                                    setTimeout(connectWebSocket, 3000);
-                                };
-
-                                socket.onerror = function(err) {
-                                    console.error('WebSocket Error:', err);
+                                    if (badge) {
+                                        badge.innerText = 'STANDBY';
+                                        badge.style.color = '#9ca3af';
+                                    }
+                                    setTimeout(connectCast, 3500);
                                 };
                             }
 
-                            connectWebSocket();
+                            connectCast();
                         })();
                     """)
                 }

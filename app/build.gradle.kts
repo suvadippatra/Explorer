@@ -12,8 +12,17 @@ android {
         applicationId = "com.troikoss.continuum_explorer"
         minSdk = 26
         targetSdk = 36
-        versionCode = 40
-        versionName = "0.4.0-beta"
+        val propVersionCode = (project.findProperty("versionCode") as? String)?.toIntOrNull() ?: 1
+        val propVersionName = (project.findProperty("versionName") as? String)?.takeIf { it.isNotBlank() } ?: "0.0.1"
+        versionCode = propVersionCode
+        versionName = propVersionName
+
+        val abiTarget = (project.findProperty("abiTarget") as? String)?.trim().orEmpty()
+        if (abiTarget.isNotEmpty() && !abiTarget.equals("universal", ignoreCase = true)) {
+            ndk {
+                abiFilters.add(abiTarget)
+            }
+        }
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -38,8 +47,9 @@ android {
 
     buildTypes {
         release {
-            isCrunchPngs = false
-            isMinifyEnabled = false
+            isCrunchPngs = true
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

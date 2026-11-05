@@ -30,13 +30,14 @@ class FolderConfigurations(private val context: Context) {
         private set
         
     var gridItemSize by mutableIntStateOf(100)
+    var gridColumnCount by mutableIntStateOf(3)
 
     val extraColumns = listOf(
-        FileColumnDefinition(FileColumnType.DATE, context.getString(R.string.details_header_date), initialWidth = 135.dp),
-        FileColumnDefinition(FileColumnType.DATE_DELETED, context.getString(R.string.details_header_date_deleted), initialWidth = 135.dp),
-        FileColumnDefinition(FileColumnType.DELETED_FROM, context.getString(R.string.details_header_deleted_from), initialWidth = 160.dp),
-        FileColumnDefinition(FileColumnType.TYPE, context.getString(R.string.details_header_type), initialWidth = 110.dp),
-        FileColumnDefinition(FileColumnType.SIZE, context.getString(R.string.details_header_size), initialWidth = 90.dp)
+        FileColumnDefinition(FileColumnType.DATE, context.getString(R.string.details_header_date), initialWidth = 120.dp),
+        FileColumnDefinition(FileColumnType.DATE_DELETED, context.getString(R.string.details_header_date_deleted), initialWidth = 125.dp),
+        FileColumnDefinition(FileColumnType.DELETED_FROM, context.getString(R.string.details_header_deleted_from), initialWidth = 140.dp),
+        FileColumnDefinition(FileColumnType.TYPE, context.getString(R.string.details_header_type), initialWidth = 82.dp),
+        FileColumnDefinition(FileColumnType.SIZE, context.getString(R.string.details_header_size), initialWidth = 76.dp)
     )
 
     val hiddenColumns = mutableStateSetOf<FileColumnType>()
@@ -76,7 +77,7 @@ class FolderConfigurations(private val context: Context) {
     }
 
     val columnWidths = mutableStateMapOf<FileColumnType, Dp>().apply {
-        put(FileColumnType.NAME, 300.dp)
+        put(FileColumnType.NAME, 210.dp)
         extraColumns.forEach { put(it.type, it.initialWidth) }
     }
 
@@ -94,12 +95,12 @@ class FolderConfigurations(private val context: Context) {
         val prefs = context.getSharedPreferences("column_widths", Context.MODE_PRIVATE)
         val prefKey = key ?: "default"
         // Always reset to defaults first so widths don't bleed from a previous folder
-        columnWidths[FileColumnType.NAME] = 300.dp
+        columnWidths[FileColumnType.NAME] = 210.dp
         extraColumns.forEach { col -> columnWidths[col.type] = col.initialWidth }
         // Then overlay any saved values for this folder
         val nameKey = "${prefKey}:${FileColumnType.NAME.name}"
         if (prefs.contains(nameKey)) {
-            columnWidths[FileColumnType.NAME] = prefs.getFloat(nameKey, 300f).dp
+            columnWidths[FileColumnType.NAME] = prefs.getFloat(nameKey, 210f).dp
             extraColumns.forEach { col ->
                 val k = "${prefKey}:${col.type.name}"
                 if (prefs.contains(k)) {
@@ -326,6 +327,23 @@ class FolderConfigurations(private val context: Context) {
         gridItemSize = 100
     }
 
+    fun updateGridColumnCount(newCount: Int, key: String?) {
+        val clamped = newCount.coerceIn(2, 8)
+        gridColumnCount = clamped
+        if (key != null) {
+            val prefs = context.getSharedPreferences("folder_grid_columns", Context.MODE_PRIVATE)
+            prefs.edit().putInt(key, clamped).apply()
+        }
+    }
+
+    fun resolveGridColumnCount(key: String?) {
+        val prefs = context.getSharedPreferences("folder_grid_columns", Context.MODE_PRIVATE)
+        if (key != null) {
+            gridColumnCount = prefs.getInt(key, SettingsManager.defaultGridColumns.value).coerceIn(2, 8)
+            return
+        }
+        gridColumnCount = SettingsManager.defaultGridColumns.value.coerceIn(2, 8)
+    }
 
 }
 

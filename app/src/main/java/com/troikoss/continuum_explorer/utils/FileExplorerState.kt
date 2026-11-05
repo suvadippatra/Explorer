@@ -182,6 +182,7 @@ class FileExplorerState(
                 folderConfigs.resolveViewMode(key)
                 folderConfigs.resolveSortParams(key)
                 folderConfigs.resolveGridSize(key)
+                folderConfigs.resolveGridColumnCount(key)
                 folderConfigs.resolveGrouping(key)
                 folderConfigs.resolveFoldersFirst(key)
                 folderConfigs.resolveColumnVisibility(key, libraryItem == LibraryItem.RecycleBin)

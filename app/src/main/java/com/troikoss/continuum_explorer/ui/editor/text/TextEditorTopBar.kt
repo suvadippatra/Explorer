@@ -155,6 +155,20 @@ fun TextEditorTopBar(
                     )
                 }
 
+                // Full-Screen Toggle (Hides/Shows Top TabBar)
+                val isFullScreen by com.troikoss.continuum_explorer.managers.SettingsManager.isFullScreenTabBarHidden
+                IconButton(
+                    onClick = { com.troikoss.continuum_explorer.managers.SettingsManager.toggleFullScreenTabBar() },
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        imageVector = if (isFullScreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
+                        contentDescription = if (isFullScreen) "Exit Full Screen" else "Full Screen",
+                        tint = if (isFullScreen) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.size(19.dp)
+                    )
+                }
+
                 Box {
                     IconButton(onClick = { showMoreMenu = true }, modifier = Modifier.size(36.dp)) {
                         Icon(
@@ -169,6 +183,19 @@ fun TextEditorTopBar(
                         expanded = showMoreMenu,
                         onDismissRequest = { showMoreMenu = false }
                     ) {
+                        DropdownMenuItem(
+                            text = { Text(if (isFullScreen) "Show Tab Bar" else "Full Screen (Hide Tab Bar)") },
+                            leadingIcon = {
+                                Icon(
+                                    if (isFullScreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
+                                    contentDescription = null
+                                )
+                            },
+                            onClick = {
+                                showMoreMenu = false
+                                com.troikoss.continuum_explorer.managers.SettingsManager.toggleFullScreenTabBar()
+                            }
+                        )
                         DropdownMenuItem(
                             text = { Text("View Path") },
                             leadingIcon = { Icon(Icons.Default.Info, contentDescription = null) },

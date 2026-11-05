@@ -4,15 +4,15 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.media.projection.MediaProjectionManager
-import android.os.Environment
+import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -26,6 +26,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.ClipboardManager
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
@@ -34,7 +35,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -48,11 +48,13 @@ import kotlinx.coroutines.delay
 import java.io.File
 
 /**
- * Material 3 Card-Based FTP/HTTP & Screen Cast Server Panel.
+ * Minimalist, Material 3 FTP/HTTP File Sharing & Self-Hosted Website Server Panel.
  * Features:
- * - Top heading with log button ONLY displayed when server is running
- * - Material 3 cards grouping similar parameters
- * - Responsive 1-column (mobile) vs 2-column (tablet/desktop) layout
+ * - Top Heading Bar with Full-Screen Toggle, Live Activity Logs (when running), and QR Code.
+ * - Segmented Mode Toggle switching between:
+ *   1. FTP & File Sharing Mode (Selected Files/Folders Bucket or Full Storage + FTP/HTTP Portal + Screen Mirroring)
+ *   2. Self-Hosted Website Mode (Host a downloaded GitHub web repo folder or specific .html file locally)
+ * - Responsive 1-column (mobile) vs 2-column (tablet/desktop) minimalist layout.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -64,8 +66,8 @@ fun FtpServerSettingsPanel(
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
     val scrollState = rememberScrollState()
+    val isFullScreen by SettingsManager.isFullScreenTabBarHidden
 
-    // Initialize Bucket Manager
     LaunchedEffect(Unit) {
         FtpBucketManager.initialize(context)
     }
@@ -116,7 +118,6 @@ fun FtpServerSettingsPanel(
     var showQrDialog by remember { mutableStateOf(false) }
     var showLogsDialog by remember { mutableStateOf(false) }
     var showFullPageFilePicker by remember { mutableStateOf(false) }
-    var explanationDialogText by remember { mutableStateOf<Pair<String, String>?>(null) }
 
     // Screen Cast Launcher
     val mediaProjectionManager = remember(context) {
@@ -129,9 +130,9 @@ fun FtpServerSettingsPanel(
         if (result.resultCode == Activity.RESULT_OK && result.data != null) {
             SettingsManager.setScreenCastParams(context, screenResolution, screenFps, screenRotation, screenAudio)
             ContinuumHubService.startScreenCast(context, result.resultCode, result.data!!)
-            Toast.makeText(context, "Live Screen Sharing started!", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "Live Screen Mirroring started", Toast.LENGTH_SHORT).show()
         } else {
-            Toast.makeText(context, "Screen Sharing permission not granted", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "Screen Mirroring permission cancelled", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -164,339 +165,484 @@ fun FtpServerSettingsPanel(
         }
     }
     val httpWebUrl = remember(serverIp) { "http://$serverIp:8080" }
+    val isWebsiteMode = hostedMode == FtpHostedMode.CUSTOM_FOLDER
+
+    fun saveAllSettings(reloadIfActive: Boolean = true) {
+        val p = portInput.toIntOrNull()?.coerceIn(1024, 65535) ?: 2121
+        SettingsManager.setFtpPort(context, p)
+        SettingsManager.setFtpAnonymousAllowed(context, isAnonymousAccess)
+        SettingsManager.setFtpCredentials(context, usernameInput, passwordInput)
+        SettingsManager.setFtpUploadPassword(context, uploadPasswordInput)
+        SettingsManager.setFtpAllowUpload(context, allowWebUploads)
+        SettingsManager.setFtpWritePermission(context, allowWritePermissions)
+        SettingsManager.setFtpHostedMode(context, hostedMode, customFolderPath)
+        if (reloadIfActive && isServerRunning) {
+            ContinuumHubService.reloadIfRunning(context)
+        }
+    }
 
     // Full page file picker overlay
     if (showFullPageFilePicker) {
-        val isHtmlMode = (hostedMode == FtpHostedMode.CUSTOM_FOLDER)
         FullPageFilePicker(
-            title = if (isHtmlMode) "Select HTML File or Folder" else "Select Files",
-            isHtmlMode = isHtmlMode,
-            onDismiss = { showFullPageFilePicker = false },
+            title = if (isWebsiteMode) "Select Website Folder or HTML File" else "Select Shared Files & Folders",
+            isHtmlMode = isWebsiteMode,
+            onDismiss = {
+                showFullPageFilePicker = false
+                if (!isWebsiteMode && isServerRunning) {
+                    ContinuumHubService.reloadIfRunning(context)
+                }
+            },
             onHtmlSelected = { selected ->
                 customFolderPath = selected.absolutePath
+                hostedMode = FtpHostedMode.CUSTOM_FOLDER
                 SettingsManager.setFtpHostedMode(context, FtpHostedMode.CUSTOM_FOLDER, customFolderPath)
                 showFullPageFilePicker = false
+                if (isServerRunning) {
+                    ContinuumHubService.reloadIfRunning(context)
+                }
             }
         )
         return
     }
 
-    // Explanation Dialog
-    if (explanationDialogText != null) {
-        AlertDialog(
-            onDismissRequest = { explanationDialogText = null },
-            title = { Text(explanationDialogText!!.first, fontWeight = FontWeight.Bold) },
-            text = { Text(explanationDialogText!!.second, style = MaterialTheme.typography.bodyMedium) },
-            confirmButton = {
-                TextButton(onClick = { explanationDialogText = null }) { Text("Got it") }
-            },
-            shape = RoundedCornerShape(16.dp)
-        )
-    }
-
-    val inputShape = RoundedCornerShape(12.dp)
+    val inputShape = RoundedCornerShape(10.dp)
 
     BoxWithConstraints(
         modifier = modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.surface)
     ) {
-        val isWideScreen = maxWidth >= 600.dp
+        val isWideScreen = maxWidth >= 680.dp
 
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .verticalScroll(scrollState),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+                .verticalScroll(scrollState)
         ) {
-            // --- TOP HEADING BAR ---
+            // --- TOP HEADING BAR (Flush under TabBar) ---
             Surface(
                 color = MaterialTheme.colorScheme.surfaceContainer,
-                tonalElevation = 2.dp
+                tonalElevation = 1.dp
             ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(52.dp)
-                        .padding(horizontal = 8.dp),
+                        .height(50.dp)
+                        .padding(horizontal = 6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     IconButton(onClick = onMenuClick) {
-                        Icon(Icons.Default.Menu, contentDescription = "Menu")
+                        Icon(Icons.Default.Menu, contentDescription = "Navigation Drawer")
                     }
 
-                    Box(
+                    Row(
                         modifier = Modifier.weight(1f),
-                        contentAlignment = Alignment.Center
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
                     ) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(if (isServerRunning) Color(0xFF10B981) else MaterialTheme.colorScheme.outline)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "FTP/HTTP Server",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold
+                            text = if (isWebsiteMode) "Self-Hosted Web Server" else "FTP & HTTP File Server",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
 
-                    // Log Button: ONLY shown when server is RUNNING
                     if (isServerRunning) {
                         IconButton(onClick = { showLogsDialog = true }) {
-                            Icon(Icons.Default.Assessment, contentDescription = "Server Logs", tint = MaterialTheme.colorScheme.primary)
+                            Icon(
+                                Icons.Default.Assessment,
+                                contentDescription = "Server Activity & Logs",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
                         }
                     }
 
                     IconButton(onClick = { showQrDialog = true }) {
-                        Icon(Icons.Default.QrCodeScanner, contentDescription = "QR Code", tint = MaterialTheme.colorScheme.primary)
+                        Icon(
+                            Icons.Default.QrCode2,
+                            contentDescription = "Quick Connect QR",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+
+                    IconButton(onClick = { SettingsManager.toggleFullScreenTabBar() }) {
+                        Icon(
+                            imageVector = if (isFullScreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
+                            contentDescription = if (isFullScreen) "Exit Fullscreen" else "Fullscreen"
+                        )
                     }
                 }
             }
 
-            // Cards Container
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 6.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp)
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                if (isWideScreen) {
-                    // TWO COLUMN CARD GRID ON TABLET / DESKTOP WIDE SCREENS
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(14.dp)
-                    ) {
-                        Column(
-                            modifier = Modifier.weight(1f),
-                            verticalArrangement = Arrangement.spacedBy(14.dp)
-                        ) {
-                            ServerControlCard(
-                                isServerRunning = isServerRunning,
-                                serverIp = serverIp,
-                                activePort = activePort,
-                                uptimeFormatted = uptimeFormatted,
-                                ftpUrl = ftpUrl,
-                                httpWebUrl = httpWebUrl,
-                                hostedMode = hostedMode,
-                                customFolderPath = customFolderPath,
-                                context = context,
-                                clipboardManager = clipboardManager,
-                                onStartToggle = { start ->
-                                    if (start) {
-                                        val p = portInput.toIntOrNull() ?: 2121
-                                        if (p !in 1024..65535) {
-                                            Toast.makeText(context, "Port must be 1024-65535", Toast.LENGTH_SHORT).show()
-                                            return@ServerControlCard
-                                        }
-                                        SettingsManager.setFtpPort(context, p)
-                                        SettingsManager.setFtpAnonymousAllowed(context, isAnonymousAccess)
-                                        SettingsManager.setFtpCredentials(context, usernameInput, passwordInput)
-                                        SettingsManager.setFtpUploadPassword(context, uploadPasswordInput)
-                                        SettingsManager.setFtpAllowUpload(context, allowWebUploads)
-                                        SettingsManager.setFtpWritePermission(context, allowWritePermissions)
-                                        SettingsManager.setFtpHostedMode(context, hostedMode, customFolderPath)
-
-                                        ContinuumHubService.startService(context)
-                                        Toast.makeText(context, "Server started in background", Toast.LENGTH_SHORT).show()
-                                    } else {
-                                        ContinuumHubService.stopService(context)
-                                        Toast.makeText(context, "Server stopped", Toast.LENGTH_SHORT).show()
-                                    }
-                                },
-                                onHostedModeChange = { mode ->
-                                    hostedMode = mode
-                                    SettingsManager.setFtpHostedMode(context, mode, if (mode == FtpHostedMode.CUSTOM_FOLDER) customFolderPath else "")
-                                },
-                                onChooseFilePicker = { showFullPageFilePicker = true },
-                                onExplain = { title, desc -> explanationDialogText = Pair(title, desc) }
-                            )
-
-                            WebUploadCard(
-                                allowWebUploads = allowWebUploads,
-                                uploadPasswordInput = uploadPasswordInput,
-                                showUploadPassword = showUploadPassword,
-                                inputShape = inputShape,
-                                onAllowChange = { allowWebUploads = it },
-                                onPasswordChange = { uploadPasswordInput = it },
-                                onToggleShowPass = { showUploadPassword = !showUploadPassword },
-                                onExplain = { title, desc -> explanationDialogText = Pair(title, desc) }
-                            )
-                        }
-
-                        Column(
-                            modifier = Modifier.weight(1f),
-                            verticalArrangement = Arrangement.spacedBy(14.dp)
-                        ) {
-                            NetworkAuthCard(
-                                portInput = portInput,
-                                isAnonymousAccess = isAnonymousAccess,
-                                usernameInput = usernameInput,
-                                passwordInput = passwordInput,
-                                showPassword = showPassword,
-                                allowWritePermissions = allowWritePermissions,
-                                inputShape = inputShape,
-                                onPortChange = { portInput = it },
-                                onAnonChange = { isAnonymousAccess = it },
-                                onUserChange = { usernameInput = it },
-                                onPassChange = { passwordInput = it },
-                                onToggleShowPass = { showPassword = !showPassword },
-                                onAllowWriteChange = { allowWritePermissions = it },
-                                onExplain = { title, desc -> explanationDialogText = Pair(title, desc) }
-                            )
-
-                            ScreenCastCard(
-                                isScreenCasting = isScreenCasting,
-                                screenResolution = screenResolution,
-                                screenRotation = screenRotation,
-                                context = context,
-                                onResolutionChange = { res ->
-                                    screenResolution = res
-                                    SettingsManager.setScreenCastParams(context, screenResolution, screenFps, screenRotation, screenAudio)
-                                },
-                                onRotationChange = { rot ->
-                                    screenRotation = rot
-                                    SettingsManager.setScreenCastParams(context, screenResolution, screenFps, screenRotation, screenAudio)
-                                },
-                                onStartCast = {
-                                    SettingsManager.setScreenCastParams(context, screenResolution, screenFps, screenRotation, screenAudio)
-                                    screenShareLauncher.launch(mediaProjectionManager.createScreenCaptureIntent())
-                                },
-                                onStopCast = {
-                                    ContinuumHubService.stopScreenCast(context)
-                                    Toast.makeText(context, "Screen Sharing stopped", Toast.LENGTH_SHORT).show()
-                                },
-                                onExplain = { title, desc -> explanationDialogText = Pair(title, desc) }
-                            )
-                        }
-                    }
-                } else {
-                    // SINGLE COLUMN STACK FOR NARROW MOBILE SCREENS
-                    ServerControlCard(
-                        isServerRunning = isServerRunning,
-                        serverIp = serverIp,
-                        activePort = activePort,
-                        uptimeFormatted = uptimeFormatted,
-                        ftpUrl = ftpUrl,
-                        httpWebUrl = httpWebUrl,
-                        hostedMode = hostedMode,
-                        customFolderPath = customFolderPath,
-                        context = context,
-                        clipboardManager = clipboardManager,
-                        onStartToggle = { start ->
-                            if (start) {
-                                val p = portInput.toIntOrNull() ?: 2121
-                                if (p !in 1024..65535) {
-                                    Toast.makeText(context, "Port must be 1024-65535", Toast.LENGTH_SHORT).show()
-                                    return@ServerControlCard
+                // --- SEGMENTED MODE TOGGLE (Minimalist 2-Mode Switcher) ---
+                SingleChoiceSegmentedButtonRow(
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    SegmentedButton(
+                        selected = !isWebsiteMode,
+                        onClick = {
+                            if (isWebsiteMode) {
+                                hostedMode = if (FtpBucketManager.bucketItems.isNotEmpty()) {
+                                    FtpHostedMode.BATCH_FILES
+                                } else {
+                                    FtpHostedMode.FULL_STORAGE
                                 }
-                                SettingsManager.setFtpPort(context, p)
-                                SettingsManager.setFtpAnonymousAllowed(context, isAnonymousAccess)
-                                SettingsManager.setFtpCredentials(context, usernameInput, passwordInput)
-                                SettingsManager.setFtpUploadPassword(context, uploadPasswordInput)
-                                SettingsManager.setFtpAllowUpload(context, allowWebUploads)
-                                SettingsManager.setFtpWritePermission(context, allowWritePermissions)
                                 SettingsManager.setFtpHostedMode(context, hostedMode, customFolderPath)
-
-                                ContinuumHubService.startService(context)
-                                Toast.makeText(context, "Server started in background", Toast.LENGTH_SHORT).show()
-                            } else {
-                                ContinuumHubService.stopService(context)
-                                Toast.makeText(context, "Server stopped", Toast.LENGTH_SHORT).show()
+                                ContinuumHubService.reloadIfRunning(context)
                             }
                         },
-                        onHostedModeChange = { mode ->
-                            hostedMode = mode
-                            SettingsManager.setFtpHostedMode(context, mode, if (mode == FtpHostedMode.CUSTOM_FOLDER) customFolderPath else "")
-                        },
-                        onChooseFilePicker = { showFullPageFilePicker = true },
-                        onExplain = { title, desc -> explanationDialogText = Pair(title, desc) }
-                    )
-
-                    NetworkAuthCard(
-                        portInput = portInput,
-                        isAnonymousAccess = isAnonymousAccess,
-                        usernameInput = usernameInput,
-                        passwordInput = passwordInput,
-                        showPassword = showPassword,
-                        allowWritePermissions = allowWritePermissions,
-                        inputShape = inputShape,
-                        onPortChange = { portInput = it },
-                        onAnonChange = { isAnonymousAccess = it },
-                        onUserChange = { usernameInput = it },
-                        onPassChange = { passwordInput = it },
-                        onToggleShowPass = { showPassword = !showPassword },
-                        onAllowWriteChange = { allowWritePermissions = it },
-                        onExplain = { title, desc -> explanationDialogText = Pair(title, desc) }
-                    )
-
-                    WebUploadCard(
-                        allowWebUploads = allowWebUploads,
-                        uploadPasswordInput = uploadPasswordInput,
-                        showUploadPassword = showUploadPassword,
-                        inputShape = inputShape,
-                        onAllowChange = { allowWebUploads = it },
-                        onPasswordChange = { uploadPasswordInput = it },
-                        onToggleShowPass = { showUploadPassword = !showUploadPassword },
-                        onExplain = { title, desc -> explanationDialogText = Pair(title, desc) }
-                    )
-
-                    ScreenCastCard(
-                        isScreenCasting = isScreenCasting,
-                        screenResolution = screenResolution,
-                        screenRotation = screenRotation,
-                        context = context,
-                        onResolutionChange = { res ->
-                            screenResolution = res
-                            SettingsManager.setScreenCastParams(context, screenResolution, screenFps, screenRotation, screenAudio)
-                        },
-                        onRotationChange = { rot ->
-                            screenRotation = rot
-                            SettingsManager.setScreenCastParams(context, screenResolution, screenFps, screenRotation, screenAudio)
-                        },
-                        onStartCast = {
-                            SettingsManager.setScreenCastParams(context, screenResolution, screenFps, screenRotation, screenAudio)
-                            screenShareLauncher.launch(mediaProjectionManager.createScreenCaptureIntent())
-                        },
-                        onStopCast = {
-                            ContinuumHubService.stopScreenCast(context)
-                            Toast.makeText(context, "Screen Sharing stopped", Toast.LENGTH_SHORT).show()
-                        },
-                        onExplain = { title, desc -> explanationDialogText = Pair(title, desc) }
-                    )
-                }
-
-                // SAVE / APPLY BUTTON
-                Button(
-                    onClick = {
-                        val p = portInput.toIntOrNull() ?: 2121
-                        SettingsManager.setFtpPort(context, p)
-                        SettingsManager.setFtpAnonymousAllowed(context, isAnonymousAccess)
-                        SettingsManager.setFtpCredentials(context, usernameInput, passwordInput)
-                        SettingsManager.setFtpUploadPassword(context, uploadPasswordInput)
-                        SettingsManager.setFtpAllowUpload(context, allowWebUploads)
-                        SettingsManager.setFtpWritePermission(context, allowWritePermissions)
-                        SettingsManager.setFtpHostedMode(context, hostedMode, customFolderPath)
-
-                        if (isServerRunning) {
-                            ContinuumHubService.stopService(context)
-                            ContinuumHubService.startService(context)
-                            Toast.makeText(context, "Server updated & restarted", Toast.LENGTH_SHORT).show()
-                        } else {
-                            Toast.makeText(context, "Settings saved", Toast.LENGTH_SHORT).show()
+                        shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
+                        icon = {
+                            Icon(
+                                Icons.Default.FolderShared,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
                         }
-                    },
-                    shape = RoundedCornerShape(16.dp),
-                    modifier = Modifier.fillMaxWidth(),
-                    contentPadding = PaddingValues(vertical = 12.dp)
-                ) {
-                    Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(if (isServerRunning) "Apply & Restart" else "Save Settings", fontWeight = FontWeight.Bold)
+                    ) {
+                        Text(
+                            text = "FTP & File Share",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+
+                    SegmentedButton(
+                        selected = isWebsiteMode,
+                        onClick = {
+                            if (!isWebsiteMode) {
+                                hostedMode = FtpHostedMode.CUSTOM_FOLDER
+                                SettingsManager.setFtpHostedMode(context, FtpHostedMode.CUSTOM_FOLDER, customFolderPath)
+                                ContinuumHubService.reloadIfRunning(context)
+                            }
+                        },
+                        shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
+                        icon = {
+                            Icon(
+                                Icons.Default.Language,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    ) {
+                        Text(
+                            text = "Self-Hosted Website",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
 
-                Spacer(modifier = Modifier.height(20.dp))
+                // --- MASTER STATUS & ENDPOINT BANNER ---
+                ServerMasterStatusCard(
+                    isServerRunning = isServerRunning,
+                    isWebsiteMode = isWebsiteMode,
+                    uptimeFormatted = uptimeFormatted,
+                    ftpUrl = ftpUrl,
+                    httpWebUrl = httpWebUrl,
+                    context = context,
+                    clipboardManager = clipboardManager,
+                    onStartToggle = { start ->
+                        if (start) {
+                            val p = portInput.toIntOrNull() ?: 2121
+                            if (p !in 1024..65535) {
+                                Toast.makeText(context, "FTP Port must be between 1024 and 65535", Toast.LENGTH_SHORT).show()
+                                return@ServerMasterStatusCard
+                            }
+                            saveAllSettings(reloadIfActive = false)
+                            ContinuumHubService.startService(context)
+                            Toast.makeText(context, "Server started", Toast.LENGTH_SHORT).show()
+                        } else {
+                            ContinuumHubService.stopService(context)
+                            Toast.makeText(context, "Server stopped", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                )
+
+                // --- MODE-SPECIFIC CONFIGURATION ---
+                if (isWebsiteMode) {
+                    // SELF-HOSTED WEBSITE MODE (GitHub Web Repo / Static HTML Folder or File)
+                    if (isWideScreen) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                SelfHostedWebsiteTargetCard(
+                                    customFolderPath = customFolderPath,
+                                    httpWebUrl = httpWebUrl,
+                                    isServerRunning = isServerRunning,
+                                    context = context,
+                                    onSelectSource = { showFullPageFilePicker = true },
+                                    onClearSource = {
+                                        customFolderPath = ""
+                                        SettingsManager.setFtpHostedMode(context, FtpHostedMode.CUSTOM_FOLDER, "")
+                                        ContinuumHubService.reloadIfRunning(context)
+                                    }
+                                )
+                            }
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                ScreenCastCard(
+                                    isScreenCasting = isScreenCasting,
+                                    screenResolution = screenResolution,
+                                    screenRotation = screenRotation,
+                                    onResolutionChange = { res ->
+                                        screenResolution = res
+                                        SettingsManager.setScreenCastParams(context, screenResolution, screenFps, screenRotation, screenAudio)
+                                    },
+                                    onRotationChange = { rot ->
+                                        screenRotation = rot
+                                        SettingsManager.setScreenCastParams(context, screenResolution, screenFps, screenRotation, screenAudio)
+                                    },
+                                    onStartCast = {
+                                        SettingsManager.setScreenCastParams(context, screenResolution, screenFps, screenRotation, screenAudio)
+                                        screenShareLauncher.launch(mediaProjectionManager.createScreenCaptureIntent())
+                                    },
+                                    onStopCast = {
+                                        ContinuumHubService.stopScreenCast(context)
+                                    }
+                                )
+                            }
+                        }
+                    } else {
+                        SelfHostedWebsiteTargetCard(
+                            customFolderPath = customFolderPath,
+                            httpWebUrl = httpWebUrl,
+                            isServerRunning = isServerRunning,
+                            context = context,
+                            onSelectSource = { showFullPageFilePicker = true },
+                            onClearSource = {
+                                customFolderPath = ""
+                                SettingsManager.setFtpHostedMode(context, FtpHostedMode.CUSTOM_FOLDER, "")
+                                ContinuumHubService.reloadIfRunning(context)
+                            }
+                        )
+                        ScreenCastCard(
+                            isScreenCasting = isScreenCasting,
+                            screenResolution = screenResolution,
+                            screenRotation = screenRotation,
+                            onResolutionChange = { res ->
+                                screenResolution = res
+                                SettingsManager.setScreenCastParams(context, screenResolution, screenFps, screenRotation, screenAudio)
+                            },
+                            onRotationChange = { rot ->
+                                screenRotation = rot
+                                SettingsManager.setScreenCastParams(context, screenResolution, screenFps, screenRotation, screenAudio)
+                            },
+                            onStartCast = {
+                                SettingsManager.setScreenCastParams(context, screenResolution, screenFps, screenRotation, screenAudio)
+                                screenShareLauncher.launch(mediaProjectionManager.createScreenCaptureIntent())
+                            },
+                            onStopCast = {
+                                ContinuumHubService.stopScreenCast(context)
+                            }
+                        )
+                    }
+                } else {
+                    // FTP & HTTP FILE SHARING MODE
+                    if (isWideScreen) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                FtpSharedContentCard(
+                                    hostedMode = hostedMode,
+                                    context = context,
+                                    onScopeChange = { mode ->
+                                        hostedMode = mode
+                                        SettingsManager.setFtpHostedMode(context, mode, customFolderPath)
+                                        ContinuumHubService.reloadIfRunning(context)
+                                    },
+                                    onPickFilesOrFolders = {
+                                        hostedMode = FtpHostedMode.BATCH_FILES
+                                        SettingsManager.setFtpHostedMode(context, FtpHostedMode.BATCH_FILES, customFolderPath)
+                                        showFullPageFilePicker = true
+                                    }
+                                )
+
+                                WebUploadCard(
+                                    allowWebUploads = allowWebUploads,
+                                    uploadPasswordInput = uploadPasswordInput,
+                                    showUploadPassword = showUploadPassword,
+                                    inputShape = inputShape,
+                                    onAllowChange = {
+                                        allowWebUploads = it
+                                        SettingsManager.setFtpAllowUpload(context, it)
+                                    },
+                                    onPasswordChange = {
+                                        uploadPasswordInput = it
+                                        SettingsManager.setFtpUploadPassword(context, it)
+                                    },
+                                    onToggleShowPass = { showUploadPassword = !showUploadPassword }
+                                )
+                            }
+
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                NetworkAuthCard(
+                                    portInput = portInput,
+                                    isAnonymousAccess = isAnonymousAccess,
+                                    usernameInput = usernameInput,
+                                    passwordInput = passwordInput,
+                                    showPassword = showPassword,
+                                    allowWritePermissions = allowWritePermissions,
+                                    inputShape = inputShape,
+                                    onPortChange = { portInput = it },
+                                    onAnonChange = { isAnonymousAccess = it },
+                                    onUserChange = { usernameInput = it },
+                                    onPassChange = { passwordInput = it },
+                                    onToggleShowPass = { showPassword = !showPassword },
+                                    onAllowWriteChange = { allowWritePermissions = it },
+                                    onApplyNetwork = {
+                                        saveAllSettings(reloadIfActive = true)
+                                        Toast.makeText(
+                                            context,
+                                            if (isServerRunning) "Server reloaded with new settings" else "Settings saved",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                    }
+                                )
+
+                                ScreenCastCard(
+                                    isScreenCasting = isScreenCasting,
+                                    screenResolution = screenResolution,
+                                    screenRotation = screenRotation,
+                                    onResolutionChange = { res ->
+                                        screenResolution = res
+                                        SettingsManager.setScreenCastParams(context, screenResolution, screenFps, screenRotation, screenAudio)
+                                    },
+                                    onRotationChange = { rot ->
+                                        screenRotation = rot
+                                        SettingsManager.setScreenCastParams(context, screenResolution, screenFps, screenRotation, screenAudio)
+                                    },
+                                    onStartCast = {
+                                        SettingsManager.setScreenCastParams(context, screenResolution, screenFps, screenRotation, screenAudio)
+                                        screenShareLauncher.launch(mediaProjectionManager.createScreenCaptureIntent())
+                                    },
+                                    onStopCast = {
+                                        ContinuumHubService.stopScreenCast(context)
+                                    }
+                                )
+                            }
+                        }
+                    } else {
+                        FtpSharedContentCard(
+                            hostedMode = hostedMode,
+                            context = context,
+                            onScopeChange = { mode ->
+                                hostedMode = mode
+                                SettingsManager.setFtpHostedMode(context, mode, customFolderPath)
+                                ContinuumHubService.reloadIfRunning(context)
+                            },
+                            onPickFilesOrFolders = {
+                                hostedMode = FtpHostedMode.BATCH_FILES
+                                SettingsManager.setFtpHostedMode(context, FtpHostedMode.BATCH_FILES, customFolderPath)
+                                showFullPageFilePicker = true
+                            }
+                        )
+
+                        NetworkAuthCard(
+                            portInput = portInput,
+                            isAnonymousAccess = isAnonymousAccess,
+                            usernameInput = usernameInput,
+                            passwordInput = passwordInput,
+                            showPassword = showPassword,
+                            allowWritePermissions = allowWritePermissions,
+                            inputShape = inputShape,
+                            onPortChange = { portInput = it },
+                            onAnonChange = { isAnonymousAccess = it },
+                            onUserChange = { usernameInput = it },
+                            onPassChange = { passwordInput = it },
+                            onToggleShowPass = { showPassword = !showPassword },
+                            onAllowWriteChange = { allowWritePermissions = it },
+                            onApplyNetwork = {
+                                saveAllSettings(reloadIfActive = true)
+                                Toast.makeText(
+                                    context,
+                                    if (isServerRunning) "Server reloaded with new settings" else "Settings saved",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        )
+
+                        WebUploadCard(
+                            allowWebUploads = allowWebUploads,
+                            uploadPasswordInput = uploadPasswordInput,
+                            showUploadPassword = showUploadPassword,
+                            inputShape = inputShape,
+                            onAllowChange = {
+                                allowWebUploads = it
+                                SettingsManager.setFtpAllowUpload(context, it)
+                            },
+                            onPasswordChange = {
+                                uploadPasswordInput = it
+                                SettingsManager.setFtpUploadPassword(context, it)
+                            },
+                            onToggleShowPass = { showUploadPassword = !showUploadPassword }
+                        )
+
+                        ScreenCastCard(
+                            isScreenCasting = isScreenCasting,
+                            screenResolution = screenResolution,
+                            screenRotation = screenRotation,
+                            onResolutionChange = { res ->
+                                screenResolution = res
+                                SettingsManager.setScreenCastParams(context, screenResolution, screenFps, screenRotation, screenAudio)
+                            },
+                            onRotationChange = { rot ->
+                                screenRotation = rot
+                                SettingsManager.setScreenCastParams(context, screenResolution, screenFps, screenRotation, screenAudio)
+                            },
+                            onStartCast = {
+                                SettingsManager.setScreenCastParams(context, screenResolution, screenFps, screenRotation, screenAudio)
+                                screenShareLauncher.launch(mediaProjectionManager.createScreenCaptureIntent())
+                            },
+                            onStopCast = {
+                                ContinuumHubService.stopScreenCast(context)
+                            }
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
             }
         }
     }
 
     // QR Code Dialog
     if (showQrDialog) {
+        val targetQrUrl = if (isWebsiteMode) httpWebUrl else httpWebUrl
         AlertDialog(
             onDismissRequest = { showQrDialog = false },
             title = { Text("Quick Connect QR Code", fontWeight = FontWeight.Bold) },
@@ -512,19 +658,27 @@ fun FtpServerSettingsPanel(
                         modifier = Modifier.padding(4.dp)
                     ) {
                         QrCodeView(
-                            content = if (hostedMode == FtpHostedMode.CUSTOM_FOLDER) httpWebUrl else ftpUrl,
+                            content = targetQrUrl,
                             size = 180.dp,
                             darkColor = Color.Black,
                             lightColor = Color.White
                         )
                     }
                     Text(
-                        text = if (hostedMode == FtpHostedMode.CUSTOM_FOLDER) httpWebUrl else ftpUrl,
+                        text = "Web: $httpWebUrl",
                         style = MaterialTheme.typography.bodySmall,
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.primary
                     )
+                    if (!isWebsiteMode) {
+                        Text(
+                            text = "FTP: $ftpUrl",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontFamily = FontFamily.Monospace,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             },
             confirmButton = {
@@ -590,7 +744,7 @@ fun FtpServerSettingsPanel(
                                 Text("No connected clients yet", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         } else {
-                            androidx.compose.foundation.lazy.LazyColumn(
+                            LazyColumn(
                                 modifier = Modifier.fillMaxSize(),
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
@@ -610,7 +764,12 @@ fun FtpServerSettingsPanel(
                                                 Text(session.clientIp, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
                                                 Text(session.protocol, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
                                             }
-                                            Text("${session.requestsCount} reqs • ${session.bytesTransferred / 1024} KB", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                                            Text(
+                                                "${session.requestsCount} reqs • ${session.bytesTransferred / 1024} KB",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 1
+                                            )
                                         }
                                     }
                                 }
@@ -622,13 +781,17 @@ fun FtpServerSettingsPanel(
                                 Text("No server logs recorded yet", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         } else {
-                            androidx.compose.foundation.lazy.LazyColumn(
+                            LazyColumn(
                                 modifier = Modifier.fillMaxSize(),
                                 verticalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
                                 items(logEntries.size) { idx ->
                                     val log = logEntries[idx]
-                                    Text(text = "[${log.protocol}] ${log.clientIp}: ${log.action} ${log.details}", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
+                                    Text(
+                                        text = "[${log.protocol}] ${log.clientIp}: ${log.action} ${log.details}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontFamily = FontFamily.Monospace
+                                    )
                                 }
                             }
                         }
@@ -644,24 +807,18 @@ fun FtpServerSettingsPanel(
 }
 
 @Composable
-private fun ServerControlCard(
+private fun ServerMasterStatusCard(
     isServerRunning: Boolean,
-    serverIp: String,
-    activePort: Int,
+    isWebsiteMode: Boolean,
     uptimeFormatted: String,
     ftpUrl: String,
     httpWebUrl: String,
-    hostedMode: FtpHostedMode,
-    customFolderPath: String,
     context: Context,
-    clipboardManager: androidx.compose.ui.platform.ClipboardManager,
-    onStartToggle: (Boolean) -> Unit,
-    onHostedModeChange: (FtpHostedMode) -> Unit,
-    onChooseFilePicker: () -> Unit,
-    onExplain: (String, String) -> Unit
+    clipboardManager: ClipboardManager,
+    onStartToggle: (Boolean) -> Unit
 ) {
     OutlinedCard(
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(14.dp),
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(
@@ -673,109 +830,435 @@ private fun ServerControlCard(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier
-                            .size(9.dp)
-                            .clip(CircleShape)
-                            .background(if (isServerRunning) Color(0xFF4CAF50) else MaterialTheme.colorScheme.outline)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = if (isServerRunning) "Service Active" else "Service Inactive",
-                        style = MaterialTheme.typography.bodyLarge,
-                        fontWeight = FontWeight.SemiBold,
-                        color = if (isServerRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-                    )
-                    IconButton(
-                        onClick = { onExplain("Server Service", "Starts FTP and HTTP server on local Wi-Fi.") },
-                        modifier = Modifier.size(26.dp)
-                    ) {
-                        Icon(Icons.Default.HelpOutline, contentDescription = null, modifier = Modifier.size(15.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(9.dp)
+                                .clip(CircleShape)
+                                .background(if (isServerRunning) Color(0xFF10B981) else MaterialTheme.colorScheme.outline)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = if (isServerRunning) "Server Online ($uptimeFormatted)" else "Server Offline",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = if (isServerRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                        )
                     }
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = if (isWebsiteMode) {
+                            "Serving static website & assets over local Wi-Fi HTTP"
+                        } else {
+                            "Serving FTP daemon & interactive Web Portal over Wi-Fi"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
 
-                Switch(checked = isServerRunning, onCheckedChange = onStartToggle)
+                Switch(
+                    checked = isServerRunning,
+                    onCheckedChange = onStartToggle
+                )
             }
 
             if (isServerRunning) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column {
-                        Text("IP: $serverIp | FTP: $activePort", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
-                        Text("Uptime: $uptimeFormatted", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
+
+                // HTTP Endpoint Row
+                EndpointRow(
+                    label = if (isWebsiteMode) "Website URL" else "Web Portal",
+                    url = httpWebUrl,
+                    onCopy = {
+                        clipboardManager.setText(AnnotatedString(httpWebUrl))
+                        Toast.makeText(context, "Copied $httpWebUrl", Toast.LENGTH_SHORT).show()
+                    },
+                    onOpenBrowser = {
+                        try {
+                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(httpWebUrl)))
+                        } catch (_: Exception) {}
                     }
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        TextButton(
-                            onClick = {
-                                clipboardManager.setText(AnnotatedString(ftpUrl))
-                                Toast.makeText(context, "FTP URL copied", Toast.LENGTH_SHORT).show()
-                            },
-                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
-                        ) {
-                            Text("Copy FTP", style = MaterialTheme.typography.labelSmall)
-                        }
+                )
+
+                // FTP Endpoint Row (Shown in FTP & File Share mode)
+                if (!isWebsiteMode) {
+                    EndpointRow(
+                        label = "FTP Server",
+                        url = ftpUrl,
+                        onCopy = {
+                            clipboardManager.setText(AnnotatedString(ftpUrl))
+                            Toast.makeText(context, "Copied $ftpUrl", Toast.LENGTH_SHORT).show()
+                        },
+                        onOpenBrowser = null
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun EndpointRow(
+    label: String,
+    url: String,
+    onCopy: () -> Unit,
+    onOpenBrowser: (() -> Unit)?
+) {
+    Surface(
+        shape = RoundedCornerShape(10.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = url,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.primary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                IconButton(
+                    onClick = onCopy,
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(Icons.Default.ContentCopy, contentDescription = "Copy URL", modifier = Modifier.size(16.dp))
+                }
+                if (onOpenBrowser != null) {
+                    IconButton(
+                        onClick = onOpenBrowser,
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(Icons.Default.OpenInNew, contentDescription = "Open in Browser", modifier = Modifier.size(16.dp))
                     }
                 }
             }
+        }
+    }
+}
 
-            HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
+@Composable
+private fun FtpSharedContentCard(
+    hostedMode: FtpHostedMode,
+    context: Context,
+    onScopeChange: (FtpHostedMode) -> Unit,
+    onPickFilesOrFolders: () -> Unit
+) {
+    val bucketItems = FtpBucketManager.bucketItems
+    val isSelectedBucketMode = hostedMode == FtpHostedMode.BATCH_FILES
+
+    OutlinedCard(
+        shape = RoundedCornerShape(14.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text(
+                text = "Shared Files & Folders Scope",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
+            )
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text("Hosting Mode", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    FilterChip(
-                        selected = hostedMode == FtpHostedMode.BATCH_FILES || hostedMode == FtpHostedMode.FULL_STORAGE,
-                        onClick = { onHostedModeChange(FtpHostedMode.BATCH_FILES) },
-                        label = { Text("FTP Bucket", style = MaterialTheme.typography.labelSmall) },
-                        shape = RoundedCornerShape(12.dp)
-                    )
-                    FilterChip(
-                        selected = hostedMode == FtpHostedMode.CUSTOM_FOLDER,
-                        onClick = { onHostedModeChange(FtpHostedMode.CUSTOM_FOLDER) },
-                        label = { Text("HTML Site", style = MaterialTheme.typography.labelSmall) },
-                        shape = RoundedCornerShape(12.dp)
-                    )
-                }
+                FilterChip(
+                    selected = isSelectedBucketMode,
+                    onClick = { onScopeChange(FtpHostedMode.BATCH_FILES) },
+                    label = { Text("Selected Files / Folders", style = MaterialTheme.typography.labelSmall) },
+                    leadingIcon = {
+                        Icon(Icons.Default.Checklist, contentDescription = null, modifier = Modifier.size(15.dp))
+                    },
+                    shape = RoundedCornerShape(10.dp)
+                )
+                FilterChip(
+                    selected = hostedMode == FtpHostedMode.FULL_STORAGE,
+                    onClick = { onScopeChange(FtpHostedMode.FULL_STORAGE) },
+                    label = { Text("Full Device Storage", style = MaterialTheme.typography.labelSmall) },
+                    leadingIcon = {
+                        Icon(Icons.Default.Storage, contentDescription = null, modifier = Modifier.size(15.dp))
+                    },
+                    shape = RoundedCornerShape(10.dp)
+                )
             }
 
+            if (isSelectedBucketMode) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = if (bucketItems.isEmpty()) {
+                                "No specific items picked yet (serving full storage fallback)"
+                            } else {
+                                "${bucketItems.size} file(s) / folder(s) shared"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        if (bucketItems.isNotEmpty()) {
+                            TextButton(
+                                onClick = {
+                                    FtpBucketManager.clearBucket(context)
+                                    ContinuumHubService.reloadIfRunning(context)
+                                },
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Text("Clear", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
+
+                        FilledTonalButton(
+                            onClick = onPickFilesOrFolders,
+                            shape = RoundedCornerShape(10.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                        ) {
+                            Icon(Icons.Default.CreateNewFolder, contentDescription = null, modifier = Modifier.size(15.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Select Items", style = MaterialTheme.typography.labelMedium)
+                        }
+                    }
+                }
+
+                if (bucketItems.isNotEmpty()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        bucketItems.forEach { item ->
+                            InputChip(
+                                selected = true,
+                                onClick = {
+                                    FtpBucketManager.removeItem(context, item)
+                                    ContinuumHubService.reloadIfRunning(context)
+                                },
+                                label = {
+                                    Text(
+                                        text = item.name,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        maxLines = 1
+                                    )
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = if (item.isDirectory) Icons.Default.Folder else Icons.Default.InsertDriveFile,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                },
+                                trailingIcon = {
+                                    Icon(
+                                        Icons.Default.Close,
+                                        contentDescription = "Remove",
+                                        modifier = Modifier.size(13.dp)
+                                    )
+                                }
+                            )
+                        }
+                    }
+                }
+            } else {
+                Text(
+                    text = "Sharing entire Internal Storage over FTP and the Web Portal.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SelfHostedWebsiteTargetCard(
+    customFolderPath: String,
+    httpWebUrl: String,
+    isServerRunning: Boolean,
+    context: Context,
+    onSelectSource: () -> Unit,
+    onClearSource: () -> Unit
+) {
+    val selectedTarget = remember(customFolderPath) {
+        if (customFolderPath.isNotBlank()) File(customFolderPath).takeIf { it.exists() } else null
+    }
+    val detectedEntryHtml = remember(selectedTarget) {
+        when {
+            selectedTarget == null -> null
+            selectedTarget.isFile -> selectedTarget
+            selectedTarget.isDirectory -> {
+                File(selectedTarget, "index.html").takeIf { it.exists() && it.isFile }
+                    ?: File(selectedTarget, "index.htm").takeIf { it.exists() && it.isFile }
+                    ?: selectedTarget.listFiles()?.firstOrNull {
+                        it.isFile && (it.name.endsWith(".html", true) || it.name.endsWith(".htm", true))
+                    }
+            }
+            else -> null
+        }
+    }
+    val rootDir = remember(selectedTarget) {
+        when {
+            selectedTarget == null -> null
+            selectedTarget.isFile -> selectedTarget.parentFile
+            else -> selectedTarget
+        }
+    }
+
+    OutlinedCard(
+        shape = RoundedCornerShape(14.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Column(modifier = Modifier.weight(1f)) {
-                    if (hostedMode == FtpHostedMode.CUSTOM_FOLDER) {
+                    Text(
+                        text = "Self-Hosted Website Source",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                        text = "Host a local web repository (e.g. from GitHub) or an .html file with CSS/JS assets.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            Surface(
+                shape = RoundedCornerShape(10.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    if (selectedTarget == null) {
                         Text(
-                            text = if (customFolderPath.isNotBlank()) "Target: ${File(customFolderPath).name}" else "No HTML Target",
+                            text = "No website folder or HTML file selected",
                             style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Medium
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = "Tap 'Choose Folder / HTML' to pick a folder containing index.html or any standalone .html file.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     } else {
-                        val count = FtpBucketManager.bucketItems.size
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                Icon(
+                                    imageVector = if (selectedTarget.isDirectory) Icons.Default.Folder else Icons.Default.Html,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = selectedTarget.name,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            TextButton(
+                                onClick = onClearSource,
+                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text("Reset", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+                            }
+                        }
+
                         Text(
-                            text = if (count > 0) "Bucket: $count item(s) selected" else "Full Storage Directory",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Medium
+                            text = "Asset Root: ${rootDir?.absolutePath ?: "-"}",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontFamily = FontFamily.Monospace,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+
+                        Text(
+                            text = if (detectedEntryHtml != null) {
+                                "Entry Page: ${detectedEntryHtml.name} (Ready)"
+                            } else {
+                                "Entry Page: No .html file found in folder (will show directory explorer)"
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = if (detectedEntryHtml != null) Color(0xFF10B981) else MaterialTheme.colorScheme.tertiary
                         )
                     }
                 }
+            }
 
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 FilledTonalButton(
-                    onClick = onChooseFilePicker,
-                    shape = RoundedCornerShape(12.dp),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                    onClick = onSelectSource,
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.weight(1f)
                 ) {
-                    Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(15.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Choose", style = MaterialTheme.typography.labelMedium)
+                    Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Choose Folder / HTML", style = MaterialTheme.typography.labelMedium)
+                }
+
+                if (isServerRunning) {
+                    Button(
+                        onClick = {
+                            try {
+                                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(httpWebUrl)))
+                            } catch (_: Exception) {}
+                        },
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Icon(Icons.Default.OpenInBrowser, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Open Site", style = MaterialTheme.typography.labelMedium)
+                    }
                 }
             }
         }
@@ -797,17 +1280,36 @@ private fun NetworkAuthCard(
     onPassChange: (String) -> Unit,
     onToggleShowPass: () -> Unit,
     onAllowWriteChange: (Boolean) -> Unit,
-    onExplain: (String, String) -> Unit
+    onApplyNetwork: () -> Unit
 ) {
     OutlinedCard(
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(14.dp),
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(
             modifier = Modifier.padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Text("Network & Credentials", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    "FTP Port & Authentication",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                TextButton(
+                    onClick = onApplyNetwork,
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                ) {
+                    Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Apply", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                }
+            }
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -822,7 +1324,7 @@ private fun NetworkAuthCard(
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     shape = inputShape,
-                    modifier = Modifier.width(110.dp)
+                    modifier = Modifier.width(105.dp)
                 )
             }
 
@@ -831,7 +1333,7 @@ private fun NetworkAuthCard(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text("Anonymous Access", style = MaterialTheme.typography.bodyMedium)
+                Text("Anonymous Login", style = MaterialTheme.typography.bodyMedium)
                 Switch(checked = isAnonymousAccess, onCheckedChange = onAnonChange)
             }
 
@@ -855,7 +1357,11 @@ private fun NetworkAuthCard(
                         visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
                         trailingIcon = {
                             IconButton(onClick = onToggleShowPass) {
-                                Icon(if (showPassword) Icons.Default.VisibilityOff else Icons.Default.Visibility, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Icon(
+                                    if (showPassword) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
                             }
                         },
                         singleLine = true,
@@ -870,7 +1376,7 @@ private fun NetworkAuthCard(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text("Allow Upload / Write", style = MaterialTheme.typography.bodyMedium)
+                Text("Allow FTP Write / Upload", style = MaterialTheme.typography.bodyMedium)
                 Switch(checked = allowWritePermissions, onCheckedChange = onAllowWriteChange)
             }
         }
@@ -885,25 +1391,29 @@ private fun WebUploadCard(
     inputShape: RoundedCornerShape,
     onAllowChange: (Boolean) -> Unit,
     onPasswordChange: (String) -> Unit,
-    onToggleShowPass: () -> Unit,
-    onExplain: (String, String) -> Unit
+    onToggleShowPass: () -> Unit
 ) {
     OutlinedCard(
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(14.dp),
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(
             modifier = Modifier.padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Text("Web Upload & Security", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+            Text(
+                "Web Portal Upload Security",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
+            )
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text("Web Upload Password", style = MaterialTheme.typography.bodyMedium)
+                Text("Allow Browser File Uploads", style = MaterialTheme.typography.bodyMedium)
                 Switch(checked = allowWebUploads, onCheckedChange = onAllowChange)
             }
 
@@ -911,11 +1421,15 @@ private fun WebUploadCard(
                 OutlinedTextField(
                     value = uploadPasswordInput,
                     onValueChange = onPasswordChange,
-                    label = { Text("Upload Password") },
+                    label = { Text("Upload Password (leave blank for none)") },
                     visualTransformation = if (showUploadPassword) VisualTransformation.None else PasswordVisualTransformation(),
                     trailingIcon = {
                         IconButton(onClick = onToggleShowPass) {
-                            Icon(if (showUploadPassword) Icons.Default.VisibilityOff else Icons.Default.Visibility, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Icon(
+                                if (showUploadPassword) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
                         }
                     },
                     singleLine = true,
@@ -932,15 +1446,13 @@ private fun ScreenCastCard(
     isScreenCasting: Boolean,
     screenResolution: String,
     screenRotation: Int,
-    context: Context,
     onResolutionChange: (String) -> Unit,
     onRotationChange: (Int) -> Unit,
     onStartCast: () -> Unit,
-    onStopCast: () -> Unit,
-    onExplain: (String, String) -> Unit
+    onStopCast: () -> Unit
 ) {
     OutlinedCard(
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(14.dp),
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(
@@ -952,28 +1464,40 @@ private fun ScreenCastCard(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text("Screen Sharing", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        "Live Screen Mirroring",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                        text = if (isScreenCasting) "Streaming live to Web Portal (/screencast)" else "Stream device screen to any browser",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
 
                 if (!isScreenCasting) {
                     FilledTonalButton(
                         onClick = onStartCast,
-                        shape = RoundedCornerShape(12.dp),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                        shape = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
                     ) {
-                        Icon(Icons.Default.Videocam, contentDescription = null, modifier = Modifier.size(15.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Start Cast", style = MaterialTheme.typography.labelMedium)
+                        Icon(Icons.Default.Cast, contentDescription = null, modifier = Modifier.size(15.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Start Mirror", style = MaterialTheme.typography.labelMedium)
                     }
                 } else {
                     Button(
                         onClick = onStopCast,
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
-                        shape = RoundedCornerShape(12.dp),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                        shape = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
                     ) {
-                        Icon(Icons.Default.VideocamOff, contentDescription = null, modifier = Modifier.size(15.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Stop Cast", style = MaterialTheme.typography.labelMedium)
+                        Icon(Icons.Default.CastConnected, contentDescription = null, modifier = Modifier.size(15.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Stop Mirror", style = MaterialTheme.typography.labelMedium)
                     }
                 }
             }
@@ -983,14 +1507,14 @@ private fun ScreenCastCard(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text("Resolution", style = MaterialTheme.typography.bodyMedium)
+                Text("Quality", style = MaterialTheme.typography.bodySmall)
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     listOf("1080p", "720p", "480p").forEach { res ->
                         FilterChip(
                             selected = screenResolution == res,
                             onClick = { onResolutionChange(res) },
                             label = { Text(res, style = MaterialTheme.typography.labelSmall) },
-                            shape = RoundedCornerShape(10.dp)
+                            shape = RoundedCornerShape(8.dp)
                         )
                     }
                 }
@@ -1001,14 +1525,14 @@ private fun ScreenCastCard(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text("Rotation", style = MaterialTheme.typography.bodyMedium)
+                Text("Orientation", style = MaterialTheme.typography.bodySmall)
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     listOf(0 to "0°", 90 to "90°", 180 to "180°", 270 to "270°").forEach { (deg, label) ->
                         FilterChip(
                             selected = screenRotation == deg,
                             onClick = { onRotationChange(deg) },
                             label = { Text(label, style = MaterialTheme.typography.labelSmall) },
-                            shape = RoundedCornerShape(10.dp)
+                            shape = RoundedCornerShape(8.dp)
                         )
                     }
                 }

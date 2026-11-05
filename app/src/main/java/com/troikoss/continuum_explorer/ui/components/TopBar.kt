@@ -677,7 +677,7 @@ fun TopBar(
                 }
             }
 
-            Spacer(modifier = Modifier.width(6.dp))
+            Spacer(modifier = Modifier.width(2.dp))
             IconButton(
                 onClick = {
                     if (searchBar) {
@@ -687,19 +687,220 @@ fun TopBar(
                         addressBar = false
                     }
                 },
-                modifier = Modifier.padding(start = 2.dp)
+                modifier = Modifier.size(36.dp)
             ) {
-                Icon(Icons.Default.Search, contentDescription = stringResource(R.string.search))
+                Icon(Icons.Default.Search, contentDescription = stringResource(R.string.search), modifier = Modifier.size(20.dp))
             }
+
+            // QUICK VIEW MODE & COLUMN COUNT SWITCHER
+            var viewMenuExpanded by remember { mutableStateOf(false) }
+            val activeViewMode = appState.folderConfigs.viewMode
+            val currentStorageKey = appState.getCurrentStorageKey()
+
             Box {
-                IconButton(onClick = { optionsMenuExpanded = true }) {
-                    Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.options))
+                IconButton(
+                    onClick = { viewMenuExpanded = true },
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    val viewIcon = when (activeViewMode) {
+                        com.troikoss.continuum_explorer.model.ViewMode.DETAILS -> Icons.Default.TableRows
+                        com.troikoss.continuum_explorer.model.ViewMode.CONTENT -> Icons.Default.ViewList
+                        com.troikoss.continuum_explorer.model.ViewMode.GRID -> Icons.Default.GridView
+                        com.troikoss.continuum_explorer.model.ViewMode.GALLERY -> Icons.Default.Collections
+                    }
+                    Icon(
+                        imageVector = viewIcon,
+                        contentDescription = "Change View Layout & Columns",
+                        modifier = Modifier.size(20.dp),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
+
+                DropdownMenu(
+                    expanded = viewMenuExpanded,
+                    onDismissRequest = { viewMenuExpanded = false },
+                    modifier = Modifier.width(250.dp)
+                ) {
+                    Text(
+                        text = "Layout Mode",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
+                    )
+
+                    val viewModes = listOf(
+                        Triple(com.troikoss.continuum_explorer.model.ViewMode.DETAILS, "Details (Table)", Icons.Default.TableRows),
+                        Triple(com.troikoss.continuum_explorer.model.ViewMode.CONTENT, "List (Compact)", Icons.Default.ViewList),
+                        Triple(com.troikoss.continuum_explorer.model.ViewMode.GRID, "Grid (Cards)", Icons.Default.GridView),
+                        Triple(com.troikoss.continuum_explorer.model.ViewMode.GALLERY, "Gallery (Tiles)", Icons.Default.Collections)
+                    )
+
+                    viewModes.forEach { (mode, label, icon) ->
+                        val isSelected = activeViewMode == mode
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    text = label,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                )
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = icon,
+                                    contentDescription = null,
+                                    tint = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            },
+                            trailingIcon = {
+                                if (isSelected) {
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            },
+                            onClick = {
+                                appState.folderConfigs.updateViewMode(mode, currentStorageKey)
+                            }
+                        )
+                    }
+
+                    if (activeViewMode == com.troikoss.continuum_explorer.model.ViewMode.GRID ||
+                        activeViewMode == com.troikoss.continuum_explorer.model.ViewMode.GALLERY
+                    ) {
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                        androidx.compose.foundation.layout.Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 6.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceBetween,
+                                verticalAlignment = CenterVertically
+                            ) {
+                                Text("Grid Columns", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    "${appState.folderConfigs.gridColumnCount} cols",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                            Slider(
+                                value = appState.folderConfigs.gridColumnCount.toFloat(),
+                                onValueChange = {
+                                    appState.folderConfigs.updateGridColumnCount(it.toInt(), currentStorageKey)
+                                },
+                                valueRange = 2f..6f,
+                                steps = 3,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceBetween,
+                                verticalAlignment = CenterVertically
+                            ) {
+                                Text("Icon / Tile Size", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    "${appState.folderConfigs.gridItemSize}%",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                            Slider(
+                                value = appState.folderConfigs.gridItemSize.toFloat(),
+                                onValueChange = {
+                                    appState.folderConfigs.updateGridSize(it.toInt(), currentStorageKey)
+                                },
+                                valueRange = 60f..200f,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    }
+
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+
+                    DropdownMenuItem(
+                        text = { Text("Folders First") },
+                        trailingIcon = {
+                            Checkbox(
+                                checked = appState.folderConfigs.foldersFirst,
+                                onCheckedChange = null
+                            )
+                        },
+                        onClick = {
+                            appState.folderConfigs.toggleFoldersFirst(currentStorageKey) { appState.refresh() }
+                        }
+                    )
+
+                    DropdownMenuItem(
+                        text = { Text("Group Items") },
+                        trailingIcon = {
+                            Checkbox(
+                                checked = appState.folderConfigs.isGroupingEnabled,
+                                onCheckedChange = null
+                            )
+                        },
+                        onClick = {
+                            appState.folderConfigs.toggleGrouping(currentStorageKey) { appState.refresh() }
+                        }
+                    )
+                }
+            }
+
+            // FULL-SCREEN TOGGLE (Hides/Shows Top TabBar)
+            val isFullScreen by SettingsManager.isFullScreenTabBarHidden
+            IconButton(
+                onClick = { SettingsManager.toggleFullScreenTabBar() },
+                modifier = Modifier.size(36.dp)
+            ) {
+                Icon(
+                    imageVector = if (isFullScreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
+                    contentDescription = if (isFullScreen) "Exit Full Screen (Show Tabs)" else "Full Screen (Hide Tabs)",
+                    modifier = Modifier.size(20.dp),
+                    tint = if (isFullScreen) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                )
+            }
+
+            Box {
+                IconButton(onClick = { optionsMenuExpanded = true }, modifier = Modifier.size(36.dp)) {
+                    Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.options), modifier = Modifier.size(20.dp))
                 }
 
                 DropdownMenu(
                     expanded = optionsMenuExpanded,
                     onDismissRequest = { optionsMenuExpanded = false }
                 ) {
+                    DropdownMenuItem(
+                        text = { Text(if (isFullScreen) "Show Tab Bar" else "Full Screen (Hide Tab Bar)") },
+                        onClick = {
+                            optionsMenuExpanded = false
+                            SettingsManager.toggleFullScreenTabBar()
+                        },
+                        leadingIcon = {
+                            Icon(
+                                if (isFullScreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
+                                contentDescription = null
+                            )
+                        }
+                    )
+
+                    DropdownMenuItem(
+                        text = { Text(if (SettingsManager.showHiddenFiles.value) "Hide Hidden Files" else "Show Hidden Files") },
+                        onClick = {
+                            optionsMenuExpanded = false
+                            appState.folderConfigs.toggleShowHiddenFiles(currentStorageKey) { appState.refresh() }
+                        },
+                        leadingIcon = { Icon(Icons.Default.Visibility, contentDescription = null) }
+                    )
 
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.settings)) },

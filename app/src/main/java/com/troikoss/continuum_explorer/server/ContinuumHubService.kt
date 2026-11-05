@@ -8,15 +8,17 @@ import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Binder
 import android.os.Build
+import android.os.Environment
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
-import android.os.Environment
 import com.troikoss.continuum_explorer.R
+import com.troikoss.continuum_explorer.managers.FtpBucketManager
 import com.troikoss.continuum_explorer.managers.FtpHostedMode
 import com.troikoss.continuum_explorer.managers.SettingsManager
 import com.troikoss.continuum_explorer.ui.activities.MainActivity
 import kotlinx.coroutines.*
+import java.io.File
 import java.net.Inet4Address
 import java.net.NetworkInterface
 
@@ -24,10 +26,10 @@ import java.net.NetworkInterface
  * ContinuumHubService
  *
  * Standalone Android foreground Service that manages:
- * 1. Ktor embedded server (Netty) on port 8080 with WebSockets and HTML DSL Dashboard.
- * 2. Apache FTP Server daemon on port 2121.
+ * 1. Ktor embedded server (Netty) on port 8080 with WebSockets, Self-Hosted Website static engine, and Responsive Web Portal.
+ * 2. Apache FTP Server daemon on configurable port (default 2121).
  * 3. MediaProjection screen casting pumped through `/screencast` WebSocket route.
- * 4. Resilient Foreground Service notification channel for external displays & Samsung DeX.
+ * 4. Hot-reload support (`ACTION_RELOAD`) when switching between FTP File Sharing and Self-Hosted Website modes.
  */
 class ContinuumHubService : Service() {
 
@@ -38,6 +40,7 @@ class ContinuumHubService : Service() {
 
         const val ACTION_START = "com.troikoss.continuum_explorer.server.ACTION_START"
         const val ACTION_STOP = "com.troikoss.continuum_explorer.server.ACTION_STOP"
+        const val ACTION_RELOAD = "com.troikoss.continuum_explorer.server.ACTION_RELOAD"
         const val ACTION_START_SCREENCAST = "com.troikoss.continuum_explorer.server.ACTION_START_SCREENCAST"
         const val ACTION_STOP_SCREENCAST = "com.troikoss.continuum_explorer.server.ACTION_STOP_SCREENCAST"
 
@@ -132,6 +135,14 @@ class ContinuumHubService : Service() {
             }
         }
 
+        fun reloadIfRunning(context: Context) {
+            if (!isRunning) return
+            val intent = Intent(context, ContinuumHubService::class.java).apply {
+                action = ACTION_RELOAD
+            }
+            context.startService(intent)
+        }
+
         fun stopService(context: Context) {
             val intent = Intent(context, ContinuumHubService::class.java).apply {
                 action = ACTION_STOP
@@ -193,7 +204,13 @@ class ContinuumHubService : Service() {
 
             ACTION_START -> {
                 startForegroundWithNotification()
-                initializeServers()
+                initializeServers(forceRestart = false)
+            }
+
+            ACTION_RELOAD -> {
+                if (isRunning) {
+                    initializeServers(forceRestart = true)
+                }
             }
 
             ACTION_START_SCREENCAST -> {
@@ -201,7 +218,7 @@ class ContinuumHubService : Service() {
                 val data = intent?.getParcelableExtra<Intent>(EXTRA_PROJECTION_DATA)
                 if (resultCode == Activity.RESULT_OK && data != null) {
                     startForegroundWithNotification(isProjection = true)
-                    initializeServers()
+                    initializeServers(forceRestart = false)
                     setupMediaProjection(resultCode, data)
                 }
             }
@@ -222,7 +239,7 @@ class ContinuumHubService : Service() {
                 "Continuum Hub Network & Cast Service",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Runs local HTTP dashboard, FTP daemon, and live screen casting"
+                description = "Runs local HTTP dashboard, self-hosted website server, FTP daemon, and live screen casting"
                 setShowBadge(false)
             }
             val manager = getSystemService(NotificationManager::class.java)
@@ -260,10 +277,10 @@ class ContinuumHubService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0)
         )
 
-        val statusText = "Run time: ${getFormattedUptime()}"
+        val statusText = "IP: $serverIpAddress • Run time: ${getFormattedUptime()}"
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Explorer")
+            .setContentTitle("Continuum Server Hub")
             .setContentText(statusText)
             .setSmallIcon(R.drawable.ic_network_server)
             .setContentIntent(pendingIntent)
@@ -299,10 +316,51 @@ class ContinuumHubService : Service() {
         manager?.notify(NOTIFICATION_ID, notification)
     }
 
-    private fun initializeServers() {
-        if (isRunning) return
+    private fun resolveTargetRootAndEntryHtml(
+        hostedMode: FtpHostedMode,
+        customPath: String
+    ): Pair<File, File?> {
+        val defaultStorage = Environment.getExternalStorageDirectory()
+        return when (hostedMode) {
+            FtpHostedMode.CUSTOM_FOLDER -> {
+                val target = if (customPath.isNotBlank()) File(customPath) else null
+                if (target != null && target.exists()) {
+                    if (target.isFile) {
+                        val parentDir = target.parentFile ?: defaultStorage
+                        Pair(parentDir, target)
+                    } else {
+                        val indexFile = File(target, "index.html").takeIf { it.exists() && it.isFile }
+                            ?: File(target, "index.htm").takeIf { it.exists() && it.isFile }
+                            ?: target.listFiles()?.firstOrNull {
+                                it.isFile && (it.name.endsWith(".html", ignoreCase = true) || it.name.endsWith(".htm", ignoreCase = true))
+                            }
+                        Pair(target, indexFile)
+                    }
+                } else {
+                    Pair(defaultStorage, null)
+                }
+            }
+            FtpHostedMode.BATCH_FILES -> {
+                FtpBucketManager.initialize(applicationContext)
+                if (FtpBucketManager.bucketItems.isNotEmpty()) {
+                    Pair(FtpBucketManager.prepareBucketDirectory(applicationContext), null)
+                } else {
+                    Pair(defaultStorage, null)
+                }
+            }
+            FtpHostedMode.FULL_STORAGE -> {
+                Pair(defaultStorage, null)
+            }
+        }
+    }
+
+    private fun initializeServers(forceRestart: Boolean = false) {
+        if (isRunning && !forceRestart) return
+        val wasAlreadyRunning = isRunning
         isRunning = true
-        startTimeMillis = System.currentTimeMillis()
+        if (!wasAlreadyRunning || startTimeMillis == 0L) {
+            startTimeMillis = System.currentTimeMillis()
+        }
         serverIpAddress = resolveLocalIpAddress()
 
         val port = SettingsManager.ftpPort.value
@@ -313,25 +371,25 @@ class ContinuumHubService : Service() {
         val hostedMode = SettingsManager.ftpHostedMode.value
         val customPath = SettingsManager.ftpHostedPath.value
 
-        val targetRootDir = when (hostedMode) {
-            FtpHostedMode.CUSTOM_FOLDER -> {
-                if (customPath.isNotBlank() && java.io.File(customPath).exists()) java.io.File(customPath)
-                else Environment.getExternalStorageDirectory()
-            }
-            FtpHostedMode.BATCH_FILES -> {
-                com.troikoss.continuum_explorer.managers.FtpBucketManager.prepareBucketDirectory(applicationContext)
-            }
-            else -> Environment.getExternalStorageDirectory()
-        }
-
         activeFtpPort = port
 
         serviceScope.launch {
-            // Start Ktor HTTP & WebSockets Server
+            if (forceRestart) {
+                try { ktorServer?.stop() } catch (_: Exception) {}
+                try { ftpServer?.stop() } catch (_: Exception) {}
+                ktorServer = null
+                ftpServer = null
+            }
+
+            val (targetRootDir, entryHtmlFile) = resolveTargetRootAndEntryHtml(hostedMode, customPath)
+
+            // Start Ktor HTTP, Self-Hosted Website & WebSockets Server
             ktorServer = KtorEmbeddedServer(
                 context = applicationContext,
                 port = 8080,
                 rootDirectory = targetRootDir,
+                hostedMode = hostedMode,
+                entryHtmlFile = entryHtmlFile,
                 getScreenCastManager = { screenCastManager }
             ).apply {
                 start()
@@ -354,11 +412,13 @@ class ContinuumHubService : Service() {
                 updateNotification()
             }
 
-            while (isActive && isRunning) {
-                delay(1000L)
-                withContext(Dispatchers.Main) {
-                    if (isRunning) {
-                        updateNotification()
+            if (!wasAlreadyRunning) {
+                while (isActive && isRunning) {
+                    delay(1000L)
+                    withContext(Dispatchers.Main) {
+                        if (isRunning) {
+                            updateNotification()
+                        }
                     }
                 }
             }
@@ -367,6 +427,7 @@ class ContinuumHubService : Service() {
 
     private fun setupMediaProjection(resultCode: Int, data: Intent) {
         try {
+            stopMediaProjection()
             val projectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
             mediaProjection = projectionManager.getMediaProjection(resultCode, data)
 
@@ -406,7 +467,7 @@ class ContinuumHubService : Service() {
         ftpServer = null
 
         // Stop heavy server sockets asynchronously on IO to eliminate UI lag
-        kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+        CoroutineScope(Dispatchers.IO).launch {
             try {
                 oldKtor?.stop()
             } catch (e: Exception) {

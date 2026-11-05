@@ -6,6 +6,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -48,21 +49,21 @@ fun DetailsHeader(appState: FileExplorerState, scrollState: ScrollState) {
     val density = LocalDensity.current
     var showColumnMenu by remember { mutableStateOf(false) }
     var columnMenuOffset by remember { mutableStateOf(DpOffset.Zero) }
-    val nameColumnWidth = appState.folderConfigs.columnWidths.getOrElse(FileColumnType.NAME) { Dp.Unspecified }
+    val nameColumnWidth = appState.folderConfigs.columnWidths.getOrElse(FileColumnType.NAME) { 210.dp }
 
-
-    Box {
+    Box(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
+                .fillMaxWidth()
                 .horizontalScroll(scrollState)
-                .padding(horizontal = 8.dp, vertical = 12.dp)
+                .padding(horizontal = 10.dp, vertical = 10.dp)
                 .contextMenuDetector(enableLongPress = true, aggressive = true) { offset: Offset ->
                     columnMenuOffset = with(density) { DpOffset(offset.x.toDp(), offset.y.toDp()) }
                     showColumnMenu = true
                 },
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Spacer(Modifier.width(36.dp))
+            Spacer(Modifier.width(34.dp))
 
             SortableHeaderLabel(
                 label = stringResource(R.string.details_header_name),
@@ -79,23 +80,23 @@ fun DetailsHeader(appState: FileExplorerState, scrollState: ScrollState) {
                 // handle at index 0 → resizes Name; handle at index N → resizes visibleColumns[N-1]
                 val prevColumnType = if (index == 0) FileColumnType.NAME
                                      else appState.folderConfigs.visibleColumns[index - 1].type
-                val prevMinWidth = if (index == 0) 75.dp
+                val prevMinWidth = if (index == 0) 90.dp
                                    else appState.folderConfigs.visibleColumns[index - 1].minWidth
 
                 VerticalResizeHandle(
                     onResize = { delta ->
                         val w = appState.folderConfigs.columnWidths[prevColumnType] ?: prevMinWidth
-                        appState.folderConfigs.columnWidths[prevColumnType] = (w + delta).coerceIn(75.dp, 800.dp)
+                        appState.folderConfigs.columnWidths[prevColumnType] = (w + delta).coerceIn(70.dp, 800.dp)
                         appState.folderConfigs.saveColumnWidths(appState.getCurrentStorageKey())
                     },
-                    modifier = Modifier.height(24.dp)
+                    modifier = Modifier.height(22.dp)
                 )
 
                 SortableHeaderLabel(
                     label = column.label,
                     modifier = Modifier
                         .width(currentWidth)
-                        .padding(start = 8.dp),
+                        .padding(start = 6.dp),
                     isActive = appState.folderConfigs.sortParams.columnType == column.type,
                     order = appState.folderConfigs.sortParams.order,
                     onClick = { appState.folderConfigs.toggleSort(column.type, appState.getCurrentStorageKey()) { appState.refresh() } }

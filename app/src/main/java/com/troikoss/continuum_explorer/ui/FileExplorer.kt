@@ -422,21 +422,24 @@ private fun ExplorerTopBar(
     appState: FileExplorerState
 ) {
     if (appState.isVideoFullScreen) return
+    val isFullScreenTabHidden by SettingsManager.isFullScreenTabBarHidden
 
     Column(
         modifier = Modifier
             .background(MaterialTheme.colorScheme.surface)
             .statusBarsPadding()
     ) {
-        TabBar(
-            tabs = tabs.map { it.currentName },
-            selectedTabIndex = selectedTabIndex,
-            onTabSelected = onTabSelected,
-            onAddTab = onAddTab,
-            onCloseTab = onCloseTab,
-            onMenuClick = onMenuClick,
-            appState = appState
-        )
+        if (!isFullScreenTabHidden) {
+            TabBar(
+                tabs = tabs.map { it.currentName },
+                selectedTabIndex = selectedTabIndex,
+                onTabSelected = onTabSelected,
+                onAddTab = onAddTab,
+                onCloseTab = onCloseTab,
+                onMenuClick = onMenuClick,
+                appState = appState
+            )
+        }
 
         val isSpecialPageOrEditor = appState.libraryItem == LibraryItem.FtpServer ||
                 appState.libraryItem == LibraryItem.VibeArea ||
@@ -471,24 +474,15 @@ private fun ExplorerBody(
     val navPaneWidth = appState.appConfigs.navPaneWidth
     val detailsPaneWidth = appState.appConfigs.detailsPaneWidth
 
-    val isSpecialPage = appState.libraryItem == LibraryItem.FtpServer ||
-            appState.libraryItem == LibraryItem.VibeArea ||
-            appState.libraryItem == LibraryItem.ExternalFtp
-
     Column(modifier = modifier.fillMaxSize()) {
         Row(
             modifier = Modifier
                 .weight(1f)
-                .padding(
-                    start = if (isSpecialPage || appState.viewingFile != null) 0.dp else 8.dp,
-                    end = if (isSpecialPage || appState.viewingFile != null) 0.dp else 8.dp,
-                    bottom = if (appState.viewingFile != null) 0.dp else 8.dp,
-                    top = 0.dp
-                )
+                .fillMaxWidth()
         ) {
             // Navigation Pane (Side)
             if (appState.viewingFile == null && screenSize != ScreenSize.SMALL) {
-                Box(modifier = Modifier.fillMaxHeight().padding(end = 8.dp)) {
+                Box(modifier = Modifier.fillMaxHeight().padding(start = 4.dp, end = 4.dp, bottom = 4.dp)) {
                     PermanentDrawerSheet(
                         modifier = Modifier.width(navPaneWidth).fillMaxHeight(),
                         windowInsets = WindowInsets(0, 0, 0, 0),

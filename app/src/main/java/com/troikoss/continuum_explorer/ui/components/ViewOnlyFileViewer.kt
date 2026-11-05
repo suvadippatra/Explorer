@@ -1,25 +1,33 @@
 package com.troikoss.continuum_explorer.ui.components
 
 import android.content.Intent
+import android.os.Environment
+import android.text.format.Formatter
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.FolderOpen
-import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.exifinterface.media.ExifInterface
+import com.troikoss.continuum_explorer.managers.SettingsManager
 import com.troikoss.continuum_explorer.model.UniversalFile
 import com.troikoss.continuum_explorer.ui.editor.NativeImageViewerEditor
 import com.troikoss.continuum_explorer.ui.editor.pdf.PdfViewerEngine
@@ -31,14 +39,29 @@ import com.troikoss.continuum_explorer.ui.preview.ImageFullPageView
 import com.troikoss.continuum_explorer.ui.preview.TextFullPageView
 import com.troikoss.continuum_explorer.ui.preview.UnsupportedFullPageView
 import com.troikoss.continuum_explorer.utils.FileExplorerState
+import com.troikoss.continuum_explorer.utils.GlobalEvents
 import com.troikoss.continuum_explorer.utils.getUriForUniversalFile
 import com.troikoss.continuum_explorer.utils.navigateTo
 import com.troikoss.continuum_explorer.utils.shareFiles
+import com.troikoss.continuum_explorer.utils.toUniversal
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
+import java.security.MessageDigest
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
  * Modular Full-Page File Viewer & Editor Router.
- * Adheres to INSTRUCTION.md: flush Heading (Action Bar) directly beneath the Title Bar (Tab Bar)
- * with zero middle gaps, delegating file rendering and editing to dedicated modular engines.
+ * Displays top bar information and actions in logical order:
+ * 1. File Name & Format/Size Subtitle
+ * 2. Edit Option (for supported editable files)
+ * 3. Metadata View / Edit Option (Inline Rename, EXIF Tag Editor, Checksums, Attributes)
+ * 4. Delete Action (with confirmation)
+ * 5. Share & Open External
+ * 6. Full-Screen Toggle (Hides/Shows Top TabBar)
  */
 @Composable
 fun ViewOnlyFileViewer(
@@ -52,8 +75,11 @@ fun ViewOnlyFileViewer(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val clipboardManager = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
-    val ext = file.name.substringAfterLast('.', "").lowercase()
+
+    var currentFile by remember(file) { mutableStateOf(file) }
+    val ext = remember(currentFile.name) { currentFile.name.substringAfterLast('.', "").lowercase() }
 
     val isPdf = ext == "pdf"
     val isImage = ext in listOf("jpg", "jpeg", "png", "gif", "webp", "bmp", "heic", "heif", "ico", "svg")
@@ -65,7 +91,11 @@ fun ViewOnlyFileViewer(
         "kt", "java", "py", "js", "ts", "html", "htm", "css", "c", "cpp", "h",
         "sh", "yaml", "yml", "ini", "conf", "properties", "gradle", "sql",
         "org", "adoc", "asciidoc", "wiki", "toml"
-    ) || file.name.lowercase().let { it == "todo.txt" || it == "done.txt" || it == "readme" || it == "license" }
+    ) || currentFile.name.lowercase().let { it == "todo.txt" || it == "done.txt" || it == "readme" || it == "license" }
+
+    var showMetadataDialog by remember { mutableStateOf(false) }
+    var showDeleteConfirmDialog by remember { mutableStateOf(false) }
+    val isFullScreen by SettingsManager.isFullScreenTabBarHidden
 
     BackHandler {
         when {
@@ -75,16 +105,15 @@ fun ViewOnlyFileViewer(
         }
     }
 
-    // If opened in Edit Mode, delegate directly to MarkorTextEngine or PhotoEditorEngine
+    // If opened in Edit Mode, delegate directly to MarkorTextEngine or NativeImageViewerEditor
     if (appState.openInEditMode) {
         when {
             isText -> {
                 MarkorTextEngine(
-                    file = file,
+                    file = currentFile,
                     appState = appState,
                     onMenuClick = {
                         appState.openInEditMode = false
-                        onClose()
                     },
                     modifier = modifier.fillMaxSize()
                 )
@@ -92,11 +121,10 @@ fun ViewOnlyFileViewer(
             }
             isImage -> {
                 NativeImageViewerEditor(
-                    file = file,
+                    file = currentFile,
                     appState = appState,
                     onMenuClick = {
                         appState.openInEditMode = false
-                        onClose()
                     },
                     modifier = modifier.fillMaxSize()
                 )
@@ -105,19 +133,23 @@ fun ViewOnlyFileViewer(
         }
     }
 
+    val formattedSize = remember(currentFile.length) {
+        if (currentFile.length > 0) Formatter.formatFileSize(context, currentFile.length) else "0 B"
+    }
+
     Column(
         modifier = modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.surface)
     ) {
-        // Flush Heading (Action Bar) directly beneath Title Bar (Tab Bar) for non-PDF / non-fullscreen video
-        if (!isPdf && !(isVideo && appState.isVideoFullScreen)) {
+        // Logical Action Bar directly beneath Title Bar (Tab Bar)
+        if (!(isVideo && appState.isVideoFullScreen)) {
             Surface(
                 color = MaterialTheme.colorScheme.surfaceContainer,
                 tonalElevation = 2.dp,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(48.dp)
+                    .height(50.dp)
             ) {
                 Row(
                     modifier = Modifier
@@ -126,6 +158,7 @@ fun ViewOnlyFileViewer(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
+                    // 1. Back Button + File Name & Subtitle
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.weight(1f)
@@ -134,19 +167,30 @@ fun ViewOnlyFileViewer(
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                         }
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = file.name,
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = currentFile.name,
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = "${ext.uppercase().ifEmpty { "FILE" }} • $formattedSize",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     }
 
+                    // 2. Logical Action Buttons Order: Edit -> Metadata -> Delete -> Share -> External -> Fullscreen
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        horizontalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
+                        // A. EDIT OPTION (or Browse Tab for Archives)
                         if (isText || isImage) {
                             FilledTonalButton(
                                 onClick = { appState.openInEditMode = true },
@@ -157,18 +201,16 @@ fun ViewOnlyFileViewer(
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text("Edit", style = MaterialTheme.typography.labelMedium)
                             }
-                        }
-
-                        if (isArchive) {
+                        } else if (isArchive) {
                             FilledTonalButton(
                                 onClick = {
-                                    val fRef = file.fileRef
+                                    val fRef = currentFile.fileRef
                                     onClose()
                                     appState.navigateTo(
                                         newPath = null,
                                         newUri = null,
                                         archiveFile = fRef,
-                                        archiveUri = if (fRef == null) file.documentFileRef?.uri else null
+                                        archiveUri = if (fRef == null) currentFile.documentFileRef?.uri else null
                                     )
                                 },
                                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
@@ -176,20 +218,52 @@ fun ViewOnlyFileViewer(
                             ) {
                                 Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(15.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("Browse Tab", style = MaterialTheme.typography.labelMedium)
+                                Text("Browse", style = MaterialTheme.typography.labelMedium)
                             }
                         }
 
+                        // B. METADATA VIEW / EDIT OPTION
                         IconButton(
-                            onClick = { shareFiles(context, scope, listOf(file)) },
+                            onClick = { showMetadataDialog = true },
                             modifier = Modifier.size(36.dp)
                         ) {
-                            Icon(Icons.Default.Share, contentDescription = "Share")
+                            Icon(
+                                Icons.Default.Info,
+                                contentDescription = "View & Edit Metadata",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(20.dp)
+                            )
                         }
 
+                        // C. DELETE ACTION
+                        IconButton(
+                            onClick = { showDeleteConfirmDialog = true },
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.DeleteOutline,
+                                contentDescription = "Delete File",
+                                tint = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+
+                        // D. SHARE ACTION
+                        IconButton(
+                            onClick = { shareFiles(context, scope, listOf(currentFile)) },
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Share,
+                                contentDescription = "Share",
+                                modifier = Modifier.size(19.dp)
+                            )
+                        }
+
+                        // E. OPEN EXTERNALLY
                         IconButton(
                             onClick = {
-                                val uri = getUriForUniversalFile(context, file)
+                                val uri = getUriForUniversalFile(context, currentFile)
                                 if (uri != null) {
                                     val intent = Intent(Intent.ACTION_VIEW).apply {
                                         setDataAndType(uri, "*/*")
@@ -201,7 +275,24 @@ fun ViewOnlyFileViewer(
                             },
                             modifier = Modifier.size(36.dp)
                         ) {
-                            Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = "Open Externally")
+                            Icon(
+                                Icons.AutoMirrored.Filled.OpenInNew,
+                                contentDescription = "Open Externally",
+                                modifier = Modifier.size(19.dp)
+                            )
+                        }
+
+                        // F. FULL-SCREEN TOGGLE (Hides/Shows Top TabBar)
+                        IconButton(
+                            onClick = { SettingsManager.toggleFullScreenTabBar() },
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (isFullScreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
+                                contentDescription = if (isFullScreen) "Exit Full Screen" else "Full Screen",
+                                tint = if (isFullScreen) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.size(20.dp)
+                            )
                         }
                     }
                 }
@@ -213,46 +304,425 @@ fun ViewOnlyFileViewer(
             when {
                 isPdf -> {
                     PdfViewerEngine(
-                        file = file,
+                        file = currentFile,
                         appState = appState,
                         modifier = Modifier.fillMaxSize()
                     )
                 }
                 isImage -> {
-                    ImageFullPageView(file = file)
+                    ImageFullPageView(file = currentFile)
                 }
                 isAudio -> {
                     DedicatedAudioPlayerView(
-                        file = file,
+                        file = currentFile,
                         appState = appState,
                         onClose = onClose
                     )
                 }
                 isVideo -> {
                     DedicatedVideoPlayerView(
-                        file = file,
+                        file = currentFile,
                         appState = appState,
                         onClose = onClose
                     )
                 }
                 isArchive -> {
                     ArchiveFullPageView(
-                        file = file,
+                        file = currentFile,
                         appState = appState,
                         onClose = onClose
                     )
                 }
                 isText -> {
                     TextFullPageView(
-                        file = file,
+                        file = currentFile,
                         appState = appState
                     )
                 }
                 else -> {
                     UnsupportedFullPageView(
-                        file = file,
+                        file = currentFile,
                         appState = appState
                     )
+                }
+            }
+        }
+    }
+
+    // Delete Confirmation Dialog
+    if (showDeleteConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirmDialog = false },
+            icon = { Icon(Icons.Default.DeleteForever, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+            title = { Text("Delete File?", fontWeight = FontWeight.Bold) },
+            text = {
+                Text("Are you sure you want to delete \"${currentFile.name}\"?")
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showDeleteConfirmDialog = false
+                        scope.launch(Dispatchers.IO) {
+                            val fRef = currentFile.fileRef ?: (currentFile.absolutePath.takeIf { it.startsWith("/") }?.let { File(it) })
+                            val deleted = try {
+                                fRef?.delete() ?: currentFile.documentFileRef?.delete() ?: false
+                            } catch (_: Exception) {
+                                false
+                            }
+                            withContext(Dispatchers.Main) {
+                                if (deleted) {
+                                    Toast.makeText(context, "Deleted ${currentFile.name}", Toast.LENGTH_SHORT).show()
+                                    appState.refresh()
+                                    GlobalEvents.triggerRefresh()
+                                    onClose()
+                                } else {
+                                    Toast.makeText(context, "Could not delete file", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Delete")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirmDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // Interactive Metadata View & Edit Modal
+    if (showMetadataDialog) {
+        FileMetadataEditorDialog(
+            file = currentFile,
+            isImage = isImage,
+            onDismiss = { showMetadataDialog = false },
+            onFileRenamed = { updatedUniversalFile ->
+                currentFile = updatedUniversalFile
+                appState.viewingFile = updatedUniversalFile
+                appState.refresh()
+                GlobalEvents.triggerRefresh()
+            },
+            onCopyText = { label, value ->
+                clipboardManager.setText(AnnotatedString(value))
+                Toast.makeText(context, "$label copied", Toast.LENGTH_SHORT).show()
+            }
+        )
+    }
+}
+
+@Composable
+private fun FileMetadataEditorDialog(
+    file: UniversalFile,
+    isImage: Boolean,
+    onDismiss: () -> Unit,
+    onFileRenamed: (UniversalFile) -> Unit,
+    onCopyText: (String, String) -> Unit
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val fileRef = remember(file) { file.fileRef ?: (file.absolutePath.takeIf { it.startsWith("/") }?.let { File(it) }) }
+
+    var renameInput by remember(file) { mutableStateOf(file.name) }
+    var exifArtist by remember { mutableStateOf("") }
+    var exifCopyright by remember { mutableStateOf("") }
+    var exifDescription by remember { mutableStateOf("") }
+    var exifMake by remember { mutableStateOf("") }
+    var exifModel by remember { mutableStateOf("") }
+    var exifDateTime by remember { mutableStateOf("") }
+    var hasGps by remember { mutableStateOf(false) }
+
+    var md5Hash by remember { mutableStateOf("Calculating...") }
+    var sha256Hash by remember { mutableStateOf("Calculating...") }
+
+    val canEditExif = remember(fileRef, isImage) {
+        val ext = file.name.substringAfterLast('.', "").lowercase()
+        isImage && fileRef != null && fileRef.exists() && ext in listOf("jpg", "jpeg", "png", "webp")
+    }
+
+    LaunchedEffect(fileRef) {
+        withContext(Dispatchers.IO) {
+            if (fileRef != null && fileRef.exists()) {
+                // Load EXIF if applicable
+                if (canEditExif) {
+                    runCatching {
+                        val exif = ExifInterface(fileRef.absolutePath)
+                        exifArtist = exif.getAttribute(ExifInterface.TAG_ARTIST) ?: ""
+                        exifCopyright = exif.getAttribute(ExifInterface.TAG_COPYRIGHT) ?: ""
+                        exifDescription = exif.getAttribute(ExifInterface.TAG_IMAGE_DESCRIPTION) ?: ""
+                        exifMake = exif.getAttribute(ExifInterface.TAG_MAKE) ?: ""
+                        exifModel = exif.getAttribute(ExifInterface.TAG_MODEL) ?: ""
+                        exifDateTime = exif.getAttribute(ExifInterface.TAG_DATETIME) ?: ""
+                        hasGps = exif.latLong != null
+                    }
+                }
+                // Compute Checksums (up to 64 MB for instant responsiveness)
+                if (fileRef.length() <= 64 * 1024 * 1024) {
+                    runCatching {
+                        val md5 = MessageDigest.getInstance("MD5")
+                        val sha256 = MessageDigest.getInstance("SHA-256")
+                        fileRef.inputStream().use { fis ->
+                            val buf = ByteArray(8192)
+                            var read: Int
+                            while (fis.read(buf).also { read = it } != -1) {
+                                md5.update(buf, 0, read)
+                                sha256.update(buf, 0, read)
+                            }
+                        }
+                        md5Hash = md5.digest().joinToString("") { "%02x".format(it) }
+                        sha256Hash = sha256.digest().joinToString("") { "%02x".format(it) }
+                    }.onFailure {
+                        md5Hash = "Unavailable"
+                        sha256Hash = "Unavailable"
+                    }
+                } else {
+                    md5Hash = "Skipped (> 64 MB)"
+                    sha256Hash = "Skipped (> 64 MB)"
+                }
+            } else {
+                md5Hash = "N/A (Stream)"
+                sha256Hash = "N/A (Stream)"
+            }
+        }
+    }
+
+    val fullPath = fileRef?.absolutePath ?: file.absolutePath
+    val formattedDate = remember(file.lastModified) {
+        if (file.lastModified > 0) {
+            SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date(file.lastModified))
+        } else "Unknown"
+    }
+    val formattedSize = remember(file.length) {
+        "${Formatter.formatFileSize(context, file.length)} (${file.length} bytes)"
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Icon(Icons.Default.Info, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                Text("File Metadata & Properties", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 440.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                // 1. Inline Rename & Extension Edit
+                Text("File Name & Extension", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                OutlinedTextField(
+                    value = renameInput,
+                    onValueChange = { renameInput = it },
+                    label = { Text("Name & Extension") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                HorizontalDivider()
+
+                // 2. Storage Attributes & Copyable Paths / Checksums
+                Text("Storage & Checksums", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+
+                MetadataRowItem(
+                    label = "Path",
+                    value = fullPath,
+                    onCopy = { onCopyText("Path", fullPath) }
+                )
+                MetadataRowItem(
+                    label = "Size",
+                    value = formattedSize,
+                    onCopy = { onCopyText("Size", formattedSize) }
+                )
+                MetadataRowItem(
+                    label = "Modified",
+                    value = formattedDate
+                )
+                if (fileRef != null) {
+                    val perms = buildString {
+                        append(if (fileRef.canRead()) "r" else "-")
+                        append(if (fileRef.canWrite()) "w" else "-")
+                        append(if (fileRef.canExecute()) "x" else "-")
+                        if (fileRef.isHidden) append(" (Hidden)")
+                    }
+                    MetadataRowItem(label = "Permissions", value = perms)
+                }
+                MetadataRowItem(
+                    label = "MD5",
+                    value = md5Hash,
+                    monospace = true,
+                    onCopy = { onCopyText("MD5", md5Hash) }
+                )
+                MetadataRowItem(
+                    label = "SHA-256",
+                    value = sha256Hash,
+                    monospace = true,
+                    onCopy = { onCopyText("SHA-256", sha256Hash) }
+                )
+
+                // 3. Editable EXIF Tags (for JPEG / PNG / WebP)
+                if (canEditExif) {
+                    HorizontalDivider()
+                    Text("Editable Image EXIF Tags", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+
+                    OutlinedTextField(
+                        value = exifArtist,
+                        onValueChange = { exifArtist = it },
+                        label = { Text("Artist / Author") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = exifCopyright,
+                        onValueChange = { exifCopyright = it },
+                        label = { Text("Copyright") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = exifDescription,
+                        onValueChange = { exifDescription = it },
+                        label = { Text("Description / Caption") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                        OutlinedTextField(
+                            value = exifMake,
+                            onValueChange = { exifMake = it },
+                            label = { Text("Camera Make") },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f)
+                        )
+                        OutlinedTextField(
+                            value = exifModel,
+                            onValueChange = { exifModel = it },
+                            label = { Text("Camera Model") },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+
+                    if (hasGps) {
+                        OutlinedButton(
+                            onClick = {
+                                scope.launch(Dispatchers.IO) {
+                                    runCatching {
+                                        val exif = ExifInterface(fileRef!!.absolutePath)
+                                        exif.setAttribute(ExifInterface.TAG_GPS_LATITUDE, null)
+                                        exif.setAttribute(ExifInterface.TAG_GPS_LONGITUDE, null)
+                                        exif.setAttribute(ExifInterface.TAG_GPS_ALTITUDE, null)
+                                        exif.saveAttributes()
+                                        hasGps = false
+                                    }
+                                    withContext(Dispatchers.Main) {
+                                        Toast.makeText(context, "GPS location stripped from image", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Default.LocationOff, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Strip GPS Location Metadata")
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    scope.launch(Dispatchers.IO) {
+                        var activeRef = fileRef
+                        val newName = renameInput.trim()
+
+                        // Save EXIF changes first
+                        if (canEditExif && activeRef != null && activeRef.exists()) {
+                            runCatching {
+                                val exif = ExifInterface(activeRef.absolutePath)
+                                exif.setAttribute(ExifInterface.TAG_ARTIST, exifArtist)
+                                exif.setAttribute(ExifInterface.TAG_COPYRIGHT, exifCopyright)
+                                exif.setAttribute(ExifInterface.TAG_IMAGE_DESCRIPTION, exifDescription)
+                                exif.setAttribute(ExifInterface.TAG_MAKE, exifMake)
+                                exif.setAttribute(ExifInterface.TAG_MODEL, exifModel)
+                                exif.saveAttributes()
+                            }
+                        }
+
+                        // Apply rename if modified
+                        var renamedFile: File? = null
+                        if (activeRef != null && activeRef.exists() && newName.isNotEmpty() && newName != file.name) {
+                            val target = File(activeRef.parentFile ?: Environment.getExternalStorageDirectory(), newName)
+                            if (activeRef.renameTo(target)) {
+                                renamedFile = target
+                            }
+                        }
+
+                        withContext(Dispatchers.Main) {
+                            if (renamedFile != null) {
+                                onFileRenamed(renamedFile.toUniversal())
+                                Toast.makeText(context, "Saved metadata & renamed to ${renamedFile.name}", Toast.LENGTH_SHORT).show()
+                            } else {
+                                Toast.makeText(context, "Metadata saved", Toast.LENGTH_SHORT).show()
+                            }
+                            onDismiss()
+                        }
+                    }
+                }
+            ) {
+                Text("Save Changes")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close")
+            }
+        },
+        shape = RoundedCornerShape(16.dp)
+    )
+}
+
+@Composable
+private fun MetadataRowItem(
+    label: String,
+    value: String,
+    monospace: Boolean = false,
+    onCopy: (() -> Unit)? = null
+) {
+    Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    text = value,
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        fontFamily = if (monospace) FontFamily.Monospace else FontFamily.Default,
+                        fontSize = 11.5.sp
+                    ),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            if (onCopy != null) {
+                IconButton(onClick = onCopy, modifier = Modifier.size(28.dp)) {
+                    Icon(Icons.Default.ContentCopy, contentDescription = "Copy $label", modifier = Modifier.size(15.dp))
                 }
             }
         }

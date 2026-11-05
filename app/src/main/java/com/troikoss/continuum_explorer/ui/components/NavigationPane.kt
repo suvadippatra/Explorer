@@ -1374,11 +1374,13 @@ private fun NavNetworkItem(
                                     .background(MaterialTheme.colorScheme.primary)
                             )
                         }
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(6.dp))
                         Text(
                             text = stringResource(R.string.nav_storage_usage_label, freeFormatted, totalFormatted),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 } else {
@@ -1457,17 +1459,17 @@ private fun NavStorageItem(
         Box(modifier = modifier.padding(NavigationDrawerItemDefaults.ItemPadding)) {
             NavigationDrawerItem(
                 label = {
-                    Column(modifier = Modifier.padding(vertical = 12.dp)) {
+                    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
                         Text(
                             text = label,
                             style = MaterialTheme.typography.labelLarge.copy(
-                                fontSize = 14.sp,
+                                fontSize = 13.5.sp,
                                 fontWeight = FontWeight.Medium
                             ),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(6.dp))
 
                         Box(
                             modifier = Modifier
@@ -1484,12 +1486,17 @@ private fun NavStorageItem(
                             )
                         }
 
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(6.dp))
 
                         Text(
                             text = stringResource(R.string.nav_storage_usage_label, freeFormatted, totalFormatted),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontSize = 11.sp,
+                                lineHeight = 13.sp
+                            ),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 },

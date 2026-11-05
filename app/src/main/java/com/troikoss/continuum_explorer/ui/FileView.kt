@@ -426,7 +426,7 @@ private fun FileDetailsView(
     val context = LocalContext.current
     val resources = LocalResources.current
 
-    val nameColumnWidth = appState.folderConfigs.columnWidths.getOrElse(FileColumnType.NAME) {Dp.Unspecified}
+    val nameColumnWidth = appState.folderConfigs.columnWidths.getOrElse(FileColumnType.NAME) { 210.dp }
 
     val tooltipState = rememberTooltipState()
     var isOverflowing by remember { mutableStateOf(false) }
@@ -438,12 +438,13 @@ private fun FileDetailsView(
     CompositionLocalProvider(LocalOverscrollConfiguration provides null) {
         Column(
             modifier = Modifier
+                .fillMaxWidth()
                 .then(if (hScrollState != null) Modifier.horizontalScroll(hScrollState) else Modifier)
         ) {
             Row(
                 modifier = Modifier
                     .selectionBackground(isSelected, isHovered, isLead, shape = shape)
-                    .padding(8.dp),
+                    .padding(horizontal = 10.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Box(modifier = Modifier.then(if (iconSelectionEnabled) Modifier.iconTouchToggle(file, appState.selectionManager) else Modifier)) {
@@ -453,7 +454,7 @@ private fun FileDetailsView(
                         contentSize = 24.dp,
                     )
                 }
-                Spacer(Modifier.width(12.dp))
+                Spacer(Modifier.width(10.dp))
                 if (appState.renamingFile == file) {
                     InlineRenameField(
                         file = file,
@@ -506,9 +507,10 @@ private fun FileDetailsView(
                     Spacer(Modifier.width(1.dp))
                     Text(
                         text = text,
-                        modifier = Modifier.width(width).padding(start = 8.dp),
+                        modifier = Modifier.width(width).padding(start = 6.dp),
                         style = MaterialTheme.typography.bodySmall,
-                        maxLines = 1
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }

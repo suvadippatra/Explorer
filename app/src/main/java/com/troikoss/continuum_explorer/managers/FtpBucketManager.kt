@@ -1,15 +1,17 @@
 package com.troikoss.continuum_explorer.managers
 
 import android.content.Context
+import android.system.Os
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import org.json.JSONArray
 import java.io.File
 
 /**
- * Manages items in the Bucket for FTP / File Serving.
- * Allows picking files/folders from internal storage, SD cards, and USB drives.
- * Prepares a hosted directory (symlinks or staging directory) to be cleanly served by Apache FTP and Ktor HTTP.
+ * Manages items in the Bucket for FTP / HTTP File Serving.
+ * Allows picking multiple files and folders from internal storage, SD cards, and USB drives.
+ * Prepares a virtual staging directory using fast OS symlinks (with safe copy fallback)
+ * to be cleanly served by Apache FTP and Ktor HTTP.
  */
 object FtpBucketManager {
     private const val PREFS_NAME = "ftp_bucket_prefs"
@@ -64,7 +66,8 @@ object FtpBucketManager {
 
     /**
      * Prepares a virtual staging directory representing the bucket items.
-     * Copies or links files into a clean temporary serving directory.
+     * Uses fast OS symlinks first so large folders/videos do not block or duplicate storage,
+     * falling back to lightweight file copy only if symlinks are disallowed.
      */
     fun prepareBucketDirectory(context: Context): File {
         val stagingDir = File(context.cacheDir, "ftp_hosted_bucket").apply {
@@ -76,12 +79,30 @@ object FtpBucketManager {
             try {
                 if (item.exists()) {
                     val dest = File(stagingDir, item.name)
-                    if (item.isDirectory) {
-                        dest.mkdirs()
-                        // Copy first-level children or symlink if available
-                        item.copyRecursively(dest, overwrite = true)
-                    } else {
-                        item.copyTo(dest, overwrite = true)
+                    val linked = try {
+                        Os.symlink(item.absolutePath, dest.absolutePath)
+                        true
+                    } catch (_: Exception) {
+                        false
+                    }
+                    if (!linked) {
+                        if (item.isDirectory) {
+                            dest.mkdirs()
+                            item.listFiles()?.forEach { child ->
+                                val childDest = File(dest, child.name)
+                                val childLinked = try {
+                                    Os.symlink(child.absolutePath, childDest.absolutePath)
+                                    true
+                                } catch (_: Exception) {
+                                    false
+                                }
+                                if (!childLinked && child.isFile && child.length() <= 50 * 1024 * 1024L) {
+                                    child.copyTo(childDest, overwrite = true)
+                                }
+                            }
+                        } else if (item.length() <= 100 * 1024 * 1024L) {
+                            item.copyTo(dest, overwrite = true)
+                        }
                     }
                 }
             } catch (_: Exception) {}
