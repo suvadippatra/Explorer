@@ -98,6 +98,18 @@ fun HelpDocumentationSection(
                     "Keyboard Shortcuts: Ctrl+C (Copy), Ctrl+X (Cut), Ctrl+V (Paste), Ctrl+A (Select All), F2 (Inline Rename), Del (Delete/Recycle Bin), Ctrl+F (Search).",
                     "GitHub Push & Clean Workspace: The standalone reference demo repositories (markor-master, Continuum-Explorer-master, and PhotoEditor-master) are safely excluded from Git commits via .gitignore, ensuring browser pushes to GitHub remain clean and within GitHub API payload limits while retaining all reference code on disk."
                 )
+            ),
+            HelpGuideSection(
+                id = "assets_and_integrity",
+                title = "6. KaTeX LaTeX & Media Engine Integrity",
+                badge = "Asset Verification",
+                icon = Icons.Default.Verified,
+                summary = "Verification and architecture details for offline LaTeX math rendering, native photo editing, and repository synchronization.",
+                bullets = listOf(
+                    "KaTeX Offline Math Engine: All KaTeX assets (katex.min.js, katex.min.css, mhchem.min.js, auto-render.min.js, and 60+ math glyph fonts) reside directly in app/src/main/assets/katex/. They are 100% intact, tracked, and power inline ($...$) and block ($$...$$) math equations.",
+                    "PhotoEditor & Markor Independence: Native photo editing (filters, crop, brush, text stickers, emoji overlay) and the Markor text/markdown engine are compiled directly into the Continuum Explorer app binary. They do not depend on the reference folders and continue functioning without interruption.",
+                    "Repository Sync & Zero-Deletion Safety: AI Studio's sync mechanism safely excludes external root folders via .gitignore without deleting any files from your workspace. All code and assets remain intact on disk."
+                )
             )
         )
     }
