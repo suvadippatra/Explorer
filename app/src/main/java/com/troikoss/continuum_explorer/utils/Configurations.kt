@@ -1,0 +1,622 @@
+package com.troikoss.continuum_explorer.utils
+
+import android.content.Context
+import android.net.Uri
+import androidx.compose.material.icons.Icons
+import org.json.JSONArray
+import org.json.JSONObject
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material3.Icon
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import com.troikoss.continuum_explorer.R
+import com.troikoss.continuum_explorer.managers.SettingsManager
+import com.troikoss.continuum_explorer.model.*
+import com.troikoss.continuum_explorer.providers.StorageProviders
+
+/**
+ * Manages configuration specific to folders (view mode, sort order, etc.)
+ */
+@Stable
+class FolderConfigurations(private val context: Context) {
+    var sortParams by mutableStateOf(SortParams(FileColumnType.NAME, SortOrder.Descending))
+        private set
+    
+    var viewMode by mutableStateOf(ViewMode.DETAILS)
+        private set
+        
+    var gridItemSize by mutableIntStateOf(100)
+
+    val extraColumns = listOf(
+        FileColumnDefinition(FileColumnType.DATE, context.getString(R.string.details_header_date), initialWidth = 135.dp),
+        FileColumnDefinition(FileColumnType.DATE_DELETED, context.getString(R.string.details_header_date_deleted), initialWidth = 135.dp),
+        FileColumnDefinition(FileColumnType.DELETED_FROM, context.getString(R.string.details_header_deleted_from), initialWidth = 160.dp),
+        FileColumnDefinition(FileColumnType.TYPE, context.getString(R.string.details_header_type), initialWidth = 110.dp),
+        FileColumnDefinition(FileColumnType.SIZE, context.getString(R.string.details_header_size), initialWidth = 90.dp)
+    )
+
+    val hiddenColumns = mutableStateSetOf<FileColumnType>()
+
+    val visibleColumns: List<FileColumnDefinition>
+        get() = extraColumns.filter { it.type !in hiddenColumns }
+
+    fun toggleColumnVisibility(type: FileColumnType, key: String?) {
+        if (type in hiddenColumns) hiddenColumns.remove(type) else hiddenColumns.add(type)
+        saveColumnVisibility(key)
+    }
+
+    fun resolveColumnVisibility(key: String?, isInRecycleBin: Boolean) {
+        val prefs = context.getSharedPreferences("column_visibility", Context.MODE_PRIVATE)
+        val savedHidden = prefs.getStringSet(key ?: "default", null)
+        hiddenColumns.clear()
+        if (savedHidden != null) {
+            savedHidden.forEach { typeName ->
+                try { hiddenColumns.add(FileColumnType.valueOf(typeName)) } catch (_: Exception) {}
+            }
+        } else {
+            if (isInRecycleBin) {
+                hiddenColumns.add(FileColumnType.DATE)
+            } else {
+                hiddenColumns.add(FileColumnType.DATE_DELETED)
+                hiddenColumns.add(FileColumnType.DELETED_FROM)
+                if (!SettingsManager.defaultHeaderDate.value) hiddenColumns.add(FileColumnType.DATE)
+                if (!SettingsManager.defaultHeaderSize.value) hiddenColumns.add(FileColumnType.SIZE)
+                if (!SettingsManager.defaultHeaderType.value) hiddenColumns.add(FileColumnType.TYPE)
+            }
+        }
+    }
+
+    private fun saveColumnVisibility(key: String?) {
+        val prefs = context.getSharedPreferences("column_visibility", Context.MODE_PRIVATE)
+        prefs.edit().putStringSet(key ?: "default", hiddenColumns.map { it.name }.toSet()).apply()
+    }
+
+    val columnWidths = mutableStateMapOf<FileColumnType, Dp>().apply {
+        put(FileColumnType.NAME, 300.dp)
+        extraColumns.forEach { put(it.type, it.initialWidth) }
+    }
+
+    fun saveColumnWidths(key: String?) {
+        val prefs = context.getSharedPreferences("column_widths", Context.MODE_PRIVATE)
+        val editor = prefs.edit()
+        val prefKey = key ?: "default"
+        columnWidths.forEach { (type, width) ->
+            editor.putFloat("${prefKey}:${type.name}", width.value)
+        }
+        editor.apply()
+    }
+
+    fun resolveColumnWidths(key: String?) {
+        val prefs = context.getSharedPreferences("column_widths", Context.MODE_PRIVATE)
+        val prefKey = key ?: "default"
+        // Always reset to defaults first so widths don't bleed from a previous folder
+        columnWidths[FileColumnType.NAME] = 300.dp
+        extraColumns.forEach { col -> columnWidths[col.type] = col.initialWidth }
+        // Then overlay any saved values for this folder
+        val nameKey = "${prefKey}:${FileColumnType.NAME.name}"
+        if (prefs.contains(nameKey)) {
+            columnWidths[FileColumnType.NAME] = prefs.getFloat(nameKey, 300f).dp
+            extraColumns.forEach { col ->
+                val k = "${prefKey}:${col.type.name}"
+                if (prefs.contains(k)) {
+                    columnWidths[col.type] = prefs.getFloat(k, col.initialWidth.value).dp
+                }
+            }
+        }
+    }
+
+    fun updateViewMode(mode: ViewMode, key: String?) {
+        if (viewMode != mode) {
+            viewMode = mode
+            if (key != null) {
+                saveViewModeForCurrentPath(mode, key)
+            }
+        }
+    }
+
+    private fun saveViewModeForCurrentPath(mode: ViewMode, key: String) {
+        val prefs = context.getSharedPreferences("folder_view_modes", Context.MODE_PRIVATE)
+        prefs.edit().putString(key, mode.name).apply()
+    }
+
+    fun resolveViewMode(key: String?) {
+        val prefs = context.getSharedPreferences("folder_view_modes", Context.MODE_PRIVATE)
+        if (key != null) {
+            val saved = prefs.getString(key, null)
+            if (saved != null) {
+                try {
+                    updateViewMode(ViewMode.valueOf(saved), null)
+                    return
+                } catch (_: Exception) {}
+            }
+        }
+        val fallback = if (key == "virtual://gallery" || key?.startsWith("virtual://gallery_album:") == true) ViewMode.GALLERY else SettingsManager.defaultViewMode.value
+        updateViewMode(fallback, null)
+    }
+
+    fun toggleSort(columnType: FileColumnType, key: String?, onSortChanged: () -> Unit) {
+        val isSameColumn = sortParams.columnType == columnType
+        val newOrder = if (isSameColumn) {
+            if (sortParams.order == SortOrder.Ascending) SortOrder.Descending else SortOrder.Ascending
+        } else {
+            SortOrder.Ascending
+        }
+        updateSortParams(SortParams(columnType, newOrder), key)
+        onSortChanged()
+    }
+    
+    fun updateSortParams(params: SortParams, key: String?) {
+        if (sortParams != params) {
+            sortParams = params
+            if (key != null) {
+                saveSortParamsForCurrentPath(params, key)
+            }
+        }
+    }
+
+    private fun saveSortParamsForCurrentPath(params: SortParams, key: String) {
+        val prefs = context.getSharedPreferences("folder_sort_params", Context.MODE_PRIVATE)
+        val value = "${params.columnType.name}:${params.order.name}"
+        prefs.edit().putString(key, value).apply()
+    }
+
+    fun resolveSortParams(key: String?) {
+        val prefs = context.getSharedPreferences("folder_sort_params", Context.MODE_PRIVATE)
+        fun parseParams(value: String): SortParams? {
+            return try {
+                val split = value.split(":")
+                SortParams(FileColumnType.valueOf(split[0]), SortOrder.valueOf(split[1]))
+            } catch (_: Exception) { null }
+        }
+
+        if (key != null) {
+            val saved = prefs.getString(key, null)
+            if (saved != null) {
+                val params = parseParams(saved)
+                if (params != null) {
+                    updateSortParams(params, null)
+                    return
+                }
+            }
+        }
+        val isDownloads = key?.lowercase()?.contains("download") == true
+        val default = when {
+            isDownloads -> SortParams(FileColumnType.DATE, SortOrder.Descending)
+            key == "virtual://recent" -> SortParams(FileColumnType.DATE, SortOrder.Descending)
+            key == "virtual://recycle_bin" -> SortParams(FileColumnType.DATE_DELETED, SortOrder.Descending)
+            else -> SortParams(SettingsManager.defaultSortColumnType.value, SettingsManager.defaultSortOrder.value)
+        }
+        updateSortParams(default, null)
+    }
+
+    @Composable
+    fun SortArrow(type: FileColumnType) {
+        if (sortParams.columnType == type) {
+            Icon(
+                imageVector = if (sortParams.order == SortOrder.Ascending) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp)
+            )
+        }
+    }
+
+    var isGroupingEnabled by mutableStateOf(false)
+        private set
+
+    private val groupingExplicitlySet = mutableSetOf<String>()
+
+    var foldersFirst by mutableStateOf(true)
+        private set
+
+    private val foldersFirstExplicitlySet = mutableSetOf<String>()
+
+    fun toggleFoldersFirst(key: String?, onChanged: () -> Unit) {
+        foldersFirst = !foldersFirst
+        if (key != null) {
+            foldersFirstExplicitlySet.add(key)
+            saveFoldersFirstForCurrentPath(foldersFirst, key)
+        }
+        onChanged()
+    }
+
+    private fun saveFoldersFirstForCurrentPath(enabled: Boolean, key: String) {
+        val prefs = context.getSharedPreferences("folder_folders_first", Context.MODE_PRIVATE)
+        prefs.edit().putBoolean(key, enabled).apply()
+    }
+
+    fun resolveFoldersFirst(key: String?) {
+        if (key != null) {
+            val prefs = context.getSharedPreferences("folder_folders_first", Context.MODE_PRIVATE)
+            if (prefs.contains(key)) {
+                foldersFirst = prefs.getBoolean(key, true)
+                return
+            }
+        }
+        val isDownloads = key?.lowercase()?.contains("download") == true
+        foldersFirst = when {
+            isDownloads -> false
+            else -> SettingsManager.foldersFirst.value
+        }
+    }
+
+    fun toggleGrouping(key: String?, onChanged: () -> Unit) {
+        isGroupingEnabled = !isGroupingEnabled
+        if (key != null) {
+            groupingExplicitlySet.add(key)
+            saveGroupingForCurrentPath(isGroupingEnabled, key)
+        }
+        onChanged()
+    }
+
+    private fun saveGroupingForCurrentPath(enabled: Boolean, key: String) {
+        val prefs = context.getSharedPreferences("folder_grouping", Context.MODE_PRIVATE)
+        prefs.edit().putBoolean(key, enabled).apply()
+    }
+
+    fun resolveGrouping(key: String?) {
+        if (key != null) {
+            val prefs = context.getSharedPreferences("folder_grouping", Context.MODE_PRIVATE)
+            if (prefs.contains(key)) {
+                isGroupingEnabled = prefs.getBoolean(key, false)
+                return
+            }
+        }
+        val isDownloads = key?.lowercase()?.contains("download") == true
+        isGroupingEnabled = when {
+            isDownloads -> true
+            else -> SettingsManager.isGroupingEnabled.value
+        }
+    }
+
+    var showHiddenFiles by mutableStateOf(false)
+        private set
+
+    private val showHiddenExplicitlySet = mutableSetOf<String>()
+
+    fun toggleShowHiddenFiles(key: String?, onChanged: () -> Unit) {
+        showHiddenFiles = !showHiddenFiles
+        if (key != null) {
+            showHiddenExplicitlySet.add(key)
+            saveShowHiddenForCurrentPath(showHiddenFiles, key)
+        }
+        onChanged()
+    }
+
+    private fun saveShowHiddenForCurrentPath(enabled: Boolean, key: String) {
+        val prefs = context.getSharedPreferences("folder_show_hidden", Context.MODE_PRIVATE)
+        prefs.edit().putBoolean(key, enabled).apply()
+    }
+
+    fun resolveShowHiddenFiles(key: String?) {
+        if (key != null) {
+            val prefs = context.getSharedPreferences("folder_show_hidden", Context.MODE_PRIVATE)
+            if (prefs.contains(key)) {
+                showHiddenFiles = prefs.getBoolean(key, false)
+                return
+            }
+        }
+        showHiddenFiles = SettingsManager.showHiddenFiles.value
+    }
+
+    fun updateGridSize(newSize: Int, key: String?) {
+        gridItemSize = newSize
+        if (key != null) {
+            saveGridSizeForCurrentPath(newSize, key)
+        }
+    }
+
+    private fun saveGridSizeForCurrentPath(size: Int, key: String) {
+        val prefs = context.getSharedPreferences("folder_grid_sizes", Context.MODE_PRIVATE)
+        prefs.edit().putInt(key, size).apply()
+    }
+
+    fun resolveGridSize(key: String?) {
+        val prefs = context.getSharedPreferences("folder_grid_sizes", Context.MODE_PRIVATE)
+        if (key != null) {
+            val defaultZoom = if (viewMode == ViewMode.GRID || viewMode == ViewMode.GALLERY)
+                SettingsManager.defaultGridZoom.value else 100
+            val savedSize = prefs.getInt(key, defaultZoom)
+            gridItemSize = savedSize
+            return
+        }
+        gridItemSize = 100
+    }
+
+
+}
+
+
+
+
+
+
+/**
+ * Manages global application configurations (favorites, SAF roots, library layout)
+ */
+@Stable
+class AppConfigurations(private val context: Context) {
+    val addedSafUris = mutableStateListOf<Uri>()
+    val favoritePaths = mutableStateListOf<String>()
+    val libraryOrder = mutableStateListOf("gallery", "recent", "trash")
+    val networkConnections = mutableStateListOf<NetworkConnection>()
+    var isRecentVisible by mutableStateOf(true)
+    var isGalleryVisible by mutableStateOf(true)
+    var isGalleryAlbumsEnabled by mutableStateOf(false)
+
+    var navPaneWidth by mutableStateOf(240.dp)
+    var detailsPaneWidth by mutableStateOf(240.dp)
+
+    init {
+        reload()
+    }
+
+    fun reload() {
+        loadAddedSafUris()
+        loadFavorites()
+        loadLibrarySettings()
+        loadPaneWidths()
+        loadNetworkConnections()
+    }
+
+    fun savePaneWidths() {
+        val prefs = context.getSharedPreferences("pane_widths", Context.MODE_PRIVATE)
+        prefs.edit().apply {
+            putFloat("nav_width", navPaneWidth.value)
+            putFloat("details_width", detailsPaneWidth.value)
+        }.apply()
+    }
+
+    private fun loadPaneWidths() {
+        val prefs = context.getSharedPreferences("pane_widths", Context.MODE_PRIVATE)
+        navPaneWidth = prefs.getFloat("nav_width", 240f).dp
+        detailsPaneWidth = prefs.getFloat("details_width", 240f).dp
+    }
+
+    private fun loadAddedSafUris() {
+        val prefs = context.getSharedPreferences("saf_storage", Context.MODE_PRIVATE)
+        addedSafUris.clear()
+        val ordered = prefs.getString("ordered_uris", null)
+        if (ordered != null) {
+            if (ordered.isNotEmpty()) {
+                ordered.split("|").forEach { addedSafUris.add(Uri.parse(it)) }
+            }
+        } else {
+            // Legacy: migrate from unordered Set
+            val uris = prefs.getStringSet("uris", emptySet()) ?: emptySet()
+            uris.forEach { addedSafUris.add(Uri.parse(it)) }
+            saveAddedSafUris()
+        }
+    }
+
+    fun saveAddedSafUris() {
+        val prefs = context.getSharedPreferences("saf_storage", Context.MODE_PRIVATE)
+        prefs.edit().putString("ordered_uris", addedSafUris.joinToString("|") { it.toString() }).apply()
+    }
+
+    fun moveSafUri(fromIndex: Int, toIndex: Int) {
+        if (fromIndex == toIndex) return
+        val item = addedSafUris.removeAt(fromIndex)
+        addedSafUris.add(toIndex, item)
+        saveAddedSafUris()
+        GlobalEvents.triggerConfigUpdate()
+    }
+
+    private fun loadFavorites() {
+        val prefs = context.getSharedPreferences("favorites", Context.MODE_PRIVATE)
+        val favoritesList = prefs.getString("ordered_paths", "") ?: ""
+        favoritePaths.clear()
+        if (favoritesList.isNotEmpty()) {
+            favoritePaths.addAll(favoritesList.split("|"))
+        } else {
+            val favoritesSet = prefs.getStringSet("paths", emptySet()) ?: emptySet()
+            favoritePaths.addAll(favoritesSet.sorted())
+            saveFavorites()
+        }
+        ShortcutHelper.updateFavoritesShortcuts(context, favoritePaths)
+    }
+    
+    fun saveFavorites() {
+        val prefs = context.getSharedPreferences("favorites", Context.MODE_PRIVATE)
+        val orderedString = favoritePaths.joinToString("|")
+        prefs.edit().putString("ordered_paths", orderedString).apply()
+        prefs.edit().putStringSet("paths", favoritePaths.toSet()).apply()
+        ShortcutHelper.updateFavoritesShortcuts(context, favoritePaths)
+    }
+
+    private fun loadLibrarySettings() {
+        val prefs = context.getSharedPreferences("library", Context.MODE_PRIVATE)
+        val order = prefs.getString("order", "gallery|recent|trash") ?: "gallery|recent|trash"
+        libraryOrder.clear()
+        val loaded = order.split("|")
+        libraryOrder.addAll(loaded)
+        // Migrate: add gallery if not present in saved order
+        if (!libraryOrder.contains("gallery")) {
+            libraryOrder.add(0, "gallery")
+        }
+        isRecentVisible = prefs.getBoolean("is_recent_visible", true)
+        isGalleryVisible = prefs.getBoolean("is_gallery_visible", true)
+        isGalleryAlbumsEnabled = prefs.getBoolean("is_gallery_albums_enabled", false)
+    }
+
+    fun saveLibrarySettings() {
+        val prefs = context.getSharedPreferences("library", Context.MODE_PRIVATE)
+        prefs.edit().apply {
+            putString("order", libraryOrder.joinToString("|"))
+            putBoolean("is_recent_visible", isRecentVisible)
+            putBoolean("is_gallery_visible", isGalleryVisible)
+            putBoolean("is_gallery_albums_enabled", isGalleryAlbumsEnabled)
+        }.apply()
+    }
+
+    fun toggleRecentVisibility() {
+        isRecentVisible = !isRecentVisible
+        saveLibrarySettings()
+        GlobalEvents.triggerConfigUpdate()
+    }
+
+    fun toggleGalleryVisibility() {
+        isGalleryVisible = !isGalleryVisible
+        saveLibrarySettings()
+        GlobalEvents.triggerConfigUpdate()
+    }
+
+    fun toggleGalleryAlbums() {
+        isGalleryAlbumsEnabled = !isGalleryAlbumsEnabled
+        saveLibrarySettings()
+        GlobalEvents.triggerConfigUpdate()
+    }
+    
+    fun addFavorite(path: String) {
+        if (!favoritePaths.contains(path)) {
+            favoritePaths.add(path)
+            saveFavorites()
+            GlobalEvents.triggerConfigUpdate()
+        }
+    }
+    
+    fun removeFavorite(path: String) {
+        if (favoritePaths.remove(path)) {
+            saveFavorites()
+            GlobalEvents.triggerConfigUpdate()
+        }
+    }
+    
+    fun moveFavorite(fromIndex: Int, toIndex: Int) {
+        if (fromIndex == toIndex) return
+        val item = favoritePaths.removeAt(fromIndex)
+        favoritePaths.add(toIndex, item)
+        saveFavorites()
+        GlobalEvents.triggerConfigUpdate()
+    }
+    
+    fun moveLibraryItem(fromIndex: Int, toIndex: Int) {
+        if (fromIndex == toIndex) return
+        val item = libraryOrder.removeAt(fromIndex)
+        libraryOrder.add(toIndex, item)
+        saveLibrarySettings()
+        GlobalEvents.triggerConfigUpdate()
+    }
+    
+    fun isFavorite(path: String): Boolean {
+        return favoritePaths.contains(path)
+    }
+
+    private fun loadNetworkConnections() {
+        // Try encrypted prefs first; fall back to legacy plaintext (one-shot migration)
+        var securePrefs: android.content.SharedPreferences? = null
+        try {
+            securePrefs = SecurePrefs.get(context)
+        } catch (_: Exception) {}
+
+        var jsonStr = securePrefs?.getString("connections", null)
+
+        if (jsonStr == null) {
+            // Legacy plaintext fallback – migrate and wipe
+            val legacyPrefs = context.getSharedPreferences("network_storage", Context.MODE_PRIVATE)
+            val legacyJson = legacyPrefs.getString("connections", null)
+            if (legacyJson != null) {
+                jsonStr = legacyJson
+                try {
+                    securePrefs?.edit()?.putString("connections", legacyJson)?.apply()
+                } catch (_: Exception) {}
+                legacyPrefs.edit().clear().apply()
+            }
+        }
+
+        jsonStr ?: return
+        networkConnections.clear()
+        try {
+            val arr = JSONArray(jsonStr)
+            for (i in 0 until arr.length()) {
+                val obj = arr.getJSONObject(i)
+                networkConnections.add(
+                    NetworkConnection(
+                        id = obj.getString("id"),
+                        protocol = NetworkProtocol.valueOf(obj.getString("protocol")),
+                        displayName = obj.getString("displayName"),
+                        host = obj.optString("host", ""),
+                        port = obj.optInt("port", 0),
+                        username = obj.optString("username", ""),
+                        password = obj.optString("password", ""),
+                        remotePath = obj.optString("remotePath", "/"),
+                        useTls = obj.optBoolean("useTls", false),
+                        ftpPassiveMode = obj.optBoolean("ftpPassiveMode", true),
+                        rootUrl = obj.optString("rootUrl", ""),
+                        acceptUntrustedCerts = obj.optBoolean("acceptUntrustedCerts", false),
+                        smbDomain = obj.optString("smbDomain", ""),
+                        sftpPrivateKeyUri = obj.optString("sftpPrivateKeyUri", ""),
+                        sftpPrivateKeyPassphrase = obj.optString("sftpPrivateKeyPassphrase", ""),
+                        sftpPrivateKey = obj.optString("sftpPrivateKey", ""),
+                    )
+                )
+            }
+        } catch (_: Exception) {}
+    }
+
+    fun saveNetworkConnections() {
+        val arr = JSONArray()
+        networkConnections.forEach { conn ->
+            arr.put(JSONObject().apply {
+                put("id", conn.id)
+                put("protocol", conn.protocol.name)
+                put("displayName", conn.displayName)
+                put("host", conn.host)
+                put("port", conn.port)
+                put("username", conn.username)
+                put("password", conn.password)
+                put("remotePath", conn.remotePath)
+                put("useTls", conn.useTls)
+                put("ftpPassiveMode", conn.ftpPassiveMode)
+                put("rootUrl", conn.rootUrl)
+                put("acceptUntrustedCerts", conn.acceptUntrustedCerts)
+                put("smbDomain", conn.smbDomain)
+                put("sftpPrivateKeyUri", conn.sftpPrivateKeyUri)
+                put("sftpPrivateKeyPassphrase", conn.sftpPrivateKeyPassphrase)
+                put("sftpPrivateKey", conn.sftpPrivateKey)
+            })
+        }
+        try {
+            SecurePrefs.get(context).edit().putString("connections", arr.toString()).apply()
+        } catch (_: Exception) {
+            // Fallback to plaintext if crypto init fails (shouldn't happen on supported devices)
+            context.getSharedPreferences("network_storage", Context.MODE_PRIVATE)
+                .edit().putString("connections", arr.toString()).apply()
+        }
+    }
+
+    fun addNetworkConnection(connection: NetworkConnection) {
+        networkConnections.add(connection)
+        saveNetworkConnections()
+        GlobalEvents.triggerConfigUpdate()
+    }
+
+    fun removeNetworkConnection(id: String) {
+        if (networkConnections.removeAll { it.id == id }) {
+            StorageProviders.evictNetwork(id)
+            saveNetworkConnections()
+            GlobalEvents.triggerConfigUpdate()
+        }
+    }
+
+    fun moveNetworkConnection(fromIndex: Int, toIndex: Int) {
+        if (fromIndex == toIndex) return
+        val item = networkConnections.removeAt(fromIndex)
+        networkConnections.add(toIndex, item)
+        saveNetworkConnections()
+        GlobalEvents.triggerConfigUpdate()
+    }
+
+    fun updateNetworkConnection(connection: NetworkConnection) {
+        val index = networkConnections.indexOfFirst { it.id == connection.id }
+        if (index >= 0) {
+            StorageProviders.evictNetwork(connection.id)
+            networkConnections[index] = connection
+            saveNetworkConnections()
+            GlobalEvents.triggerConfigUpdate()
+        }
+    }
+}

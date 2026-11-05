@@ -1,0 +1,609 @@
+package com.troikoss.continuum_explorer.ui.components
+
+import android.content.ClipboardManager
+import android.content.Context
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
+import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.automirrored.filled.ListAlt
+import androidx.compose.material.icons.automirrored.filled.Redo
+import androidx.compose.material.icons.automirrored.filled.Undo
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Archive
+import androidx.compose.material.icons.filled.ContentCut
+import androidx.compose.material.icons.filled.ContentPaste
+import androidx.compose.material.icons.filled.CopyAll
+import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DeleteForever
+import androidx.compose.material.icons.filled.Deselect
+import androidx.compose.material.icons.filled.Done
+import androidx.compose.material.icons.filled.DriveFileRenameOutline
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.InsertDriveFile
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.filled.Restore
+import androidx.compose.material.icons.filled.SelectAll
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Splitscreen
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.StarOutline
+import androidx.compose.material.icons.filled.Tab
+import androidx.compose.material.icons.filled.TextFormat
+import androidx.compose.material.icons.filled.Unarchive
+import androidx.compose.material.icons.filled.ViewModule
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
+import androidx.compose.material3.InputChip
+import androidx.compose.material3.InputChipDefaults
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SuggestionChipDefaults
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.VerticalDivider
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.PointerType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
+import com.troikoss.continuum_explorer.R
+import com.troikoss.continuum_explorer.managers.SettingsManager
+import com.troikoss.continuum_explorer.managers.UndoManager
+import com.troikoss.continuum_explorer.model.FileColumnType
+import com.troikoss.continuum_explorer.model.LibraryItem
+import com.troikoss.continuum_explorer.model.ViewMode
+import com.troikoss.continuum_explorer.utils.*
+import kotlinx.coroutines.launch
+
+/**
+ * A horizontal toolbar containing file operations, sorting, and view options.
+ */
+@Composable
+fun CommandBar(
+    appState: FileExplorerState
+) {
+    val selectionManager = appState.selectionManager
+    val isSelectionMode = selectionManager.isInSelectionMode()
+    val canUndo by UndoManager.canUndo
+    val canRedo by UndoManager.canRedo
+
+    val context = LocalContext.current
+    val clipboard = remember { context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager }
+    var hasClipboardItems by remember { mutableStateOf(clipboard.hasPrimaryClip()) }
+
+    val virtualStorage = listOf(LibraryItem.RecycleBin, LibraryItem.Gallery, LibraryItem.Recent, LibraryItem.VibeArea)
+    val isInVirtualStorage = appState.libraryItem in virtualStorage
+    val isInRecycleBin = appState.libraryItem == LibraryItem.RecycleBin
+
+    DisposableEffect(clipboard) {
+        val listener = ClipboardManager.OnPrimaryClipChangedListener {
+            hasClipboardItems = clipboard.hasPrimaryClip()
+        }
+        clipboard.addPrimaryClipChangedListener(listener)
+        onDispose {
+            clipboard.removePrimaryClipChangedListener(listener)
+        }
+    }
+
+    val scrollState = rememberScrollState()
+    val coroutineScope = rememberCoroutineScope()
+    val commandBarBorderColor = MaterialTheme.colorScheme.outlineVariant
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .drawBehind {
+                val strokeWidth = 1.dp.toPx()
+                drawLine(
+                    color = commandBarBorderColor,
+                    start = Offset(0f, size.height - strokeWidth / 2),
+                    end = Offset(size.width, size.height - strokeWidth / 2),
+                    strokeWidth = strokeWidth
+                )
+            },
+        color = MaterialTheme.colorScheme.surface
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 4.dp)
+                .height(48.dp)
+                .pointerInput(Unit) {
+                    awaitPointerEventScope {
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            if (event.type == PointerEventType.Scroll) {
+                                val delta = event.changes.first().scrollDelta
+                                coroutineScope.launch {
+                                    scrollState.scrollBy(delta.y * 60f)
+                                }
+                            }
+                        }
+                    }
+                }
+                .horizontalScroll(scrollState),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            // Normal Folder UI
+            if (!isSelectionMode) {
+                if (!isInVirtualStorage || (appState.libraryItem == LibraryItem.Gallery && appState.currentPath != null)) {
+                    CommandDropDown(
+                        text = stringResource(R.string.menu_new),
+                        icon = Icons.Default.Add
+                    ) { onDismiss ->
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.folder)) },
+                            leadingIcon = { Icon(Icons.Default.Folder, null) },
+                            onClick = { appState.createNewFolder(); onDismiss() }
+                        )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.menu_text_document)) },
+                            leadingIcon = { Icon(Icons.AutoMirrored.Filled.InsertDriveFile, null) },
+                            onClick = { appState.createNewFile(); onDismiss() }
+                        )
+                    }
+                }
+
+                SortDropDown(appState, isInRecycleBin)
+
+                ViewMenuDropDown(appState)
+
+                VerticalDivider()
+
+                CommandButton(
+                    text = stringResource(R.string.shortcuts_ctrl_a_desc),
+                    icon = Icons.Default.SelectAll,
+                    onClick = { selectionManager.selectAll() },
+                )
+
+                if (hasClipboardItems && (!isInVirtualStorage || (appState.libraryItem == LibraryItem.Gallery && appState.currentPath != null))) {
+                    CommandButton(
+                        text = stringResource(R.string.menu_paste),
+                        icon = Icons.Default.ContentPaste,
+                        onClick = { appState.paste() }
+                    )
+                }
+
+                if (canUndo) {
+                    CommandButton(
+                        text = stringResource(R.string.menu_undo),
+                        icon = Icons.AutoMirrored.Filled.Undo,
+                        onClick = { appState.undo() }
+                    )
+                }
+
+                if (canRedo) {
+                    CommandButton(
+                        text = stringResource(R.string.menu_redo),
+                        icon = Icons.AutoMirrored.Filled.Redo,
+                        onClick = { appState.redo() }
+                    )
+                }
+            } else {
+                // Selection Mode Actions
+                val selectedList = selectionManager.selectedItems.toList()
+                val hasDirectories = selectedList.any { it.isDirectory }
+                val onlyOneSelected = selectedList.size == 1
+                val hasArchive = selectedList.any { ZipUtils.isArchive(it) }
+
+                if (onlyOneSelected && !hasDirectories) {
+                    CommandButton(
+                        text = "Preview & Edit",
+                        icon = Icons.Default.InsertDriveFile,
+                        onClick = { isTouch ->
+                            appState.showPreview(selectedList[0])
+                            if (isTouch) selectionManager.clear()
+                        },
+                    )
+                    CommandButton(
+                        text = stringResource(R.string.menu_open_with_no_dots),
+                        icon = Icons.Default.FolderOpen,
+                        onClick = { isTouch ->
+                            openWith(context, appState.scope, selectedList[0])
+                            if (isTouch) selectionManager.clear()
+                        },
+                    )
+                }
+
+                if (hasDirectories || hasArchive) {
+                    CommandButton(
+                        text = stringResource(R.string.menu_open_new_tab),
+                        icon = Icons.Default.Tab,
+                        onClick = { isTouch ->
+                            appState.openInNewTab(selectionManager.selectedItems.toList())
+                            if (isTouch) selectionManager.clear()
+                        },
+                    )
+                    CommandButton(
+                        text = stringResource(R.string.menu_open_new_window),
+                        icon = Icons.Default.Splitscreen,
+                        onClick = { isTouch ->
+                            appState.openInNewWindow(selectionManager.selectedItems.toList())
+                            if (isTouch) selectionManager.clear()
+                        },
+                    )
+                }
+
+                if (onlyOneSelected || hasArchive || hasDirectories) {
+                    VerticalDivider()
+                }
+
+                if (onlyOneSelected && selectedList.first().isDirectory && selectedList.first().fileRef != null) {
+                    val path = selectedList.first().fileRef!!.absolutePath
+                    val isFav = appState.appConfigs.isFavorite(path)
+
+                    CommandButton(
+                        text = if (isFav) stringResource(R.string.menu_remove_favorites) else stringResource(R.string.menu_add_favorites),
+                        onClick = { isTouch ->
+                            if (isFav) appState.appConfigs.removeFavorite(path)
+                            else appState.appConfigs.addFavorite(path)
+                            if (isTouch) selectionManager.clear()
+                        },
+                        icon = if (isFav) Icons.Default.StarOutline else Icons.Default.Star
+                    )
+                }
+
+                if (onlyOneSelected) {
+                    CommandButton(
+                        text = stringResource(R.string.menu_add_home),
+                        icon = Icons.Default.PushPin,
+                        onClick = { isTouch ->
+                            appState.pinSelectionToHome()
+                            if (isTouch) selectionManager.clear()
+                        }
+                    )
+                    VerticalDivider()
+                }
+
+                if (!isInVirtualStorage || (appState.libraryItem == LibraryItem.Gallery && appState.currentPath != null)) {
+                    if (hasArchive) {
+                        CommandButton(
+                            text = stringResource(R.string.menu_extract).removeSuffix("..."),
+                            icon = Icons.Default.Unarchive,
+                            onClick = { isTouch ->
+                                appState.extractSelection()
+                                if (isTouch) selectionManager.clear()
+                            }
+                        )
+                    }
+
+                    CommandButton(
+                        text = stringResource(R.string.menu_compress).removeSuffix("..."),
+                        icon = Icons.Default.Archive,
+                        onClick = { isTouch ->
+                            appState.compressSelection()
+                            if (isTouch) selectionManager.clear()
+                        }
+                    )
+                VerticalDivider()
+                }
+
+                CommandDropDown(text = stringResource(R.string.menu_select), icon = Icons.Default.SelectAll) { onDismiss ->
+                    val allSelected = selectionManager.selectedItems.size == selectionManager.allFiles.size
+
+                    if (!allSelected) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.shortcuts_ctrl_a_desc)) },
+                            leadingIcon = { Icon(Icons.Default.Deselect, null) },
+                            onClick = { selectionManager.selectAll(); onDismiss() }
+                        )
+                    }
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.menu_clear_selection)) },
+                        leadingIcon = { Icon(Icons.Default.Deselect, null) },
+                        onClick = { selectionManager.clear(); onDismiss() }
+                    )
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.menu_select_inverse)) },
+                        leadingIcon = { Icon(Icons.Default.Deselect, null) },
+                        onClick = { selectionManager.selectInverse(); onDismiss() }
+                    )
+                }
+
+                if (!isInRecycleBin) {
+                    CommandButton(
+                        text = stringResource(R.string.menu_cut),
+                        icon = Icons.Default.ContentCut,
+                        onClick = { isTouch -> appState.cutSelection(); if (isTouch) selectionManager.clear() },
+                    )
+                }
+                CommandButton(
+                    text = stringResource(R.string.menu_copy),
+                    icon = Icons.Default.CopyAll,
+                    onClick = { isTouch -> appState.copySelection(); if (isTouch) selectionManager.clear() },
+                )
+
+                if (hasClipboardItems && (!isInVirtualStorage || (appState.libraryItem == LibraryItem.Gallery && appState.currentPath != null))) {
+                    CommandButton(
+                        text = stringResource(R.string.menu_paste),
+                        icon = Icons.Default.ContentPaste,
+                        onClick = { isTouch -> appState.paste(); if (isTouch) selectionManager.clear() }
+                    )
+                }
+
+                if (!isInRecycleBin) {
+                    CommandButton(
+                        text = stringResource(R.string.menu_rename),
+                        icon = Icons.Default.DriveFileRenameOutline,
+                        onClick = { isTouch -> appState.renameSelection(); if (isTouch) selectionManager.clear() }
+                    )
+                }
+
+                if (!selectionManager.selectedItems.any { it.isDirectory }) {
+                    CommandButton(
+                        text = stringResource(R.string.menu_share),
+                        icon = Icons.Default.Share,
+                        onClick = { isTouch -> shareFiles(context, appState.scope, selectionManager.selectedItems.toList()); if (isTouch) selectionManager.clear() }
+                    )
+                }
+
+                if (!isInRecycleBin) {
+                    CommandButton(
+                        text = stringResource(R.string.menu_delete),
+                        icon = Icons.Default.Delete,
+                        onClick = { appState.deleteSelection() },
+                    )
+                } else {
+                    CommandButton(
+                        text = stringResource(R.string.menu_restore),
+                        icon = Icons.Default.Restore,
+                        onClick = { isTouch ->
+                            appState.restoreSelection()
+                            if (isTouch) selectionManager.clear()
+                        }
+                    )
+                    CommandButton(
+                        text = stringResource(R.string.menu_delete_permanently),
+                        icon = Icons.Default.Delete,
+                        onClick = { appState.deleteSelection(forcePermanent = true) },
+                    )
+                }
+                CommandButton(
+                    text = stringResource(R.string.menu_properties),
+                    icon = Icons.Default.Info,
+                    onClick = { isTouch ->
+                        appState.showProperties()
+                        if (isTouch) selectionManager.clear()
+                    },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun SortDropDown(
+    appState: FileExplorerState, // This gives the function access to your app's data
+    isInRecycleBin: Boolean
+) {
+    // 1. Determine which icon to show based on current sort settings
+    val sortIcon = when (appState.folderConfigs.sortParams.columnType) {
+        FileColumnType.NAME -> Icons.Default.TextFormat
+        FileColumnType.DATE -> Icons.Default.DateRange
+        FileColumnType.DATE_DELETED -> Icons.Default.DateRange
+        FileColumnType.DELETED_FROM -> Icons.Default.LocationOn
+        FileColumnType.TYPE -> Icons.AutoMirrored.Filled.InsertDriveFile
+        FileColumnType.SIZE -> Icons.AutoMirrored.Filled.List
+    }
+
+    // 2. Use the existing CommandDropDown component
+    CommandDropDown(text = stringResource(R.string.menu_sort), icon = sortIcon) { onDismiss ->
+
+        // Helper to handle the click logic so we don't repeat it 5 times
+        val onSortClick: (FileColumnType) -> Unit = { type ->
+            appState.folderConfigs.toggleSort(type, appState.getCurrentStorageKey()) {
+                appState.refresh()
+            }
+            onDismiss()
+        }
+
+        DropdownMenuItem(
+            text = { Text(stringResource(R.string.menu_by_name)) },
+            leadingIcon = { Icon(Icons.Default.TextFormat, null) },
+            trailingIcon = { appState.folderConfigs.SortArrow(FileColumnType.NAME) },
+            onClick = { onSortClick(FileColumnType.NAME) }
+        )
+
+        DropdownMenuItem(
+            text = { Text(stringResource(R.string.menu_by_date)) },
+            leadingIcon = { Icon(Icons.Default.DateRange, null) },
+            trailingIcon = { appState.folderConfigs.SortArrow(FileColumnType.DATE) },
+            onClick = { onSortClick(FileColumnType.DATE) }
+        )
+
+        // Only show these if we are in the Recycle Bin
+        if (isInRecycleBin) {
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.menu_by_date_deleted)) },
+                leadingIcon = { Icon(Icons.Default.DateRange, null) },
+                trailingIcon = { appState.folderConfigs.SortArrow(FileColumnType.DATE_DELETED) },
+                onClick = { onSortClick(FileColumnType.DATE_DELETED) }
+            )
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.menu_by_location)) },
+                leadingIcon = { Icon(Icons.Default.LocationOn, null) },
+                trailingIcon = { appState.folderConfigs.SortArrow(FileColumnType.DELETED_FROM) },
+                onClick = { onSortClick(FileColumnType.DELETED_FROM) }
+            )
+        }
+
+        DropdownMenuItem(
+            text = { Text(stringResource(R.string.menu_by_type)) },
+            leadingIcon = { Icon(Icons.AutoMirrored.Filled.InsertDriveFile, null) },
+            trailingIcon = { appState.folderConfigs.SortArrow(FileColumnType.TYPE) },
+            onClick = { onSortClick(FileColumnType.TYPE) }
+        )
+
+        DropdownMenuItem(
+            text = { Text(stringResource(R.string.menu_by_size)) },
+            leadingIcon = { Icon(Icons.AutoMirrored.Filled.List, null) },
+            trailingIcon = { appState.folderConfigs.SortArrow(FileColumnType.SIZE) },
+            onClick = { onSortClick(FileColumnType.SIZE) }
+        )
+
+        HorizontalDivider()
+
+        DropdownMenuItem(
+            text = { Text(stringResource(R.string.menu_group)) },
+            leadingIcon = {
+                if (appState.folderConfigs.isGroupingEnabled) {
+                    Icon(Icons.Default.Done, null, tint = MaterialTheme.colorScheme.primary)
+                }
+            },
+            onClick = {
+                appState.folderConfigs.toggleGrouping(appState.getCurrentStorageKey()) { appState.refresh() }
+                onDismiss()
+            }
+        )
+
+        DropdownMenuItem(
+            text = { Text(stringResource(R.string.menu_folders_first)) },
+            leadingIcon = {
+                if (appState.folderConfigs.foldersFirst) {
+                    Icon(Icons.Default.Done, null, tint = MaterialTheme.colorScheme.primary)
+                }
+            },
+            onClick = {
+                appState.folderConfigs.toggleFoldersFirst(appState.getCurrentStorageKey()) { appState.refresh() }
+                onDismiss()
+            }
+        )
+    }
+}
+
+@Composable
+private fun ViewMenuDropDown(appState: FileExplorerState) {
+    val viewIcon = when (appState.activeViewMode) {
+        ViewMode.DETAILS -> Icons.AutoMirrored.Filled.ListAlt
+        ViewMode.CONTENT -> Icons.AutoMirrored.Filled.List
+        ViewMode.GRID -> Icons.Default.ViewModule
+        ViewMode.GALLERY -> Icons.Default.PhotoLibrary
+    }
+
+    CommandDropDown(text = stringResource(R.string.menu_view), icon = viewIcon) { onDismiss ->
+        DropdownMenuItem(
+            text = { Text(stringResource(R.string.menu_details)) },
+            leadingIcon = { Icon(Icons.AutoMirrored.Filled.ListAlt, null) },
+            trailingIcon = { if (appState.activeViewMode == ViewMode.DETAILS) Icon(Icons.Default.Done, null) },
+            onClick = { appState.folderConfigs.updateViewMode(ViewMode.DETAILS, appState.getCurrentStorageKey()); onDismiss() }
+        )
+        DropdownMenuItem(
+            text = { Text(stringResource(R.string.menu_content)) },
+            leadingIcon = { Icon(Icons.AutoMirrored.Filled.List, null) },
+            trailingIcon = { if (appState.activeViewMode == ViewMode.CONTENT) Icon(Icons.Default.Done, null) },
+            onClick = { appState.folderConfigs.updateViewMode(ViewMode.CONTENT, appState.getCurrentStorageKey()); onDismiss() }
+        )
+        DropdownMenuItem(
+            text = { Text(stringResource(R.string.menu_grid)) },
+            leadingIcon = { Icon(Icons.Default.ViewModule, null) },
+            trailingIcon = { if (appState.activeViewMode == ViewMode.GRID) Icon(Icons.Default.Done, null) },
+            onClick = { appState.folderConfigs.updateViewMode(ViewMode.GRID, appState.getCurrentStorageKey()); onDismiss() }
+        )
+        DropdownMenuItem(
+            text = { Text(stringResource(R.string.menu_gallery)) },
+            leadingIcon = { Icon(Icons.Default.PhotoLibrary, null) },
+            trailingIcon = { if (appState.activeViewMode == ViewMode.GALLERY) Icon(Icons.Default.Done, null) },
+            onClick = { appState.folderConfigs.updateViewMode(ViewMode.GALLERY, appState.getCurrentStorageKey()); onDismiss() }
+        )
+
+        if (!SettingsManager.showHiddenFiles.value) {
+            HorizontalDivider()
+
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.menu_show_hidden)) },
+                leadingIcon = {
+                    if (appState.folderConfigs.showHiddenFiles) {
+                        Icon(Icons.Default.Done, null, tint = MaterialTheme.colorScheme.primary)
+                    }
+                },
+                onClick = {
+                    appState.folderConfigs.toggleShowHiddenFiles(appState.getCurrentStorageKey()) { appState.refresh() }
+                    onDismiss()
+                }
+            )
+        }
+    }
+}
+
+@Composable
+fun CommandDropDown(
+    text: String,
+    icon: ImageVector,
+    menuItems: @Composable ColumnScope.(onDismiss: () -> Unit) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    Box {
+        CommandButton(
+            text = text,
+            icon = icon,
+            onClick = { expanded = true },
+            trailingIcon = Icons.Default.KeyboardArrowDown
+        )
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            menuItems { expanded = false }
+        }
+    }
+}
+
+@Composable
+fun CommandButton(
+    text: String,
+    icon: ImageVector,
+    onClick: (isTouch: Boolean) -> Unit,
+    trailingIcon: ImageVector? = null
+) {
+    var lastInputWasTouch by remember { mutableStateOf(false) }
+
+    InputChip(
+        selected = false,
+        onClick = { onClick(lastInputWasTouch) },
+        label = { Text(text) },
+        leadingIcon = { Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp)) },
+        trailingIcon = {
+            if (trailingIcon != null) {
+                Icon(trailingIcon, contentDescription = null, modifier = Modifier.size(18.dp))
+            }
+        },
+        shape = SuggestionChipDefaults.shape,
+        colors = InputChipDefaults.inputChipColors(),
+        modifier = Modifier.pointerInput(Unit) {
+            awaitPointerEventScope {
+                while (true) {
+                    val event = awaitPointerEvent()
+                    lastInputWasTouch = event.changes.any { it.type == PointerType.Touch }
+                }
+            }
+        }
+    )
+}

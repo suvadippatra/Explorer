@@ -1,0 +1,6 @@
+{
+  "name": "Explorer",
+  "description": "A modern, open-source file explorer and archive manager for Android.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

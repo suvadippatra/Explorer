@@ -1,0 +1,493 @@
+<resources>
+    <string name="app_name">Explorer</string>
+
+    <!-- Shortcuts -->
+    <string name="shortcut_new_window_short">New Window</string>
+    <string name="shortcut_new_window_long">New Window</string>
+
+    <!-- General -->
+    <string name="cancel">Cancel</string>
+    <string name="ok">OK</string>
+    <string name="close">Close</string>
+    <string name="yes">Yes</string>
+    <string name="no">No</string>
+    <string name="back">Back</string>
+    <string name="done">Done</string>
+    <string name="loading">Loading…</string>
+    <string name="calculating">Calculating…</string>
+    <string name="unknown">Unknown</string>
+    <string name="home">Home</string>
+    <string name="new_tab">New Tab</string>
+    <string name="create">Create</string>
+    <string name="forward">Forward</string>
+    <string name="history">History</string>
+    <string name="up">Up</string>
+    <string name="menu">Menu</string>
+    <string name="search">Search</string>
+    <string name="search_hint">Search…</string>
+    <string name="options">Options</string>
+    <string name="off">Off</string>
+    <string name="previous">Previous</string>
+    <string name="next">Next</string>
+
+    <!-- Properties / Details -->
+    <string name="properties">Properties</string>
+    <string name="prop_name">Name:</string>
+    <string name="prop_type">Type:</string>
+    <string name="prop_size">Size:</string>
+    <string name="prop_size_on_disk">Size on disk:</string>
+    <string name="prop_location">Location:</string>
+    <string name="prop_modified">Modified:</string>
+    <string name="prop_deleted">Deleted:</string>
+    <string name="prop_deleted_from">Deleted From:</string>
+    <string name="prop_resolution">Resolution:</string>
+    <string name="prop_duration">Duration:</string>
+    <string name="prop_items">Items:</string>
+    <string name="prop_contains">Contains:</string>
+    <string name="prop_folders_count">%1$d Folders</string>
+    <string name="prop_files_count">%1$d Files</string>
+    <string name="prop_selected_count">%1$d selected</string>
+    <string name="prop_loading_metadata">Loading metadata…</string>
+    <string name="prop_total_size">Total Size:</string>
+    <string name="prop_bytes">bytes</string>
+    <string name="details_item_count_singular">1 item</string>
+    <string name="details_item_count_plural">%1$d items</string>
+    <string name="details_date_modified">Date Modified: %1$s</string>
+    <string name="details_date_deleted">Date Deleted: %1$s</string>
+    <string name="details_deleted_from">Deleted From: %1$s</string>
+    <string name="details_size">Size: %1$s</string>
+    <string name="details_resolution">Resolution: %1$s</string>
+    <string name="details_duration">Duration: %1$s</string>
+
+    <!-- Shortcuts Dialog -->
+    <string name="shortcuts_title">Shortcuts Cheatsheet</string>
+    <string name="shortcuts_nav_selection">Navigation &amp; Selection</string>
+    <string name="shortcuts_arrow_keys">Arrow Keys</string>
+    <string name="shortcuts_arrow_keys_desc">Move selection</string>
+    <string name="shortcuts_home_end">Home / End</string>
+    <string name="shortcuts_home_end_desc">Go to start / end of list</string>
+    <string name="shortcuts_page_up_down">Page Up / Down</string>
+    <string name="shortcuts_page_up_down_desc">Scroll the page up / down</string>
+    <string name="shortcuts_ctrl_a">Ctrl + A</string>
+    <string name="shortcuts_ctrl_a_desc">Select all</string>
+    <string name="shortcuts_backspace">Backspace</string>
+    <string name="shortcuts_backspace_desc">Go back to parent folder</string>
+    <string name="shortcuts_file_ops">File Operations</string>
+    <string name="shortcuts_enter">Enter</string>
+    <string name="shortcuts_enter_desc">Open file or folder</string>
+    <string name="shortcuts_ctrl_enter">Ctrl + Enter</string>
+    <string name="shortcuts_ctrl_enter_desc">Open in new tab</string>
+    <string name="shortcuts_shift_enter">Shift + Enter</string>
+    <string name="shortcuts_shift_enter_desc">Open in new window</string>
+    <string name="shortcuts_ctrl_cvx">Ctrl + C / X / V</string>
+    <string name="shortcuts_ctrl_cvx_desc">Copy / Cut / Paste</string>
+    <string name="shortcuts_delete">Delete</string>
+    <string name="shortcuts_delete_desc">Delete (Shift + Delete for permanent)</string>
+    <string name="shortcuts_f2" translatable="false">F2</string>
+    <string name="shortcuts_f2_desc">Rename</string>
+    <string name="shortcuts_f5" translatable="false">F5</string>
+    <string name="shortcuts_f5_desc">Refresh</string>
+    <string name="shortcuts_app_actions">App Actions</string>
+    <string name="shortcuts_ctrl_n">Ctrl + N</string>
+    <string name="shortcuts_ctrl_n_desc">New window</string>
+    <string name="shortcuts_ctrl_w">Ctrl + W</string>
+    <string name="shortcuts_ctrl_w_desc">Close window</string>
+    <string name="shortcuts_ctrl_zy">Ctrl + Z / Y</string>
+    <string name="shortcuts_ctrl_zy_desc">Undo / Redo</string>
+    <string name="shortcuts_ctrl_wheel">Ctrl + Mouse Wheel</string>
+    <string name="shortcuts_ctrl_wheel_desc">Zoom in / out</string>
+    <string name="shortcuts_ctrl_slash">Ctrl + /</string>
+    <string name="shortcuts_ctrl_slash_desc">Shortcut Cheatsheet</string>
+    <string name="shortcuts_mouse">Mouse</string>
+    <string name="shortcuts_right_click">Right Click</string>
+    <string name="shortcuts_right_click_desc">Context menu</string>
+    <string name="shortcuts_middle_click">Middle Click</string>
+    <string name="shortcuts_middle_click_desc">Open in new tab</string>
+    <string name="shortcuts_shift_middle_click">Shift + Middle Click</string>
+    <string name="shortcuts_shift_middle_click_desc">Open in new window</string>
+    <string name="shortcuts_drag">Drag</string>
+    <string name="shortcuts_drag_desc">Copy</string>
+    <string name="shortcuts_shift_drag">Shift + Drag</string>
+    <string name="shortcuts_shift_drag_desc">Move</string>
+
+    <!-- Archive Operations -->
+    <string name="archive_create">Create Archive</string>
+    <string name="archive_name">Archive Name</string>
+    <string name="archive_comp_method">Compression Method</string>
+    <string name="archive_comp_level">Compression Level</string>
+    <string name="archive_enc_method">Encryption Method</string>
+    <string name="archive_password">Password</string>
+    <string name="archive_delete_source">Delete source files after archiving</string>
+    <string name="archive_extract">Extract Archive</string>
+    <string name="archive_extract_options">Choose extraction options for: %1$s</string>
+    <string name="archive_extract_separate">Extract to separate folder</string>
+    <string name="archive_extract_current">Extract to current folder</string>
+    <string name="archive_extract_delete_source">Delete source archive after extraction</string>
+    <string name="archive_encrypted_title">Encrypted Archive</string>
+    <string name="archive_enter_password">Please enter the password for: %1$s</string>
+    <string name="archive_button">Archive</string>
+    <string name="extract_button">Extract</string>
+    <string name="archive_inner_error">Cannot open file inside archive yet</string>
+
+    <!-- File Operations Dialogs -->
+    <string name="conflict_title">File Conflict</string>
+    <string name="conflict_message">A file named \"%1$s\" already exists. What would you like to do?</string>
+    <string name="conflict_remember">Remember selection for this session</string>
+    <string name="conflict_merge">Merge</string>
+    <string name="conflict_keep_both">Keep Both</string>
+    <string name="conflict_replace">Replace</string>
+    <string name="delete_confirm_title">Confirm Delete</string>
+    <string name="delete_item_this">this item</string>
+    <string name="delete_items_count">%1$d items</string>
+    <string name="delete_confirm_message">Are you sure you want to delete %1$s?</string>
+    <string name="delete_recycle_bin">Recycle Bin</string>
+    <string name="delete_permanently">Permanently</string>
+    <string name="delete_permanent_title">Permanently Delete</string>
+    <string name="delete_permanent_message">Are you sure you want to delete %1$s permanently? This action cannot be undone.</string>
+
+    <!-- Progress Dialog -->
+    <string name="op_deleting">Deleting items…</string>
+    <string name="op_extracting">Extracting archive…</string>
+    <string name="op_compressing">Compressing items…</string>
+    <string name="op_processing">Processing items…</string>
+    <string name="op_finished">Finished</string>
+    <string name="op_time_remaining">Time remaining:</string>
+    <string name="op_items_remaining">Items remaining:</string>
+    <string name="op_speed">Speed:</string>
+    <string name="op_background">Background</string>
+    <string name="op_min_remaining">About %1$d min remaining</string>
+    <string name="op_sec_remaining">About %1$d sec remaining</string>
+    <string name="op_renaming">Renaming %1$s…</string>
+    <string name="op_copying">Copying 1 item…</string>
+    <string name="op_copying_items">Copying %1$d items…</string>
+    <string name="op_extracting_an_archive">Extracting 1 item…</string>
+    <string name="op_extracting_archives">Extracting %1$d archives…</string>
+    <string name="op_compressing_an_item">Compressing 1 item…</string>
+    <string name="op_compressing_items">Compressing %1$d items…</string>
+    <string name="op_deleting_an_item">Deleting 1 item…</string>
+    <string name="op_deleting_items">Deleting %1$d items…</string>
+    <string name="op_trashing">Moving 1 item to Recycle Bin…</string>
+    <string name="op_trashing_items">Moving %1$d items to Recycle Bin…</string>
+    <string name="op_restoring">Restoring 1 item…</string>
+    <string name="op_restoring_items">Restoring %1$d items…</string>
+    <string name="op_sec">sec</string>
+
+    <!-- Notifications -->
+    <string name="notif_description">Progress of file operations</string>
+
+    <!-- Settings -->
+    <string name="settings">Settings</string>
+    <string name="settings_appearance">Appearance</string>
+    <string name="settings_theme">Theme</string>
+    <string name="settings_theme_system">System default</string>
+    <string name="settings_theme_light">Light mode</string>
+    <string name="settings_theme_dark">Dark mode</string>
+    <string name="settings_colorful_bars">Colorful top and tab bars</string>
+    <string name="settings_colorful_bars_desc">Enable accent colors for the top bar and tab bar.</string>
+    <string name="settings_details_large">Details (Large screens only)</string>
+    <string name="settings_details_hidden">Hidden</string>
+    <string name="settings_details_pane">Side Pane</string>
+    <string name="settings_details_bar">Bottom Bar</string>
+    <string name="settings_show_command_bar">Show Command Bar</string>
+    <string name="settings_show_command_bar_desc">Toolbar with file operation buttons below the address bar.</string>
+    <string name="settings_show_hidden_files">Show hidden files/folders</string>
+    <string name="settings_show_hidden_files_desc">Show files and folders that start with a dot.</string>
+    <string name="settings_icon_selection">Icon Selection Toggle</string>
+    <string name="settings_icon_selection_desc">Toggle selection by tapping the file icon with touch or stylus.</string>
+    <string name="settings_file_ops">File Operations</string>
+    <string name="settings_deletion_behavior">Deletion Behavior</string>
+    <string name="settings_del_ask">Ask each time</string>
+    <string name="settings_del_recycle">Move to Recycle Bin</string>
+    <string name="settings_del_permanent">Delete permanently</string>
+    <string name="settings_internal_archive">Use Internal Archive Viewer</string>
+    <string name="settings_internal_archive_desc">Open zip files directly inside the app instead of launching external apps.</string>
+    <string name="settings_shortcuts_desc">View available keyboard and mouse shortcuts</string>
+    <string name="settings_default_view_mode">Default View Mode</string>
+    <string name="settings_choose_default_view_mode">Choose Default View Mode</string>
+    <string name="settings_choose_del_behavior">Choose Deletion Behavior</string>
+    <string name="settings_choose_theme">Choose Theme</string>
+    <string name="settings_choose_details_mode">Choose Details Mode</string>
+    <string name="settings_language">Language</string>
+    <string name="settings_language_system">System default</string>
+    <string name="settings_language_english">English</string>
+    <string name="settings_language_turkish">Turkish</string>
+    <string name="settings_language_french">French</string>
+    <string name="settings_language_portuguese">Portuguese</string>
+    <string name="settings_language_spanish">Spanish</string>
+    <string name="settings_choose_language">Choose Language</string>
+    <string name="settings_default_folder_options">Default Folder Options</string>
+    <string name="settings_default_folder_options_desc">View mode, sort order, headers and zoom defaults</string>
+    <string name="settings_sort_by">Sort by</string>
+    <string name="settings_sort_order">Order</string>
+    <string name="sort_ascending">Ascending</string>
+    <string name="sort_descending">Descending</string>
+    <string name="settings_details_headers">Details Headers</string>
+    <string name="settings_default_zoom">Default Zoom (Grid / Gallery)</string>
+    <string name="settings_reset_folder_options">Reset to defaults</string>
+    <string name="settings_reset_folder_options_title">Reset to defaults</string>
+    <string name="settings_reset_folder_options_confirm">This will reset all default folder options to their original values.</string>
+    <string name="reset">Reset</string>
+    <string name="settings_reset_all">Reset all folder overrides</string>
+    <string name="settings_reset_all_title">Reset all folder overrides</string>
+    <string name="settings_reset_all_confirm">This will clear all per-folder custom settings (view mode, sort, zoom, etc.) and reset them to the global defaults above.</string>
+
+    <!-- Context Menus/Command Bar -->
+    <string name="menu_restore">Restore</string>
+    <string name="menu_delete_permanently">Delete Permanently</string>
+    <string name="menu_properties">Properties</string>
+    <string name="menu_open">Open</string>
+    <string name="menu_open_with">Open With…</string>
+    <string name="menu_open_new_tab">Open in New Tab</string>
+    <string name="menu_open_new_window">Open in New Window</string>
+    <string name="menu_remove_favorites">Remove from Favorites</string>
+    <string name="menu_add_favorites">Add to Favorites</string>
+    <string name="menu_add_home">Add to Home</string>
+    <string name="menu_extract">Extract…</string>
+    <string name="menu_compress">Compress…</string>
+    <string name="menu_cut">Cut</string>
+    <string name="menu_copy">Copy</string>
+    <string name="menu_paste">Paste</string>
+    <string name="menu_rename">Rename</string>
+    <string name="menu_share">Share</string>
+    <string name="menu_delete">Delete</string>
+    <string name="menu_new">New</string>
+    <string name="menu_sort">Sort</string>
+    <string name="menu_view">View</string>
+    <string name="menu_group">Grouping</string>
+    <string name="menu_folders_first">Folders first</string>
+    <string name="menu_show_hidden">Show hidden files</string>
+    <string name="retry">Retry</string>
+    <string name="github">GitHub</string>
+    <string name="folder_prefix">Folder - %s</string>
+    <string name="file_size_date">%1$s - %2$s</string>
+    <string name="network_error">Network error</string>
+    <string name="test_connected">✓ Connected</string>
+    <string name="test_failed">Failed</string>
+    <string name="placeholder_display_name">My NAS</string>
+    <string name="placeholder_host">192.168.1.x  or  nas.local</string>
+    <string name="placeholder_anonymous">Leave blank for anonymous</string>
+    <string name="placeholder_username">username</string>
+    <string name="label_private_key_uri">Private key URI (optional)</string>
+    <string name="placeholder_private_key_uri">content://…</string>
+    <string name="label_private_key_passphrase">Private key passphrase (optional)</string>
+    <string name="label_private_key_text">Private key text fallback (optional)</string>
+    <string name="placeholder_private_key_text">-----BEGIN OPENSSH PRIVATE KEY-----</string>
+    <string name="label_domain">Domain / Workgroup (optional)</string>
+    <string name="today">Today</string>
+    <string name="yesterday">Yesterday</string>
+    <string name="this_week">This Week</string>
+    <string name="this_month">This Month</string>
+    <string name="older">Older</string>
+    <string name="size_less_than_1kb">&lt; 1 KB</string>
+    <string name="size_1kb_to_1mb">1 KB – 1 MB</string>
+    <string name="size_1mb_to_100mb">1 MB – 100 MB</string>
+    <string name="size_100mb_to_1gb">100 MB – 1 GB</string>
+    <string name="size_more_than_1gb">≥ 1 GB</string>
+    <string name="group_name_numbers">0-9</string>
+    <string name="group_name_symbols">#</string>
+    <string name="file_type_format_archive">%s Archive</string>
+    <string name="file_type_format_image">%s Image</string>
+    <string name="file_type_format_video">%s Video</string>
+    <string name="file_type_format_audio">%s Audio</string>
+    <string name="file_type_format_document">%s Document</string>
+    <string name="file_type_format_file">%s File</string>
+    <string name="kind_folder">kind:folder</string>
+    <string name="kind_document">kind:document</string>
+    <string name="kind_image">kind:image</string>
+    <string name="kind_video">kind:video</string>
+    <string name="kind_audio">kind:audio</string>
+    <string name="kind_archive">kind:archive</string>
+    <string name="menu_empty_recycle_bin">Empty Recycle Bin</string>
+    <string name="menu_refresh">Refresh</string>
+    <string name="menu_text_document">Text Document</string>
+    <string name="menu_by_name">By Name</string>
+    <string name="menu_by_date">By Date</string>
+    <string name="menu_by_size">By Size</string>
+    <string name="menu_by_date_deleted">By Date Deleted</string>
+    <string name="menu_by_location">By Location</string>
+    <string name="menu_details">Details</string>
+    <string name="menu_grid">Grid</string>
+    <string name="menu_gallery">Gallery</string>
+    <string name="menu_content">Content</string>
+    <string name="menu_subtitles">Subtitles</string>
+    <string name="menu_audio_track">Audio Track</string>
+    <string name="menu_speed">Speed</string>
+    <string name="menu_aspect_ratio">Aspect Ratio</string>
+    <string name="menu_open_with_no_dots">Open With</string>
+    <string name="menu_select">Select</string>
+    <string name="menu_clear_selection">Clear Selection</string>
+    <string name="menu_select_inverse">Select Inverse</string>
+    <string name="menu_remove">Remove</string>
+    <string name="menu_zoom_in">Zoom in</string>
+    <string name="menu_zoom_out">Zoom out</string>
+    <string name="menu_reset_zoom">Reset zoom</string>
+    <string name="menu_copy_image">Copy image</string>
+    <string name="menu_set_wallpaper">Set as Wallpaper</string>
+    <string name="menu_fullscreen">Fullscreen</string>
+    <string name="menu_undo">Undo</string>
+    <string name="menu_redo">Redo</string>
+
+    <!-- Navigation -->
+    <string name="nav_library_items">Library items</string>
+    <string name="nav_recent">Recent</string>
+    <string name="nav_gallery">Gallery</string>
+    <string name="menu_gallery_albums">Albums</string>
+    <string name="nav_add_storage">Add Storage</string>
+    <string name="nav_internal_storage">Internal Storage</string>
+    <string name="nav_vibe_area">My suite</string>
+    <string name="nav_external_ftp">View External FTP Server</string>
+    <string name="nav_bookmarks">Bookmarks</string>
+    <string name="nav_trash">Recycle Bin</string>
+    <string name="nav_external_drive">External Drive</string>
+    <string name="nav_favorites">Favorites</string>
+    <string name="nav_no_favorites">No favorites added</string>
+    <string name="nav_library">Library</string>
+    <string name="nav_recycle_bin">Recycle Bin</string>
+    <string name="nav_storage">Storage</string>
+    <string name="nav_added_locations">Added Locations</string>
+    <string name="nav_sd_card">SD Card</string>
+    <string name="nav_external_location">External Location</string>
+    <string name="nav_unknown_folder">Unknown Folder</string>
+    <string name="nav_collapse">Collapse</string>
+    <string name="nav_expand">Expand</string>
+    <string name="nav_storage_usage_label">%1$s free of %2$s</string>
+    <string name="nav_network">Network</string>
+    <string name="nav_add_local_storage">Add Local Storage</string>
+    <string name="nav_add_network_storage">Add Network Storage</string>
+    <string name="nav_network_protocol">Protocol</string>
+    <string name="nav_network_display_name">Display Name</string>
+    <string name="nav_network_host">Host</string>
+    <string name="nav_network_port">Port</string>
+    <string name="nav_network_username">Username</string>
+    <string name="nav_network_password">Password</string>
+    <string name="nav_network_remote_path">Remote Path</string>
+    <string name="nav_network_save">Save</string>
+    <string name="nav_network_edit">Edit Connection</string>
+    <string name="nav_network_use_tls">Use FTPS (TLS)</string>
+    <string name="nav_network_passive_mode">Passive mode</string>
+    <string name="nav_network_root_url">Full URL (optional override)</string>
+    <string name="nav_network_accept_untrusted">Accept self-signed certificates</string>
+    <string name="nav_network_test">Test Connection</string>
+
+    <!-- Item Types -->
+    <string name="archive">Archive</string>
+    <string name="image">Image</string>
+    <string name="video">Video</string>
+    <string name="audio">Audio</string>
+    <string name="document">Document</string>
+    <string name="file">File</string>
+    <string name="folder">Folder</string>
+
+    <!-- Actions/Operations Messages -->
+    <string name="msg_preparing">Preparing…</string>
+    <string name="msg_starting">Starting…</string>
+    <string name="msg_cancelling">Cancelling…</string>
+    <string name="msg_cancelled">Cancelled</string>
+    <string name="msg_rename_failed">Rename failed</string>
+    <string name="msg_select_rename">Select a file to rename</string>
+    <string name="msg_select_one_rename">Select only one file to rename</string>
+    <string name="msg_failed_create_folder">Failed to create folder</string>
+    <string name="msg_failed_create_file">Failed to create file</string>
+    <string name="msg_recycle_bin_empty">Recycle Bin is already empty</string>
+    <string name="msg_select_pin">Select a file or folder to add</string>
+    <string name="msg_select_one_pin">Select only one item to add</string>
+    <string name="msg_operation_cancelled">Operation Cancelled</string>
+    <string name="msg_pasted_count">Pasted %1$d files</string>
+    <string name="msg_moved_count">Moved %1$d files</string>
+    <string name="msg_restored_count">Restored %1$d files</string>
+    <string name="msg_moved_to_recycle_bin">Moved to Recycle Bin</string>
+    <string name="msg_moved_to_recycle_bin_count">Moved %1$d files to Recycle Bin</string>
+    <string name="msg_moved_to_recycle_bin_partial">Moved %1$d files to Recycle Bin (some failed)</string>
+    <string name="msg_share_failed_prepare">Could not prepare files for sharing</string>
+    <string name="msg_no_app_share">No app found to share this file</string>
+    <string name="msg_no_app_open">No app found to open this file</string>
+    <string name="msg_apk_install_permission">Please allow permission, then click the APK again to install.</string>
+    <string name="msg_search_results" translatable="false">search_results</string>
+    <string name="msg_search_failed">Search failed</string>
+    <string name="msg_invalid_path">Invalid path</string>
+    <string name="msg_file_not_found">File or directory not found</string>
+    <string name="msg_not_dir_archive">Not a directory or archive</string>
+    <string name="msg_failed_open_image">Failed to open image</string>
+    <string name="msg_image_copied">Image copied to clipboard</string>
+    <string name="msg_failed_copy_image">Failed to copy image</string>
+    <string name="msg_failed_set_wallpaper">Failed to set wallpaper</string>
+    <string name="msg_share_image_via">Share image via</string>
+    <string name="msg_no_file_specified">No file specified</string>
+    <string name="msg_not_supported_archive">Cannot open file inside archive yet</string>
+    <string name="msg_op_completed">File operation completed.</string>
+    <string name="msg_already_at_storage_root">Already at storage root</string>
+    <string name="msg_already_at_saf_root">Already at picked folder root</string>
+    <string name="msg_empty_clipboard">Clipboard is empty</string>
+    <string name="msg_compression_failed">Compression failed: %1$s</string>
+    <string name="msg_unknown_compression_error">Unknown compression error</string>
+    <string name="menu_set_wallpaper_failed">Failed to set wallpaper</string>
+
+
+    <!-- Dialog Titles -->
+    <string name="dialog_new_folder">New Folder</string>
+    <string name="dialog_new_file">New Text Document</string>
+    <string name="dialog_rename">Rename</string>
+    <string name="dialog_search_options">Search Options</string>
+
+    <!-- Search -->
+    <string name="search_subfolders">Search all subfolders</string>
+    <string name="search_kind">kind: (File type)</string>
+    <string name="search_and" translatable="false">AND</string>
+    <string name="search_or" translatable="false">OR</string>
+    <string name="search_not" translatable="false">NOT</string>
+    <string name="search_ext">*.ext (Extension)</string>
+
+    <!-- Image Viewer/ Video Player -->
+    <string name="unknown_resolution">Unknown Resolution</string>
+    <string name="media_playing">Playing</string>
+    <string name="media_paused">Paused</string>
+    <string name="media_loop_on">Loop: On</string>
+    <string name="media_loop_off">Loop: Off</string>
+    <string name="media_speed_normal">Normal (1x)</string>
+    <string name="media_no_audio_tracks">No audio tracks found</string>
+    <string name="media_fit">Fit (Default)</string>
+    <string name="media_fill">Fill</string>
+    <string name="media_zoom">Zoom (Crop)</string>
+    <string name="media_fixed_w">Fixed width</string>
+    <string name="media_fixed_h">Fixed height</string>
+    <string name="media_audio_track">Audio track $1%d</string>
+    <string name="media_subtitle_track">Subtitle track $1%d</string>
+    <string name="media_volume">Volume</string>
+    <string name="media_loop">Loop</string>
+    <string name="media_viewed">Viewed image</string>
+    <string name="media_share_image_failed">Failed to share image</string>
+    <string name="media_thumbnail">Thumbnail</string>
+
+    <!-- Details Headers -->
+    <string name="details_header_name">Name</string>
+    <string name="details_header_size">Size</string>
+    <string name="details_header_date">Date</string>
+    <string name="details_header_date_deleted">Date Deleted</string>
+    <string name="details_header_deleted_from">Location</string>
+
+    <string name="menu_move">Move</string>
+    <string name="move_or_copy_title">Move or Copy?</string>
+    <string name="move_or_copy_message">Do you want to move or copy the dragged files to this location?</string>
+    <string name="settings_touch_drag">Touch drag behavior</string>
+    <string name="settings_touch_drag_title">Choose touch drag behavior</string>
+    <string name="settings_touch_drag_ask">Ask each time</string>
+    <string name="settings_touch_drag_copy">Always copy</string>
+    <string name="settings_touch_drag_move">Always move</string>
+    <string name="msg_cancelled_deletion">Deletion Cancelled</string>
+    <string name="msg_deletion">Deleted %1$d files</string>
+    <string name="details_header_type">Type</string>
+    <string name="menu_by_type">By Type</string>
+    <string name="menu_group_by">Group by %s</string>
+
+    <plurals name="group_item_count">
+        <item quantity="one">%d item</item>
+        <item quantity="other">%d items</item>
+    </plurals>
+
+    <!-- Network file operations -->
+    <string name="msg_remote_permanent_warning">Network files will be deleted permanently (cannot be moved to trash).</string>
+    <string name="msg_archive_remote_unsupported">Archiving is not yet supported for network locations.</string>
+    <string name="msg_remote_trash_skipped">Can\'t move network files to trash. They will be deleted permanently.</string>
+    <string name="settings_about">About</string>
+
+</resources>
