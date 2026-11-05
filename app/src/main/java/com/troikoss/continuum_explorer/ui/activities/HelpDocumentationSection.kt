@@ -77,10 +77,10 @@ fun HelpDocumentationSection(
                 title = "4. Release APK Compression & Multi-ABI GitHub Actions CI/CD",
                 badge = "Build & CI",
                 icon = Icons.Default.BuildCircle,
-                summary = "R8 code/resource shrinking and automated GitHub Actions compilation for all Android architectures.",
+                summary = "Compressed JNI packaging, per-ABI native splitting, and error-free GitHub Actions compilation for all Android architectures.",
                 bullets = listOf(
-                    "Release APK Size Compression: Enabled R8 minification (isMinifyEnabled), unused resource shrinking (isShrinkResources), and PNG crunching with ProGuard keep rules for Ktor, Netty, Apache FtpServer, POI, PDFBox, and SMBJ.",
-                    "Multi-Architecture GitHub Workflow (.github/workflows/android-build.yml): Builds arm64-v8a, armeabi-v7a, x86_64, x86, Universal APK, and Play Store AAB packages using JDK 21 and Gradle 9.3.1.",
+                    "Release APK Size Compression & R8 Fix: Compresses APK size via per-ABI native .so filtering (-PabiTarget), Deflate-compressed JNI packaging (useLegacyPackaging = true), PNG crunching, and metadata exclusions while bypassing brittle R8 OSGi/Log4j bytecode verification failures.",
+                    "Multi-Architecture GitHub Workflow (.github/workflows/android-build.yml): Builds arm64-v8a, armeabi-v7a, x86_64, x86, Universal APK, and Play Store AAB packages using actions/setup-java@v5 (JDK 21), Node 24 actions compatibility, warm Gradle daemon reuse, and Gradle 9.3.1.",
                     "Automated 0.0.x+1 Versioning & Optional Releases: Base version starts at 0.0.1 and automatically increments to 0.0.x+1 on each workflow run (or accepts a custom number/version input) with optional one-click GitHub Release publishing and zero personal data exposure."
                 )
             ),

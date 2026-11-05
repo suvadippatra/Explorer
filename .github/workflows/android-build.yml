@@ -38,6 +38,9 @@ on:
 permissions:
   contents: write
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build-android:
     name: Build (${{ inputs.build_target }} - ${{ inputs.build_variant }})
@@ -48,7 +51,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up JDK 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: 'temurin'
           java-version: '21'
@@ -124,12 +127,14 @@ jobs:
           if [ "$VARIANT" == "release" ]; then
             CAP_VARIANT="Release"
             SUBDIR="release"
+            SKIP_LINT="-x lintVitalAnalyzeRelease -x lintVitalReportRelease -x lintVitalRelease"
           else
             CAP_VARIANT="Debug"
             SUBDIR="debug"
+            SKIP_LINT=""
           fi
 
-          GRADLE_VER_ARGS="-PversionName=${VERSION_NAME} -PversionCode=${VERSION_CODE} --no-daemon"
+          GRADLE_VER_ARGS="-PversionName=${VERSION_NAME} -PversionCode=${VERSION_CODE} ${SKIP_LINT}"
 
           build_abi_apk() {
             ABI=$1

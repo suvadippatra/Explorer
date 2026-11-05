@@ -818,8 +818,9 @@ class KtorEmbeddedServer(
                             }
                         }
                         div("toolbar") {
-                            if (!isRootView && currentDir.parentFile != null) {
-                                val parentEncoded = URLEncoder.encode(currentDir.parentFile.absolutePath, "UTF-8")
+                            val parentPath = currentDir.parentFile?.absolutePath
+                            if (!isRootView && !parentPath.isNullOrEmpty()) {
+                                val parentEncoded = URLEncoder.encode(parentPath, "UTF-8")
                                 a(href = "/?explorer=true&path=$parentEncoded", classes = "btn") {
                                     +"↑ Up Folder"
                                 }
