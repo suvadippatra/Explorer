@@ -45,6 +45,7 @@ import com.troikoss.continuum_explorer.rules.MiniAppRuleDescriptor
 import com.troikoss.continuum_explorer.utils.IconHelper
 import com.troikoss.continuum_explorer.utils.open
 import com.troikoss.continuum_explorer.utils.openInEdit
+import com.troikoss.continuum_explorer.utils.openInFileConverter
 import com.troikoss.continuum_explorer.utils.toUniversal
 import java.io.File
 
@@ -138,6 +139,12 @@ fun VibeAreaScreen(
     }
 
     fun handleMiniAppClick(descriptor: MiniAppRuleDescriptor) {
+        if (descriptor.id == "file_converter") {
+            if (appState != null) {
+                appState.openInFileConverter(emptyList())
+            }
+            return
+        }
         if (descriptor.requiresInitialFileFromDisk) {
             // PhotoEditor Studio: immediately open file picker to choose an image to edit
             showOpenFilePicker = true

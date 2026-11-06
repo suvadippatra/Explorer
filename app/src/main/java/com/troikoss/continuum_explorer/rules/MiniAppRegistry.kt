@@ -5,6 +5,7 @@ import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.TableChart
+import androidx.compose.material.icons.filled.Transform
 import androidx.compose.ui.graphics.Color
 
 /**
@@ -14,6 +15,18 @@ import androidx.compose.ui.graphics.Color
 object MiniAppRegistry {
 
     val allMiniApps: List<MiniAppRuleDescriptor> = listOf(
+        MiniAppRuleDescriptor(
+            id = "file_converter",
+            title = "File Converter",
+            subtitle = "VERT-inspired 100% local batch converter for Images, Docs, Data, Audio/Video & Archives",
+            badge = "VERT Native",
+            icon = Icons.Default.Transform,
+            accentColor = Color(0xFF0EA5E9),
+            supportedExtensions = emptySet(),
+            isActiveInUi = true,
+            requiresInitialFileFromDisk = false,
+            defaultNewFileName = null
+        ),
         MiniAppRuleDescriptor(
             id = "text_editor",
             title = "Markor Text & Code Studio",

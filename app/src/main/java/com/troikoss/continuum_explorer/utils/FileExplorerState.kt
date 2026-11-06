@@ -158,6 +158,8 @@ class FileExplorerState(
     var showBatchRenameDialog by mutableStateOf(false)
     var activeEditorToolId by mutableStateOf<String?>(null)
     var activeEditorToolTitle by mutableStateOf<String?>(null)
+    val converterInitialFiles = mutableStateListOf<File>()
+    var onOpenFileConverterTab: ((List<File>) -> Unit)? = null
 
     // APK Package Info Sheet & Non-Editable Binary Info Sheet state
     var activeApkInstallerFile by mutableStateOf<UniversalFile?>(null)
@@ -166,6 +168,8 @@ class FileExplorerState(
     fun closeViewerOrReturnToOrigin() {
         viewingFile = null
         openInEditMode = false
+        activeEditorToolId = null
+        activeEditorToolTitle = null
         if (isDedicatedViewerTab && onCloseCurrentTabAndReturnToOrigin != null) {
             onCloseCurrentTabAndReturnToOrigin?.invoke()
         }

@@ -117,13 +117,23 @@ fun FloatingMiniAppHost(
 
                 // Window Body
                 Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                    if (session.file != null) {
-                        ViewOnlyFileViewer(
-                            file = session.file,
-                            appState = appState,
-                            startInEditMode = session.openInEditMode,
-                            onClose = onClose
-                        )
+                    when {
+                        session.toolId == "file_converter" -> {
+                            com.troikoss.continuum_explorer.ui.converter.FileConverterScreen(
+                                appState = appState,
+                                initialFiles = session.initialFiles,
+                                onBack = onClose,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
+                        session.file != null -> {
+                            ViewOnlyFileViewer(
+                                file = session.file,
+                                appState = appState,
+                                startInEditMode = session.openInEditMode,
+                                onClose = onClose
+                            )
+                        }
                     }
                 }
 

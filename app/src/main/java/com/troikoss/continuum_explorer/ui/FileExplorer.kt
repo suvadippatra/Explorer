@@ -94,7 +94,9 @@ fun FileExplorer(
     initialLibraryItem: LibraryItem = LibraryItem.None,
     initialNetworkConnectionId: String? = null,
     initialOpenFilePath: String? = null,
-    initialOpenInEditMode: Boolean = false
+    initialOpenInEditMode: Boolean = false,
+    initialEditorToolId: String? = null,
+    initialConverterFilePaths: List<String> = emptyList()
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -111,6 +113,9 @@ fun FileExplorer(
             // Clear heavy references before removing tab to prevent any memory retention
             tabToClose.viewingFile = null
             tabToClose.openInEditMode = false
+            tabToClose.activeEditorToolId = null
+            tabToClose.activeEditorToolTitle = null
+            tabToClose.converterInitialFiles.clear()
             tabs.removeAt(idx)
             selectedTabIndex = if (originIdx != null) {
                 val adjustedOrigin = if (originIdx > idx) originIdx - 1 else originIdx
@@ -121,6 +126,9 @@ fun FileExplorer(
         } else {
             tabToClose.viewingFile = null
             tabToClose.openInEditMode = false
+            tabToClose.activeEditorToolId = null
+            tabToClose.activeEditorToolTitle = null
+            tabToClose.converterInitialFiles.clear()
         }
     }
 
@@ -128,6 +136,20 @@ fun FileExplorer(
         return FileExplorerState(ctx, scp).apply {
             onCloseCurrentTabAndReturnToOrigin = {
                 closeTabAndReturnToOrigin(this)
+            }
+
+            onOpenFileConverterTab = { files ->
+                val originIdx = selectedTabIndex.coerceIn(0, (tabs.size - 1).coerceAtLeast(0))
+                val newState = createNewTabState(ctx, scp).apply {
+                    originTabIndex = originIdx
+                    isDedicatedViewerTab = true
+                    libraryItem = LibraryItem.VibeArea
+                    activeEditorToolId = "file_converter"
+                    activeEditorToolTitle = "File Converter"
+                    converterInitialFiles.addAll(files)
+                }
+                tabs.add(newState)
+                selectedTabIndex = tabs.size - 1
             }
 
             onOpenInNewEditTab = { item ->
@@ -217,6 +239,16 @@ fun FileExplorer(
         if (tabs.isEmpty()) {
             val firstState = createNewTabState(context, scope)
             when {
+                !initialEditorToolId.isNullOrBlank() -> {
+                    firstState.libraryItem = LibraryItem.VibeArea
+                    firstState.activeEditorToolId = initialEditorToolId
+                    firstState.activeEditorToolTitle = if (initialEditorToolId == "file_converter") "File Converter" else initialEditorToolId
+                    if (initialConverterFilePaths.isNotEmpty()) {
+                        firstState.converterInitialFiles.addAll(
+                            initialConverterFilePaths.map { File(it) }.filter { it.exists() && it.isFile }
+                        )
+                    }
+                }
                 !initialOpenFilePath.isNullOrBlank() -> {
                     val targetFile = File(initialOpenFilePath)
                     if (targetFile.exists()) {
@@ -301,6 +333,7 @@ fun FileExplorer(
             WorkspaceWindowController.activeFloatingPanel != null ||
             drawerState.isOpen ||
             appState.viewingFile != null ||
+            appState.activeEditorToolId != null ||
             appState.isVideoFullScreen ||
             appState.isPreviewFullScreen ||
             (appState.isPreviewPaneVisible && isMobileScreen) ||
@@ -320,6 +353,14 @@ fun FileExplorer(
                     appState.isPreviewFullScreen = false
                 } else {
                     appState.closeViewerOrReturnToOrigin()
+                }
+            }
+            appState.activeEditorToolId != null -> {
+                if (appState.isDedicatedViewerTab && tabs.size > 1) {
+                    closeTabAndReturnToOrigin(appState)
+                } else {
+                    appState.activeEditorToolId = null
+                    appState.activeEditorToolTitle = null
                 }
             }
             appState.isPreviewFullScreen -> appState.isPreviewFullScreen = false
@@ -484,11 +525,16 @@ fun FileExplorer(
                 appState = appState,
                 onExpandToFullTab = { sess ->
                     WorkspaceWindowController.closeFloatingPanel()
-                    if (sess.file != null) {
-                        if (sess.openInEditMode) {
-                            appState.onOpenInNewEditTab?.invoke(sess.file)
-                        } else {
-                            appState.onOpenInNewTab?.invoke(sess.file)
+                    when {
+                        sess.toolId == "file_converter" -> {
+                            appState.onOpenFileConverterTab?.invoke(sess.initialFiles)
+                        }
+                        sess.file != null -> {
+                            if (sess.openInEditMode) {
+                                appState.onOpenInNewEditTab?.invoke(sess.file)
+                            } else {
+                                appState.onOpenInNewTab?.invoke(sess.file)
+                            }
                         }
                     }
                 },
@@ -698,16 +744,34 @@ private fun ExplorerBody(
                             onMenuClick = onMenuClick
                         )
                         stateKey.startsWith("vibe_area:") -> {
-                            if (appState.activeEditorToolId != null) {
-                                com.troikoss.continuum_explorer.ui.editor.EditorContainer(
-                                    editorToolId = appState.activeEditorToolId,
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                            } else {
-                                com.troikoss.continuum_explorer.ui.components.VibeAreaScreen(
-                                    appState = appState,
-                                    onMenuClick = onMenuClick
-                                )
+                            when (appState.activeEditorToolId) {
+                                "file_converter" -> {
+                                    com.troikoss.continuum_explorer.ui.converter.FileConverterScreen(
+                                        appState = appState,
+                                        onBack = {
+                                            if (appState.isDedicatedViewerTab && appState.onCloseCurrentTabAndReturnToOrigin != null) {
+                                                appState.onCloseCurrentTabAndReturnToOrigin?.invoke()
+                                            } else {
+                                                appState.activeEditorToolId = null
+                                                appState.activeEditorToolTitle = null
+                                            }
+                                        },
+                                        onMenuClick = onMenuClick,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                }
+                                null -> {
+                                    com.troikoss.continuum_explorer.ui.components.VibeAreaScreen(
+                                        appState = appState,
+                                        onMenuClick = onMenuClick
+                                    )
+                                }
+                                else -> {
+                                    com.troikoss.continuum_explorer.ui.editor.EditorContainer(
+                                        editorToolId = appState.activeEditorToolId,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                }
                             }
                         }
                         stateKey == "external_ftp" -> com.troikoss.continuum_explorer.ui.components.ExternalFtpViewerPanel(

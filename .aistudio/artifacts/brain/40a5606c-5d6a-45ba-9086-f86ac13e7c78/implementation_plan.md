@@ -1,136 +1,120 @@
-# Continuum Explorer (Explorer) — UX, Windowing Rules, Server & Modular Architecture Plan
+# VERT-Inspired Native File Converter Mini-App ("File Converter" in My Suite)
 
-## 1. Executive Summary & Architectural Goals
-
-This plan addresses all UX, navigation, sidebar, file-handling, server-hosting, and modularity improvements requested:
-
-1. **Logical File Opening, Previewing & Direct Editing Flow**:
-   - **Editable Files (Text, Code, Markdown, CSV, JSON, XML, Images)**:
-     - **Single-Tap / Open in Explorer**: Opens the clean **File Preview** tab (`ViewOnlyFileViewer`) with a prominent **Edit** button in the top action bar.
-     - **Three-Dot Menu / Context Menu ("Edit") or Opening from My Suite**: Bypasses all intermediate preview/landing screens and opens **directly inside the Editor UI** (`MarkorTextEngine`, `CsvTableEditor`, or `PhotoEditorStudio`).
-     - **Launching Editors in My Suite**: Clicking an editor card in My Suite immediately opens a fresh untitled document or file creation/picker action directly inside the editor—eliminating the redundant middle landing screen.
-   - **Playable / Viewable Non-Editable Files (Video, Audio, PDF, Archives like `.zip`/`.tar`)**:
-     - Opens directly in the rich media/document/archive viewer (never raw binary text).
-   - **APK Files (`.apk`)**:
-     - Never opened as a ZIP folder structure. Tapping an `.apk` displays a dedicated **APK Package Info Sheet** (showing app icon, label, package name, version name/code, target/min SDK, file size, and SHA-256) with a primary **Install with Package Installer** button (`Intent.ACTION_VIEW` with `application/vnd.android.package-archive` via `FileProvider`). No "Browse Archive" button is shown.
-   - **Unsupported / Binary Non-Editable Files**:
-     - Never dumped as raw binary garbage. Shows a clean **File Info & Open-With Sheet** displaying file properties and a **Choose Preferred App to View** (`Intent.createChooser`) button.
-
-2. **Leak-Free Tab & Back-Stack Lifecycle**:
-   - Every tab stores an explicit `originTabIndex: Int?` and `returnFolderState` when spawned by opening/editing a file or launching a My Suite tool.
-   - Pressing **Back**, **Save & Close**, or **Close** inside a temporary preview/editor tab cleanly disposes buffers/Bitmaps/ExoPlayer instances, closes the temporary tab, and restores the exact originating tab and scroll position—never dumping the user onto the root `/storage/emulated/0` homepage.
-   - Navigating folders inside a tab pushes onto that tab's `backStack` so system Back steps backward one folder at a time before returning to the parent tab.
-
-3. **Unified Single Sidebar & Responsive Navigation (Mobile, Tablet, DeX)**:
-   - **Mobile (`ScreenSize.SMALL`)**: Uses a single `ModalNavigationDrawer` opened by the TopBar menu icon.
-   - **Tablet & DeX (`ScreenSize.MEDIUM` / `LARGE`)**: Uses a single collapsible `PermanentDrawerSheet` / Rail controlled by `isSidebarCollapsed` state.
-   - **Eliminate Duplicate Sidebars & Broken Back Buttons**:
-     - When the Tablet/DeX sidebar is visible, the redundant hamburger `Menu` button in subpages (`My Suite`, `FTP/HTTP Server`, `External FTP`, `TopBar`) is either hidden or wired directly to toggle `isSidebarCollapsed`—never opening a second `ModalNavigationDrawer` on top of the permanent sidebar.
-     - The collapse button (`ArrowBack` / `MenuOpen`) inside `NavigationPane` is wired to `onToggleSidebar` so it actually collapses the sidebar on Tablet/DeX.
-
-4. **Workspace, Windowing & Mini-App Rules System (User-Selectable in Settings)**:
-   - Configurable in **Settings -> Workspace & Windowing Mode** with three modes (defaulting to Option 1):
-     1. **Mode 1 (Default)**: *Separate Multi-Instance Windows on DeX/Desktop (`FLAG_ACTIVITY_NEW_DOCUMENT` / `FLAG_ACTIVITY_MULTIPLE_TASK` + Freeform bounds), Animated In-App Tabs on Tablet & Mobile*.
-     2. **Mode 2**: *Animated In-App Tabs across DeX, Tablet, and Mobile*.
-     3. **Mode 3**: *Floating Resizable Desktop Panels on DeX and Tablet, Animated Tabs on Mobile*.
-   - **Exact Rules File Locations**:
-     - `app/src/main/java/com/troikoss/continuum_explorer/rules/MiniAppRulesSpec.md` — Human-readable architectural specification for adding future Mini-Apps, window/tab creation, sidebar visibility, and UI standards.
-     - `app/src/main/java/com/troikoss/continuum_explorer/rules/WorkspaceRulesConfig.kt` — Declarative rules data models (`WindowingPolicy`, `SidebarVisibilityRule`, `MiniAppDescriptor`, `TabAnimationSpec`, `FileOpenResolutionRule`).
-     - `app/src/main/java/com/troikoss/continuum_explorer/rules/MiniAppRegistry.kt` — Central registry of My Suite Mini-Apps and file-extension routing rules.
-     - `app/src/main/java/com/troikoss/continuum_explorer/rules/WorkspaceWindowController.kt` — Runtime engine executing tab transitions, floating window overlays, or DeX multi-window intents based on the user's selected rule.
-
-5. **My Suite Recent Edited/Created Database**:
-   - Replaces the device-wide `MediaStore` query in My Suite with a dedicated persistence store (`SuiteActivityDatabase.kt`) that records **only files created or edited inside My Suite / Explorer Editors**, sorted by last edited timestamp with tool badge, file type, and quick-resume action.
-
-6. **Homepage Quick Preview Bar & Side-Pane Polish**:
-   - Makes the Homepage Quick Preview (`WorkspacePreviewPane` / `ViewAreaWindow`) cleanly toggleable from the TopBar eye icon and file context menu, respecting the new APK/binary/media preview rules without cramping narrow windows.
-
-7. **HTTP/FTP Server Hub, Screen Sharing Fix, Responsive Web Portal & Notification Title**:
-   - **Notification Title**: Changes the foreground notification title in `ContinuumHubService.kt` from `"Continuum Server Hub"` to `"Explorer"`.
-   - **Android 8–15 Screen Mirroring Fix (`ScreenCastManager.kt`)**: Registers `MediaProjection.Callback` before calling `createVirtualDisplay()` (mandatory on Android 14 / API 34+ and Android 15), uses a dedicated background `HandlerThread` for `ImageReader` frame capture, and ensures `ContinuumHubService` starts/attaches the MJPEG stream dynamically even if the HTTP server is already running.
-   - **Hideable Screen-Share Player & Responsive Web Portal (`KtorEmbeddedServer.kt` + `WebPortalTemplates.kt`)**:
-     - On the FTP/HTTP File Hosting portal, the screen-mirror video player is **hidden by default** behind a clean **"Live Screen Stream (Show/Hide)"** toggle pill in the header (and only shown when screen mirroring is active).
-     - Redesigns the hosted web file browser with a responsive grid/table switcher, breadcrumb bar, drag-and-drop upload zone, media preview modal, and adaptive layout for mobile, tablet, and desktop browsers.
-
-8. **Archive Base64 Codec Feature**:
-   - Removes Base64 Codec from active UI (`VibeAreaScreen.kt` and `EditorContainer.kt`) and archives its implementation inside `app/src/main/java/com/troikoss/continuum_explorer/archive/base64/ArchivedBase64Codec.kt` for future reference.
-
-9. **Strict Modularity (Separate UI, Functionality/Logic, and Database Files)**:
-   - Splits oversized files into focused, fast-compiling modules under `data/db/`, `domain/logic/`, `rules/`, and `ui/` so every file remains concise and easy to maintain.
+A local-first, privacy-respecting native Android **File Converter** Mini-App inside **My Suite**, modeled after the `VERT-sh/VERT` user experience and engineered in 100% native Kotlin and Jetpack Compose for zero cloud limits, instant responsiveness on Android 8 through Android 15, and zero APK bloat.
 
 ---
 
-## 2. Where the Rules Files Are Located
+## User Review & Critical Decisions
 
-The new Mini-App, Tab/Window Creation, Sidebar, and UI Rules system is stored in:
+> [!IMPORTANT]
+> All four core product decisions have been confirmed from your answers:
 
-1. **`/app/src/main/java/com/troikoss/continuum_explorer/rules/MiniAppRulesSpec.md`**
-   - Complete developer documentation defining how every new Mini-App in **My Suite** must declare its ID, supported extensions, memory cleanup hook, sidebar behavior, and launch mode across Mobile, Tablet, and DeX.
-2. **`/app/src/main/java/com/troikoss/continuum_explorer/rules/WorkspaceRulesConfig.kt`**
-   - Defines `WorkspaceWindowMode` (`DEX_WINDOWS_MOBILE_TABS`, `ALL_ANIMATED_TABS`, `FLOATING_PANELS_DESKTOP_TABLET`), `SidebarVisibilityMode`, `TabLifecycleRule`, and `FileLaunchRule`.
-3. **`/app/src/main/java/com/troikoss/continuum_explorer/rules/MiniAppRegistry.kt`**
-   - Central registry mapping active Mini-Apps (Markor Text & Code Studio, PhotoEditor Studio, CSV & Table Studio) and archived Mini-Apps (Base64 Codec) with extension routing and direct-launch behavior.
-4. **`/app/src/main/java/com/troikoss/continuum_explorer/rules/WorkspaceWindowController.kt`**
-   - Enforces back-stack origin tracking (`originTabId`), animated tab transitions, floating window state (`FloatingPanelState`), and DeX multi-window `Intent` launching.
+- **Confirmed Decision 1 — All 4 Conversion Categories Supported Locally**:
+  1. **Images**: `PNG`, `JPG/JPEG`, `WEBP`, `BMP`, `PDF` (single or multi-image to PDF), `ICO` (multi-resolution Windows/Web icon header), and `SVG` rasterization.
+  2. **Documents, Markup & Data Tables**: `MD` (Markdown), `HTML` (styled standalone document), `PDF` (rendered multi-page PDF), `TXT`, `JSON`, `CSV`, `TSV`, `XML`, `YAML`, and `DOCX/XLSX` extraction/conversion.
+  3. **Audio & Video**: `MP4`, `WEBM`, `MKV`, `MP3`/`M4A`/`AAC` (audio extraction from video or audio transcode via `MediaExtractor`/`MediaMuxer`/`MediaCodec`), `WAV` (uncompressed PCM RIFF WAV synthesis), and video frame/GIF thumbnail extraction.
+  4. **Archives & Packages**: Convert and repack between `ZIP` (including password-protected AES ZIP via Zip4j), `TAR`, `TAR.GZ / TGZ`, and `GZ`, plus one-tap archive extraction.
+- **Confirmed Decision 2 — Special VERT-Style Unified Landing Page**:
+  - Features a single cohesive screen with **Category Filter Pills** (*All, Images, Documents & Data, Audio & Video, Archives*), a prominent **Interactive Dropzone & Multi-File Picker**, a **Global "Convert All To" Bar**, and a **Live Batch Queue** with adaptive 1-column (Mobile) and 2-column (Tablet/DeX) workspace layouts.
+- **Confirmed Decision 3 — Global "Convert All To" + Per-File Output & Tuning Controls**:
+  - Users can apply a global target format to all compatible queued files at once OR customize each file's target format and tuning parameters individually (Image quality %, resize dimensions, strip EXIF, PDF page size, Audio bitrate/sample rate, Video audio-track strip/trim, Archive compression level & optional ZIP password).
+- **Confirmed Decision 4 — Output Destination & My Suite Recent Tracking**:
+  - Users can toggle between saving in a dedicated `Converted` subfolder or alongside the original file (or pick a custom folder), and every converted output file is automatically recorded in `SuiteRecentDatabase` so it immediately appears in **My Suite -> Recent Edited & Created Files**.
 
 ---
 
-## 3. File-by-File Modular Implementation Breakdown
+## 1. Overview & Core Concept
 
-### A. Database & Persistence Layer (`data/db/`)
-- **`/app/src/main/java/com/troikoss/continuum_explorer/data/db/SuiteRecentDatabase.kt` (New)**:
-  - Lightweight SQLite / JSON-backed database tracking only files **created or edited** in My Suite or Explorer Editors (`path`, `name`, `extension`, `editorId`, `lastModified`, `actionType = CREATED | EDITED`), with automatic pruning of deleted files and zero memory overhead.
+- **What It Does**: Brings the signature workflow of **VERT (`VERT-sh/VERT`)** — local-first, no file-size limits, batch-capable multi-format conversion — natively into Continuum Explorer's **My Suite** and Explorer context menus.
+- **Target Audience / Persona**: Power users on Mobile, Tablet, and Samsung DeX/Desktop who need to transcode images, convert Markdown/CSV/JSON/XML/HTML/PDF documents, extract audio tracks from videos into WAV/M4A/MP3, or repackage archives without uploading sensitive files to external servers.
+- **Key Value**:
+  - **100% On-Device Execution**: Uses Android's hardware-accelerated media, graphics, PDF, and archive engines on background coroutines (`Dispatchers.Default` / `Dispatchers.IO`).
+  - **Seamless Explorer Integration**: Launchable both from its **My Suite** card and directly from any file's three-dot context menu in Explorer (*"Convert File..."*), respecting the user's configured Workspace Windowing Mode (Separate DeX Window, Animated In-App Tab with Origin-Tab return, or Floating Resizable Panel).
 
-### B. Rules & Domain Logic Layer (`rules/` & `domain/logic/`)
-- **`/app/src/main/java/com/troikoss/continuum_explorer/rules/MiniAppRulesSpec.md` (New)**
-- **`/app/src/main/java/com/troikoss/continuum_explorer/rules/WorkspaceRulesConfig.kt` (New)**
-- **`/app/src/main/java/com/troikoss/continuum_explorer/rules/MiniAppRegistry.kt` (New)**
-- **`/app/src/main/java/com/troikoss/continuum_explorer/rules/WorkspaceWindowController.kt` (New)**
-- **`/app/src/main/java/com/troikoss/continuum_explorer/domain/logic/FileOpenPolicyEngine.kt` (New)**:
-  - Classifies any `UniversalFile` into:
-    - `EDITABLE_TEXT` / `EDITABLE_TABLE` / `EDITABLE_IMAGE` -> Single-tap opens Preview with Edit button; "Edit" menu action opens Editor directly; My Suite opens Editor directly.
-    - `PLAYABLE_MEDIA_OR_DOC` (Video, Audio, PDF, ZIP/TAR/7Z/RAR excluding APK) -> Opens rich viewer.
-    - `APK_PACKAGE` (`.apk`) -> Opens APK Info & Package Installer Sheet (never Archive folder view).
-    - `NON_EDITABLE_BINARY` -> Opens File Info & Choose Preferred App sheet (never raw binary text).
-- **`/app/src/main/java/com/troikoss/continuum_explorer/domain/logic/ApkMetadataExtractor.kt` (New)**:
-  - Uses Android `PackageManager.getPackageArchiveInfo` to extract the APK's application icon, app name, package name, version name, version code, minSdk, targetSdk, and permissions, plus launches the system Package Installer via `FileProvider`.
+---
 
-### C. Archiving Base64 Codec (`archive/base64/`)
-- **`/app/src/main/java/com/troikoss/continuum_explorer/archive/base64/ArchivedBase64Codec.kt` (New)**:
-  - Preserves the Base64 encoder/decoder logic and UI composable in an archived module removed from active UI navigation.
+## 2. User Experience & Visual Design
 
-### D. UI Components & Screens (`ui/`)
-- **`/app/src/main/java/com/troikoss/continuum_explorer/ui/dialogs/ApkInstallerSheet.kt` (New)**:
-  - Material 3 modal dialog/sheet showing APK icon, app label, package ID, version, SDK levels, file size, and **Install with Package Installer** primary button (no "Browse Archive" button).
-- **`/app/src/main/java/com/troikoss/continuum_explorer/ui/dialogs/NonEditableFileInfoSheet.kt` (New)**:
-  - Clean file info sheet for unsupported/binary files with a **Choose Preferred App to View** button.
-- **`/app/src/main/java/com/troikoss/continuum_explorer/ui/components/FloatingMiniAppHost.kt` (New)**:
-  - Renders draggable, resizable floating windows on Tablet/DeX when Windowing Mode 3 is selected in Settings.
-- **`/app/src/main/java/com/troikoss/continuum_explorer/ui/FileExplorer.kt` & `/app/src/main/java/com/troikoss/continuum_explorer/utils/FileExplorerState.kt`**:
-  - Adds `originTabIndex` to `ExplorerState` so closing a preview/editor tab returns to the exact source tab and folder scroll state.
-  - Unifies the sidebar into a single collapsible rail/drawer on Tablet & DeX (`isSidebarCollapsed`) and single modal drawer on Mobile—eliminating overlapping drawers.
-  - Adds animated tab creation/closing transitions.
-- **`/app/src/main/java/com/troikoss/continuum_explorer/ui/components/NavigationPane.kt`**:
-  - Connects the collapse/hide button on Tablet & DeX to `onToggleSidebar` and hides it when inappropriate.
-- **`/app/src/main/java/com/troikoss/continuum_explorer/ui/components/VibeAreaScreen.kt` & `/app/src/main/java/com/troikoss/continuum_explorer/ui/editor/EditorContainer.kt`**:
-  - Removes the redundant mid-page before editing; clicking a tool or file opens the editor directly.
-  - Connects the "Recent" section in My Suite exclusively to `SuiteRecentDatabase`.
-  - Removes Base64 Codec from the My Suite grid.
-  - Hides the duplicate hamburger menu button when the Tablet/DeX permanent sidebar is already visible.
-- **`/app/src/main/java/com/troikoss/continuum_explorer/ui/components/ViewOnlyFileViewer.kt` & `/app/src/main/java/com/troikoss/continuum_explorer/ui/components/ItemRow.kt` & `ContextMenus.kt`**:
-  - Adds a direct **Edit** item with icon to the three-dot menu of all supported editable files (`txt`, `md`, `json`, `xml`, `csv`, `html`, `css`, `js`, `kt`, `py`, `jpg`, `png`, `webp`).
-  - Removes `.apk` from `isArchive` in `ViewOnlyFileViewer.kt`.
-- **`/app/src/main/java/com/troikoss/continuum_explorer/ui/activities/SettingsScreen.kt` & `/app/src/main/java/com/troikoss/continuum_explorer/utils/SettingsManager.kt`**:
-  - Adds the **Workspace & Mini-App Windowing Mode** selector (Options 1, 2, and 3, with Option 1 as default).
+### Key User Flows
+1. **Launching File Converter**:
+   - **From My Suite**: Tap the **File Converter** Mini-App card in *My Suite* to open the special VERT-inspired landing page directly (no extra middle screen).
+   - **From File Explorer Context Menu**: Tap *"Convert with File Converter"* in any file's three-dot menu to open the File Converter pre-loaded with the selected file(s).
+2. **Adding Files to the Batch Queue**:
+   - Tap the **VERT Interactive Dropzone** (*"Drop or Select Files to Convert — Local-First • Unlimited Size"*) to pick one or multiple files via the in-app multi-file selector or quick-add recent files.
+   - Each queued item is automatically classified into **Image**, **Document/Data**, **Audio/Video**, or **Archive**, displaying its source format badge, file size, and compatible target format dropdown.
+3. **Global vs. Per-File Format & Tuning**:
+   - When multiple files of the same category are queued, the **Global "Convert All To" Bar** lets the user switch all items to a target format (e.g., `WEBP`, `PDF`, `CSV`, `WAV`, `ZIP`) in one tap.
+   - Tapping the **Tune (Sliders)** icon on any queued item (or the global settings drawer) expands format-specific tuning controls:
+     - *Images*: Quality slider (`10%–100%`), Max Width/Height scale (`Original`, `1920px`, `1280px`, `512px`, `Custom`), Background fill color for transparent PNG -> JPG, and Strip EXIF metadata toggle.
+     - *Documents & Data*: Page size (`A4`, `Letter`, `Fit Content`) for PDF output, Pretty-Print indentation for JSON/XML/YAML, Delimiter selector (`,` / `;` / `\t`) for CSV/TSV, and Dark/Light CSS theme for HTML output.
+     - *Audio & Video*: Sample rate (`44.1 kHz`, `48 kHz`), Channels (`Stereo`, `Mono`), Video-to-Audio demuxing (`M4A/AAC`, `WAV`), or container remuxing (`MP4`).
+     - *Archives*: Compression level (`Fastest`, `Normal`, `Maximum`) and optional AES-256 password protection for `.zip` output.
+4. **Live Conversion Progress & Instant Actions**:
+   - Tapping **"Convert All (N)"** runs conversions concurrently with per-item progress bars, speed/elapsed badges, and status indicators (*Queued*, *Converting %*, *Completed*, *Failed*).
+   - Completed items expose one-tap **Preview**, **Edit** (if editable), **Share**, and **Open Folder** buttons, and are automatically logged in `SuiteRecentDatabase`.
 
-### E. Server & Screen Sharing Layer (`server/`)
-- **`/app/src/main/java/com/troikoss/continuum_explorer/server/ContinuumHubService.kt`**:
-  - Changes notification title to `"Explorer"`.
-  - Allows starting/stopping Screen Mirroring dynamically while the HTTP server is already running.
-- **`/app/src/main/java/com/troikoss/continuum_explorer/server/ScreenCastManager.kt`**:
-  - Registers `MediaProjection.Callback` before `createVirtualDisplay()` for Android 14/15 compatibility and pumps frames on a dedicated background `HandlerThread`.
-- **`/app/src/main/java/com/troikoss/continuum_explorer/server/WebPortalTemplates.kt` (New) & `/app/src/main/java/com/troikoss/continuum_explorer/server/KtorEmbeddedServer.kt`**:
-  - Extracts and upgrades the web portal HTML/CSS/JS into a responsive, interactive file-hosting UI where the live screen stream player is hidden by default behind a toggle button and scales cleanly across mobile, tablet, and desktop aspect ratios.
+### Visual Identity & Theme
+- **Aesthetic Direction**: VERT-inspired utilitarian precision combined with Material 3 tonal surfaces — crisp monospace format badges (`PNG → WEBP`, `MD → PDF`, `MP4 → WAV`), glowing emerald status indicators for local-first privacy (`100% On-Device • Zero Cloud Upload`), and responsive split panes.
+- **Responsive Layout Optimization**:
+  - **Mobile (< 600dp)**: Vertical scrollable workspace with compact dropzone header, horizontal category filter chips, sticky bottom *Convert All* action bar, and expandable per-file tuning drawers.
+  - **Tablet & DeX (>= 600dp)**: Canonical two-pane desktop workbench — Left pane houses the VERT Dropzone, Category Explorer & Output Destination settings; Right pane houses the live Batch Queue table, Global "Convert All To" bar, and side-by-side tuning inspector.
 
-### F. Help Documentation (`ui/components/HelpDocumentationSection.kt`)
-- Updates the Help page with complete documentation of the new file opening/editing rules, APK installer flow, My Suite Recent Edited database, Workspace Windowing Modes (1/2/3), unified sidebar, and HTTP/FTP web portal + screen mirroring upgrades.
+---
+
+## 3. Key Product Decisions & Trade-Offs
+
+- **Decision 1 — Pure Native Kotlin Conversion Engines (Zero External Wasm Bloat)**
+  - *Chosen Approach*: Implement dedicated, modular Kotlin engines for Images (`Bitmap`/`Canvas`/`PdfDocument`/ICO binary encoder), Documents & Data (`PdfRenderer`/`PdfDocument`/Markdown-to-HTML-to-PDF/JSON-CSV-XML-YAML AST transformers), Audio/Video (`MediaExtractor`/`MediaMuxer`/`MediaCodec` PCM-to-WAV & AAC/MP4 pipelines), and Archives (`Zip4j` + TAR/GZIP stream engines).
+  - *Why*: Keeps APK size compact, avoids bundling 60MB+ of FFmpeg/Pandoc binaries, guarantees compatibility across ARM64, ARMv7, x86_64, and x86 on Android 8–15, and runs at native hardware speed.
+- **Decision 2 — Architecture Rules & Origin-Tab Memory Compliance**
+  - *Chosen Approach*: Register `file_converter` in `MiniAppRegistry.kt` and route it through `WorkspaceWindowController` and `FileExplorerState` with `originTabIndex` tracking.
+  - *Why*: Ensures opening File Converter from *My Suite* or Explorer respects the user's chosen Windowing Mode (Mode 1 DeX Window / Mode 2 Animated Tab / Mode 3 Floating Panel) and pressing Back cleanly returns to the originating tab without memory leaks.
+
+---
+
+## 4. Technical Architecture & Data Strategy *(Technical Reference)*
+
+### Architecture & Component Diagram
+
+```
+┌────────────────────────────────────────────────────────────────────────────┐
+│                   My Suite / Explorer Context Menu                         │
+│        (MiniAppRegistry: "file_converter" • WorkspaceWindowController)     │
+└─────────────────────────────────────┬──────────────────────────────────────┘
+                                      │
+                                      ▼
+┌────────────────────────────────────────────────────────────────────────────┐
+│                   FileConverterScreen (Special Landing Page)               │
+│  ┌──────────────────────────────────┐  ┌────────────────────────────────┐  │
+│  │ Left / Top Pane:                 │  │ Right / Bottom Pane:           │  │
+│  │ • Local-First Privacy Hero Badge │  │ • Global "Convert All To" Bar  │  │
+│  │ • Category Filter Tabs           │  │ • Interactive Batch Queue List │  │
+│  │ • VERT Multi-File Dropzone       │  │ • Per-File Format & Tuning UI  │  │
+│  │ • Output Folder Mode Selector    │  │ • Live Progress & Result Bar   │  │
+│  └─────────────────┬────────────────┘  └───────────────┬────────────────┘  │
+└────────────────────┼───────────────────────────────────┼───────────────────┘
+                     │                                   │
+                     └─────────────────┬─────────────────┘
+                                       ▼
+┌────────────────────────────────────────────────────────────────────────────┐
+│                   FileConverterEngine (Coroutine Dispatcher)               │
+├──────────────────┬───────────────────┬──────────────────┬──────────────────┤
+│ ImageConverter   │ DocumentConverter │ MediaConverter   │ ArchiveConverter │
+│ • PNG/JPG/WEBP   │ • MD <-> HTML/PDF │ • MP4/MKV/WEBM   │ • ZIP (AES/Std)  │
+│ • BMP / ICO      │ • CSV <-> JSON    │   -> WAV / M4A   │ • TAR / GZ / TGZ │
+│ • SVG -> Raster  │ • XML <-> YAML    │ • Audio Transcode│ • Repack &       │
+│ • Images -> PDF  │ • PDF -> Images   │ • Video Frame/GIF│   Extract        │
+└──────────────────┴─────────┬─────────┴──────────────────┴──────────────────┘
+                             │
+                             ▼
+┌────────────────────────────────────────────────────────────────────────────┐
+│             Output Storage & SuiteRecentDatabase Integration               │
+│  • Saves to "/Converted/" subfolder or original directory                  │
+│  • Logs every converted file into SuiteRecentDatabase (My Suite Recent)    │
+└────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Interactive Component & State Mapping
+- **Format Compatibility Matrix (`ConversionFormatMatrix`)**: Maps every input extension to its valid target extensions and default tuning parameters so users can never select an invalid conversion pair.
+- **Batch Queue State (`ConverterQueueItem`)**: Tracks `id`, `sourceFile`, `category`, `sourceExtension`, `targetExtension`, `tuningConfig`, `status` (`IDLE`, `CONVERTING`, `SUCCESS`, `ERROR`), `progress` (`0f..1f`), `outputFile`, and `errorMessage`.
+- **Mandatory Help Page Synchronization**: Updates `HelpDocumentationSection.kt` to document the new **File Converter** Mini-App, supported conversion matrices, tuning parameters, and output rules.

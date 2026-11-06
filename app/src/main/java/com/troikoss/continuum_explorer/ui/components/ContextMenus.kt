@@ -36,6 +36,7 @@ import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarOutline
 import androidx.compose.material.icons.filled.Tab
 import androidx.compose.material.icons.filled.TextFormat
+import androidx.compose.material.icons.filled.Transform
 import androidx.compose.material.icons.filled.Unarchive
 import androidx.compose.material.icons.filled.ViewModule
 import androidx.compose.material3.DropdownMenu
@@ -156,6 +157,24 @@ fun ItemContextMenu(
                     )
                 }
 
+                val itemFileRef = item.fileRef
+                if (itemFileRef != null && com.troikoss.continuum_explorer.ui.converter.ConversionFormatMatrix.isSupportedFile(itemFileRef)) {
+                    DropdownMenuItem(
+                        text = { Text("Convert with File Converter") },
+                        onClick = {
+                            onDismiss()
+                            appState.openInFileConverter(listOf(itemFileRef))
+                        },
+                        leadingIcon = {
+                            Icon(
+                                androidx.compose.material.icons.Icons.Default.Transform,
+                                null,
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    )
+                }
+
                 DropdownMenuItem(
                     text = { Text(stringResource(R.string.menu_open_with)) },
                     onClick = {
@@ -176,6 +195,26 @@ fun ItemContextMenu(
             }
 
             HorizontalDivider()
+        } else if (!hasDirectories) {
+            val convertibleRefs = selectedItems.mapNotNull { it.fileRef }
+                .filter { com.troikoss.continuum_explorer.ui.converter.ConversionFormatMatrix.isSupportedFile(it) }
+            if (convertibleRefs.isNotEmpty()) {
+                DropdownMenuItem(
+                    text = { Text("Batch Convert (${convertibleRefs.size}) in File Converter") },
+                    onClick = {
+                        onDismiss()
+                        appState.openInFileConverter(convertibleRefs)
+                    },
+                    leadingIcon = {
+                        Icon(
+                            androidx.compose.material.icons.Icons.Default.Transform,
+                            null,
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                )
+                HorizontalDivider()
+            }
         }
 
         if (hasDirectories || hasArchive) {

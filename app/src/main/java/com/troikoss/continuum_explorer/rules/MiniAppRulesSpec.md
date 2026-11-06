@@ -13,7 +13,7 @@ This document and its companion Kotlin modules in `com.troikoss.continuum_explor
 All workspace and mini-app rules live in `app/src/main/java/com/troikoss/continuum_explorer/rules/`:
 - `MiniAppRulesSpec.md` (this specification file)
 - `WorkspaceRulesConfig.kt` (declarative enums and rule models)
-- `MiniAppRegistry.kt` (central registry of active and archived My Suite mini-apps)
+- `MiniAppRegistry.kt` (central registry of active and archived My Suite mini-apps, including `file_converter`, `text_editor`, `image_studio`, `csv_editor`, and archived `base64_codec`)
 - `WorkspaceWindowController.kt` (runtime controller for tabs, floating panels, and DeX multi-window intents)
 
 ---
@@ -22,12 +22,12 @@ All workspace and mini-app rules live in `app/src/main/java/com/troikoss/continu
 
 Every Mini-App registered in `MiniAppRegistry.kt` MUST adhere to the following contract:
 1. **Direct Launch (No Intermediate Landing Screen)**:
-   - Clicking a Mini-App card in **My Suite** or clicking **Edit** on a supported file MUST open the functional workspace immediately (either with the target file loaded, an active scratchpad/new document, or an immediate file selector for image tools)—never an extra static mid-page.
+   - Clicking a Mini-App card in **My Suite** or clicking **Edit** / **Convert with File Converter** on a supported file MUST open the functional workspace immediately (either with the target file(s) loaded, the VERT File Converter workbench, an active scratchpad/new document, or an immediate file selector for image tools)—never an extra static mid-page.
 2. **Recent Activity Recording (`SuiteRecentDatabase`)**:
-   - Whenever a Mini-App creates or saves a file, it MUST call `SuiteRecentDatabase.recordFileActivity(context, file, toolId, toolTitle, SuiteActivityType.CREATED / EDITED)`.
+   - Whenever a Mini-App creates, edits, or converts a file (including `FileConverterDispatcher`), it MUST call `SuiteRecentDatabase.recordFileActivity(context, file, toolId, toolTitle, SuiteActivityType.CREATED / EDITED)`.
    - The **My Suite -> Recent Edited & Created** section reads exclusively from `SuiteRecentDatabase` and never from device-wide `MediaStore`.
 3. **Deterministic Memory & Resource Teardown**:
-   - Every Mini-App composable must release heavy allocations (`Bitmap`, `PdfRenderer`, `ExoPlayer`, `WebView`, syntax highlight caches) inside `DisposableEffect(Unit) { onDispose { ... } }` when closed.
+   - Every Mini-App composable and conversion engine must release heavy allocations (`Bitmap`, `PdfRenderer`, `PdfDocument`, `MediaCodec`, `MediaExtractor`, `MediaMuxer`, `ExoPlayer`, `WebView`, temporary cache directories) inside `finally` blocks or `DisposableEffect(Unit) { onDispose { ... } }`.
 4. **Archiving Deprecated Mini-Apps**:
    - Mini-Apps that are retired from active UI (such as the Base64 Codec) must be set to `isActiveInUi = false` and moved under `com.troikoss.continuum_explorer.archive.<feature>` so the main UI stays lean while preserving source code for future reuse.
 

@@ -159,6 +159,8 @@ class MainActivity : AppCompatActivity() {
         val initialNetworkConnectionId = intent.getStringExtra("networkConnectionId")
         val initialOpenFilePath = intent.getStringExtra("openFilePath")
         val initialOpenInEditMode = intent.getBooleanExtra("openInEditMode", false)
+        val initialEditorToolId = intent.getStringExtra("editorToolId")
+        val initialConverterFilePaths = intent.getStringArrayListExtra("converterFilePaths")?.toList().orEmpty()
 
         // Build ImageLoader asynchronously to prevent main thread lag on startup
         lifecycleScope.launch(Dispatchers.IO) {
@@ -183,7 +185,9 @@ class MainActivity : AppCompatActivity() {
                     initialLibraryItem = initialLibraryItem,
                     initialNetworkConnectionId = initialNetworkConnectionId,
                     initialOpenFilePath = initialOpenFilePath,
-                    initialOpenInEditMode = initialOpenInEditMode
+                    initialOpenInEditMode = initialOpenInEditMode,
+                    initialEditorToolId = initialEditorToolId,
+                    initialConverterFilePaths = initialConverterFilePaths
                 )
             }
         }

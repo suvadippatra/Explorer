@@ -144,6 +144,45 @@ fun FileExplorerState.openInEdit(item: UniversalFile) {
     }
 }
 
+/**
+ * Opens the VERT-inspired Native File Converter Mini-App (with optional pre-queued files)
+ * respecting the active WorkspaceWindowMode across DeX, Tablet, and Mobile.
+ */
+fun FileExplorerState.openInFileConverter(files: List<File> = emptyList()) {
+    if (com.troikoss.continuum_explorer.rules.WorkspaceWindowController.openFloatingPanelIfConfigured(
+            context = context,
+            title = "File Converter • VERT Native",
+            file = null,
+            openInEditMode = false,
+            toolId = "file_converter",
+            initialFiles = files
+        )
+    ) {
+        return
+    }
+    val mode = SettingsManager.workspaceWindowMode.value
+    if (mode == com.troikoss.continuum_explorer.rules.WorkspaceWindowMode.DEX_WINDOWS_TABLET_MOBILE_TABS &&
+        com.troikoss.continuum_explorer.rules.WorkspaceWindowController.isDesktopOrDexEnvironment(context)
+    ) {
+        if (com.troikoss.continuum_explorer.rules.WorkspaceWindowController.launchSeparateDeXWindow(
+                context = context,
+                isVibeArea = true,
+                editorToolId = "file_converter",
+                converterFiles = files
+            )
+        ) {
+            return
+        }
+    }
+    onOpenFileConverterTab?.invoke(files) ?: run {
+        converterInitialFiles.clear()
+        converterInitialFiles.addAll(files)
+        activeEditorToolId = "file_converter"
+        activeEditorToolTitle = "File Converter"
+        libraryItem = LibraryItem.VibeArea
+    }
+}
+
 fun FileExplorerState.openInNewTab(items: List<UniversalFile>) {
     items.filter { it.isDirectory || (ZipUtils.isArchive(it) && it.fileRef != null && SettingsManager.isDefaultArchiveViewerEnabled.value) }.forEach { item ->
         onOpenInNewTab?.invoke(item)

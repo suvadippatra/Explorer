@@ -25,7 +25,8 @@ data class FloatingPanelSession(
     val title: String,
     val file: UniversalFile?,
     val openInEditMode: Boolean,
-    val toolId: String? = null
+    val toolId: String? = null,
+    val initialFiles: List<File> = emptyList()
 )
 
 /**
@@ -72,7 +73,8 @@ object WorkspaceWindowController {
         title: String,
         file: UniversalFile?,
         openInEditMode: Boolean,
-        toolId: String? = null
+        toolId: String? = null,
+        initialFiles: List<File> = emptyList()
     ): Boolean {
         val mode = SettingsManager.workspaceWindowMode.value
         if (mode == WorkspaceWindowMode.FLOATING_PANELS_DEX_TABLET_TABS_MOBILE && isTabletOrWideScreen(context)) {
@@ -80,7 +82,8 @@ object WorkspaceWindowController {
                 title = title,
                 file = file,
                 openInEditMode = openInEditMode,
-                toolId = toolId
+                toolId = toolId,
+                initialFiles = initialFiles
             )
             return true
         }
@@ -95,7 +98,9 @@ object WorkspaceWindowController {
         file: File? = null,
         openInEditMode: Boolean = false,
         isVibeArea: Boolean = false,
-        isFtpServer: Boolean = false
+        isFtpServer: Boolean = false,
+        editorToolId: String? = null,
+        converterFiles: List<File> = emptyList()
     ): Boolean {
         return try {
             val intent = Intent(context, MainActivity::class.java).apply {
@@ -110,6 +115,16 @@ object WorkspaceWindowController {
                 }
                 if (isVibeArea) putExtra("isVibeArea", true)
                 if (isFtpServer) putExtra("isFtpServer", true)
+                if (!editorToolId.isNullOrBlank()) {
+                    putExtra("editorToolId", editorToolId)
+                    putExtra("isVibeArea", true)
+                }
+                if (converterFiles.isNotEmpty()) {
+                    putStringArrayListExtra(
+                        "converterFilePaths",
+                        ArrayList(converterFiles.map { it.absolutePath })
+                    )
+                }
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                 val options = ActivityOptions.makeBasic()
