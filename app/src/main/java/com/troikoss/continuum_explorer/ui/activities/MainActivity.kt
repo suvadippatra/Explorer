@@ -153,9 +153,12 @@ class MainActivity : AppCompatActivity() {
             intent.getBooleanExtra("isRecycleBin", false) -> LibraryItem.RecycleBin
             intent.getBooleanExtra("isVibeArea", false) -> LibraryItem.VibeArea
             intent.getBooleanExtra("isFtpServer", false) -> LibraryItem.FtpServer
+            intent.getBooleanExtra("isExternalFtp", false) -> LibraryItem.ExternalFtp
             else -> LibraryItem.None
         }
         val initialNetworkConnectionId = intent.getStringExtra("networkConnectionId")
+        val initialOpenFilePath = intent.getStringExtra("openFilePath")
+        val initialOpenInEditMode = intent.getBooleanExtra("openInEditMode", false)
 
         // Build ImageLoader asynchronously to prevent main thread lag on startup
         lifecycleScope.launch(Dispatchers.IO) {
@@ -173,7 +176,15 @@ class MainActivity : AppCompatActivity() {
 
         setContent {
             FileExplorerTheme {
-                FileExplorer(initialPath = initialPath, initialUri = initialUri, initialArchive = initialArchive, initialLibraryItem = initialLibraryItem, initialNetworkConnectionId = initialNetworkConnectionId)
+                FileExplorer(
+                    initialPath = initialPath,
+                    initialUri = initialUri,
+                    initialArchive = initialArchive,
+                    initialLibraryItem = initialLibraryItem,
+                    initialNetworkConnectionId = initialNetworkConnectionId,
+                    initialOpenFilePath = initialOpenFilePath,
+                    initialOpenInEditMode = initialOpenInEditMode
+                )
             }
         }
     }

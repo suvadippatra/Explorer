@@ -67,9 +67,9 @@ import java.util.Locale
 fun ViewOnlyFileViewer(
     file: UniversalFile,
     appState: FileExplorerState,
+    startInEditMode: Boolean = appState.openInEditMode,
     onClose: () -> Unit = {
-        appState.openInEditMode = false
-        appState.viewingFile = null
+        appState.closeViewerOrReturnToOrigin()
     },
     onMenuClick: () -> Unit = {},
     modifier: Modifier = Modifier
@@ -81,11 +81,18 @@ fun ViewOnlyFileViewer(
     var currentFile by remember(file) { mutableStateOf(file) }
     val ext = remember(currentFile.name) { currentFile.name.substringAfterLast('.', "").lowercase() }
 
+    // Remember whether this viewer tab was launched directly into Edit Mode (e.g. from 3-dot Edit or My Suite)
+    val launchedDirectlyInEdit = remember(file) { startInEditMode || appState.openInEditMode }
+    var isEditing by remember(file, startInEditMode, appState.openInEditMode) {
+        mutableStateOf(startInEditMode || appState.openInEditMode)
+    }
+
+    val isApk = ext == "apk"
     val isPdf = ext == "pdf"
     val isImage = ext in listOf("jpg", "jpeg", "png", "gif", "webp", "bmp", "heic", "heif", "ico", "svg")
     val isAudio = ext in listOf("mp3", "wav", "ogg", "m4a", "flac", "aac", "opus", "wma")
     val isVideo = ext in listOf("mp4", "mkv", "webm", "avi", "mov", "3gp", "flv", "ts", "m4v")
-    val isArchive = ext in listOf("zip", "jar", "apk", "tar", "gz", "tgz", "7z", "rar")
+    val isArchive = ext in listOf("zip", "jar", "tar", "gz", "tgz", "7z", "rar")
     val isText = ext in listOf(
         "txt", "md", "markdown", "json", "xml", "csv", "tsv", "log",
         "kt", "java", "py", "js", "ts", "html", "htm", "css", "c", "cpp", "h",
@@ -97,24 +104,50 @@ fun ViewOnlyFileViewer(
     var showDeleteConfirmDialog by remember { mutableStateOf(false) }
     val isFullScreen by SettingsManager.isFullScreenTabBarHidden
 
+    if (isApk) {
+        com.troikoss.continuum_explorer.ui.dialogs.ApkInstallerSheet(
+            apkUniversalFile = currentFile,
+            scope = scope,
+            onDismiss = onClose
+        )
+        return
+    }
+
+    val handleExitEditMode = {
+        if (launchedDirectlyInEdit) {
+            appState.openInEditMode = false
+            onClose()
+        } else {
+            isEditing = false
+            appState.openInEditMode = false
+        }
+    }
+
     BackHandler {
         when {
             appState.isVideoFullScreen -> appState.isVideoFullScreen = false
-            appState.openInEditMode -> appState.openInEditMode = false
+            isEditing -> handleExitEditMode()
             else -> onClose()
         }
     }
 
-    // If opened in Edit Mode, delegate directly to MarkorTextEngine or NativeImageViewerEditor
-    if (appState.openInEditMode) {
+    // If in Edit Mode, delegate directly to MarkorTextEngine or NativeImageViewerEditor
+    if (isEditing) {
+        LaunchedEffect(currentFile.absolutePath) {
+            currentFile.fileRef?.let { f ->
+                com.troikoss.continuum_explorer.data.db.SuiteRecentDatabase.recordFileActivity(
+                    context = context,
+                    file = f,
+                    activityType = com.troikoss.continuum_explorer.data.db.SuiteActivityType.EDITED
+                )
+            }
+        }
         when {
             isText -> {
                 MarkorTextEngine(
                     file = currentFile,
                     appState = appState,
-                    onMenuClick = {
-                        appState.openInEditMode = false
-                    },
+                    onMenuClick = { handleExitEditMode() },
                     modifier = modifier.fillMaxSize()
                 )
                 return
@@ -123,9 +156,7 @@ fun ViewOnlyFileViewer(
                 NativeImageViewerEditor(
                     file = currentFile,
                     appState = appState,
-                    onMenuClick = {
-                        appState.openInEditMode = false
-                    },
+                    onMenuClick = { handleExitEditMode() },
                     modifier = modifier.fillMaxSize()
                 )
                 return
@@ -193,7 +224,10 @@ fun ViewOnlyFileViewer(
                         // A. EDIT OPTION (or Browse Tab for Archives)
                         if (isText || isImage) {
                             FilledTonalButton(
-                                onClick = { appState.openInEditMode = true },
+                                onClick = {
+                                    isEditing = true
+                                    appState.openInEditMode = true
+                                },
                                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
                                 modifier = Modifier.height(32.dp)
                             ) {

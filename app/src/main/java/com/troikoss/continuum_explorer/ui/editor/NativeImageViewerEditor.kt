@@ -74,6 +74,7 @@ fun NativeImageViewerEditor(
     file: UniversalFile,
     appState: FileExplorerState,
     onMenuClick: () -> Unit,
+    startInEditMode: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -86,7 +87,7 @@ fun NativeImageViewerEditor(
     val photoState = rememberPhotoEditorStateController()
 
     // Mode & Dialog Toggles
-    var isEditMode by remember { mutableStateOf(false) }
+    var isEditMode by remember(file, startInEditMode) { mutableStateOf(startInEditMode) }
     var showBars by remember { mutableStateOf(true) }
     var showExifDialog by remember { mutableStateOf(false) }
     var showSaveDialog by remember { mutableStateOf(false) }
@@ -396,12 +397,27 @@ fun NativeImageViewerEditor(
                 baseBitmap = baseBitmap!!,
                 fileName = file.name,
                 targetSaveFile = fileRef,
-                onExit = { isEditMode = false },
+                onExit = {
+                    if (startInEditMode) {
+                        onMenuClick()
+                    } else {
+                        isEditMode = false
+                    }
+                },
                 onSaveSuccess = { savedFile ->
-                    isEditMode = false
+                    com.troikoss.continuum_explorer.data.db.SuiteRecentDatabase.recordFileActivity(
+                        context = context,
+                        file = savedFile,
+                        activityType = com.troikoss.continuum_explorer.data.db.SuiteActivityType.EDITED
+                    )
                     appState.viewingFile = savedFile.toUniversal()
                     appState.refresh()
                     GlobalEvents.triggerRefresh()
+                    if (startInEditMode) {
+                        onMenuClick()
+                    } else {
+                        isEditMode = false
+                    }
                 },
                 modifier = Modifier.fillMaxSize()
             )

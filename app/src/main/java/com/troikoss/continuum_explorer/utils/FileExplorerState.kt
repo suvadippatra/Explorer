@@ -135,8 +135,14 @@ class FileExplorerState(
     val backStack = mutableStateListOf<NavLocation>()
     val forwardStack = mutableStateListOf<NavLocation>()
 
-    // Callback to open a new tab
+    // Callback to open a new tab (optionally starting directly in edit mode)
     var onOpenInNewTab: ((UniversalFile) -> Unit)? = null
+    var onOpenInNewEditTab: ((UniversalFile) -> Unit)? = null
+    var onCloseCurrentTabAndReturnToOrigin: (() -> Unit)? = null
+
+    // Tracks which tab index spawned this tab (for preview/edit tabs that should close back to origin)
+    var originTabIndex by mutableStateOf<Int?>(null)
+    var isDedicatedViewerTab by mutableStateOf(false)
 
     var isSearchMode by mutableStateOf(false)
     var isSearchUIActive by mutableStateOf(false)
@@ -153,10 +159,32 @@ class FileExplorerState(
     var activeEditorToolId by mutableStateOf<String?>(null)
     var activeEditorToolTitle by mutableStateOf<String?>(null)
 
+    // APK Package Info Sheet & Non-Editable Binary Info Sheet state
+    var activeApkInstallerFile by mutableStateOf<UniversalFile?>(null)
+    var activeNonEditableInfoFile by mutableStateOf<UniversalFile?>(null)
+
+    fun closeViewerOrReturnToOrigin() {
+        viewingFile = null
+        openInEditMode = false
+        if (isDedicatedViewerTab && onCloseCurrentTabAndReturnToOrigin != null) {
+            onCloseCurrentTabAndReturnToOrigin?.invoke()
+        }
+    }
+
     fun showPreview(file: UniversalFile, fullScreen: Boolean = false) {
-        previewFile = file
-        isPreviewPaneVisible = true
-        isPreviewFullScreen = fullScreen
+        when (com.troikoss.continuum_explorer.domain.logic.FileOpenPolicyEngine.classify(file)) {
+            com.troikoss.continuum_explorer.domain.logic.FileOpenCategory.APK_PACKAGE -> {
+                activeApkInstallerFile = file
+            }
+            com.troikoss.continuum_explorer.domain.logic.FileOpenCategory.NON_EDITABLE_BINARY -> {
+                activeNonEditableInfoFile = file
+            }
+            else -> {
+                previewFile = file
+                isPreviewPaneVisible = true
+                isPreviewFullScreen = fullScreen
+            }
+        }
     }
 
     fun closePreview() {

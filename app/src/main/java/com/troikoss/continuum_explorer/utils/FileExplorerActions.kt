@@ -20,6 +20,10 @@ import kotlinx.coroutines.withContext
 import java.io.File
 
 fun FileExplorerState.open(item: UniversalFile) {
+    if (libraryItem == LibraryItem.RecycleBin) {
+        showProperties()
+        return
+    }
     if (item.isDirectory) {
         if (item.provider.capabilities.isRemote) {
             navigateTo(null, null, networkProvider = item.provider, networkId = item.providerId, networkConnectionId = currentNetworkConnectionId)
@@ -63,14 +67,80 @@ fun FileExplorerState.open(item: UniversalFile) {
         } else if (item.provider.capabilities.isRemote) {
             openRemoteFile(context, scope, item)
         } else {
-            if (SettingsManager.shouldOpenWithInternalViewer(item)) {
-                onOpenInNewTab?.invoke(item) ?: run {
-                    viewingFile = item
+            when (com.troikoss.continuum_explorer.domain.logic.FileOpenPolicyEngine.classify(item)) {
+                com.troikoss.continuum_explorer.domain.logic.FileOpenCategory.APK_PACKAGE -> {
+                    activeApkInstallerFile = item
                 }
-            } else {
-                openFile(context, item)
+                com.troikoss.continuum_explorer.domain.logic.FileOpenCategory.NON_EDITABLE_BINARY -> {
+                    activeNonEditableInfoFile = item
+                }
+                com.troikoss.continuum_explorer.domain.logic.FileOpenCategory.EDITABLE_FILE,
+                com.troikoss.continuum_explorer.domain.logic.FileOpenCategory.PLAYABLE_OR_VIEWABLE_MEDIA -> {
+                    if (SettingsManager.shouldOpenWithInternalViewer(item)) {
+                        if (com.troikoss.continuum_explorer.rules.WorkspaceWindowController.openFloatingPanelIfConfigured(
+                                context = context,
+                                title = item.name,
+                                file = item,
+                                openInEditMode = false
+                            )
+                        ) {
+                            return
+                        }
+                        onOpenInNewTab?.invoke(item) ?: run {
+                            openInEditMode = false
+                            viewingFile = item
+                        }
+                    } else {
+                        openFile(context, item)
+                    }
+                }
             }
         }
+    }
+}
+
+/**
+ * Opens an editable file directly inside its Editor UI (Markor Text & Code Studio, CSV Studio, or PhotoEditor)
+ * without showing the read-only preview first, and returns to the origin tab when closed.
+ */
+fun FileExplorerState.openInEdit(item: UniversalFile) {
+    if (!com.troikoss.continuum_explorer.domain.logic.FileOpenPolicyEngine.isEditable(item)) {
+        open(item)
+        return
+    }
+    item.fileRef?.let { file ->
+        com.troikoss.continuum_explorer.data.db.SuiteRecentDatabase.recordFileActivity(
+            context = context,
+            file = file,
+            activityType = com.troikoss.continuum_explorer.data.db.SuiteActivityType.EDITED
+        )
+    }
+    if (com.troikoss.continuum_explorer.rules.WorkspaceWindowController.openFloatingPanelIfConfigured(
+            context = context,
+            title = "Edit • ${item.name}",
+            file = item,
+            openInEditMode = true
+        )
+    ) {
+        return
+    }
+    val mode = SettingsManager.workspaceWindowMode.value
+    if (mode == com.troikoss.continuum_explorer.rules.WorkspaceWindowMode.DEX_WINDOWS_TABLET_MOBILE_TABS &&
+        com.troikoss.continuum_explorer.rules.WorkspaceWindowController.isDesktopOrDexEnvironment(context) &&
+        item.fileRef != null
+    ) {
+        if (com.troikoss.continuum_explorer.rules.WorkspaceWindowController.launchSeparateDeXWindow(
+                context = context,
+                file = item.fileRef,
+                openInEditMode = true
+            )
+        ) {
+            return
+        }
+    }
+    onOpenInNewEditTab?.invoke(item) ?: run {
+        openInEditMode = true
+        viewingFile = item
     }
 }
 

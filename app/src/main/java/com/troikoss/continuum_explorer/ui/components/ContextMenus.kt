@@ -114,8 +114,11 @@ fun ItemContextMenu(
     ) {
         if (onlyOneSelected) {
             val item = selectedItems.first()
+            val isEditableFile = com.troikoss.continuum_explorer.domain.logic.FileOpenPolicyEngine.isEditable(item)
+            val isApkFile = com.troikoss.continuum_explorer.domain.logic.FileOpenPolicyEngine.isApk(item)
+
             DropdownMenuItem(
-                text = { Text(stringResource(R.string.menu_open)) },
+                text = { Text(if (isApkFile) "APK Info & Install" else stringResource(R.string.menu_open)) },
                 onClick = {
                     onDismiss()
                     appState.open(item)
@@ -131,24 +134,27 @@ fun ItemContextMenu(
             )
 
             if (!hasDirectories) {
-                DropdownMenuItem(
-                    text = { Text("Preview") },
-                    onClick = {
-                        onDismiss()
-                        appState.showPreview(item)
-                    },
-                    leadingIcon = { Icon(Icons.AutoMirrored.Filled.InsertDriveFile, null) }
-                )
+                if (isEditableFile) {
+                    DropdownMenuItem(
+                        text = { Text("Edit") },
+                        onClick = {
+                            onDismiss()
+                            appState.openInEdit(item)
+                        },
+                        leadingIcon = { Icon(Icons.Default.Edit, null, tint = MaterialTheme.colorScheme.primary) }
+                    )
+                }
 
-                DropdownMenuItem(
-                    text = { Text("Edit") },
-                    onClick = {
-                        onDismiss()
-                        appState.openInEditMode = true
-                        appState.viewingFile = item
-                    },
-                    leadingIcon = { Icon(Icons.Default.Edit, null) }
-                )
+                if (!isApkFile) {
+                    DropdownMenuItem(
+                        text = { Text("Quick Preview") },
+                        onClick = {
+                            onDismiss()
+                            appState.showPreview(item)
+                        },
+                        leadingIcon = { Icon(Icons.AutoMirrored.Filled.InsertDriveFile, null) }
+                    )
+                }
 
                 DropdownMenuItem(
                     text = { Text(stringResource(R.string.menu_open_with)) },

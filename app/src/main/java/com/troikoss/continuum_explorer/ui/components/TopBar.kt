@@ -203,9 +203,13 @@ fun TopBar(
         color = if (SettingsManager.isColorfulBarsEnabled.value) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface
     ) {
         Row (modifier = Modifier.padding(horizontal = 8.dp), verticalAlignment = CenterVertically) {
-            if (appState.getScreenSize() == ScreenSize.SMALL) {
+            val isWideCollapsed by SettingsManager.isWideSidebarCollapsed
+            if (appState.getScreenSize() == ScreenSize.SMALL || isWideCollapsed) {
                 IconButton(onClick = onMenuClick) {
-                    Icon(Icons.Default.Menu, contentDescription = stringResource(R.string.menu))
+                    Icon(
+                        imageVector = Icons.Default.Menu,
+                        contentDescription = if (isWideCollapsed) "Expand Navigation Sidebar" else stringResource(R.string.menu)
+                    )
                 }
             }
             
@@ -854,6 +858,30 @@ fun TopBar(
                         }
                     )
                 }
+            }
+
+            // QUICK PREVIEW PANE TOGGLE (Homepage Quick Preview Feature)
+            IconButton(
+                onClick = {
+                    if (appState.isPreviewPaneVisible) {
+                        appState.closePreview()
+                    } else {
+                        val candidate = appState.selectionManager.selectedItems.firstOrNull { !it.isDirectory }
+                            ?: appState.files.firstOrNull { !it.isDirectory }
+                        if (candidate != null) {
+                            appState.previewFile = candidate
+                        }
+                        appState.isPreviewPaneVisible = true
+                    }
+                },
+                modifier = Modifier.size(36.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Visibility,
+                    contentDescription = if (appState.isPreviewPaneVisible) "Close Quick Preview Pane" else "Open Quick Preview Pane",
+                    modifier = Modifier.size(20.dp),
+                    tint = if (appState.isPreviewPaneVisible) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                )
             }
 
             // FULL-SCREEN TOGGLE (Hides/Shows Top TabBar)

@@ -513,6 +513,11 @@ fun MarkorTextEngine(
                 val contentBytes = newContent.toByteArray()
                 if (fileRef != null && fileRef.canWrite()) {
                     FileOutputStream(fileRef).use { out -> out.write(contentBytes) }
+                    com.troikoss.continuum_explorer.data.db.SuiteRecentDatabase.recordFileActivity(
+                        context = context,
+                        file = fileRef,
+                        activityType = com.troikoss.continuum_explorer.data.db.SuiteActivityType.EDITED
+                    )
                 } else if (uri != null) {
                     context.contentResolver.openOutputStream(uri, "wt")?.use { out ->
                         out.write(contentBytes)
@@ -602,7 +607,7 @@ fun MarkorTextEngine(
         onSaveContent = { saveContent(it) },
         fileRef = fileRef,
         onMenuClick = onMenuClick,
-        onExitEditor = { appState.openInEditMode = false },
+        onExitEditor = { onMenuClick() },
         onShare = { shareText(initialTextLoaded) },
         onOpenExternal = { openExternal() },
         onViewPath = { showViewPathDialog = true },

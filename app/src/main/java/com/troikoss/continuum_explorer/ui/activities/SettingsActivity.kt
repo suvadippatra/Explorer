@@ -409,47 +409,128 @@ fun SettingsScreen(onBack: () -> Unit) {
                         }
                     }
                     2 -> {
-                        PixelCategoryCard(
-                            title = "Editors, Previewers & Handlers",
-                            icon = Icons.Default.Apps
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
+                        val currentWorkspaceMode by SettingsManager.workspaceWindowMode
+                        Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                            PixelCategoryCard(
+                                title = "Workspace & Mini-App Windowing Mode",
+                                icon = Icons.Default.Layers
                             ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text("Desktop Hover Preview", style = MaterialTheme.typography.bodyMedium)
-                                    IconButton(
-                                        onClick = {
-                                            explanationDialogText = Pair(
-                                                "Desktop Hover Preview",
-                                                "Instantly previews PDFs, archives, images, documents, and code in the right split preview pane when hovering or selecting a file."
-                                            )
+                                Text(
+                                    text = "Choose how My Suite Mini-Apps, File Editors, and Server Tools launch across DeX/Desktop, Tablet, and Mobile:",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+
+                                com.troikoss.continuum_explorer.rules.WorkspaceWindowMode.entries.forEach { mode ->
+                                    val isSelected = currentWorkspaceMode == mode
+                                    Surface(
+                                        shape = RoundedCornerShape(12.dp),
+                                        color = if (isSelected) {
+                                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
+                                        } else {
+                                            MaterialTheme.colorScheme.surfaceContainerLow
                                         },
-                                        modifier = Modifier.size(28.dp)
+                                        border = androidx.compose.foundation.BorderStroke(
+                                            width = if (isSelected) 1.5.dp else 1.dp,
+                                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
+                                        ),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .clickable {
+                                                SettingsManager.setWorkspaceWindowMode(context, mode)
+                                            }
                                     ) {
-                                        Icon(Icons.Default.HelpOutline, contentDescription = null, modifier = Modifier.size(15.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Row(
+                                            modifier = Modifier.padding(12.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            RadioButton(
+                                                selected = isSelected,
+                                                onClick = { SettingsManager.setWorkspaceWindowMode(context, mode) }
+                                            )
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(
+                                                    text = mode.title,
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
+                                                    color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                                )
+                                                Spacer(modifier = Modifier.height(2.dp))
+                                                Text(
+                                                    text = mode.description,
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                        }
                                     }
                                 }
-                                Switch(
-                                    checked = isHoverPreviewEnabled,
-                                    onCheckedChange = { SettingsManager.setHoverPreviewEnabled(context, it) }
-                                )
+
+                                HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Text(
+                                        text = "Workspace & Mini-App Rules System Location",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                    Text(
+                                        text = "• app/src/main/java/com/troikoss/continuum_explorer/rules/MiniAppRulesSpec.md\n" +
+                                            "• app/src/main/java/com/troikoss/continuum_explorer/rules/WorkspaceRulesConfig.kt\n" +
+                                            "• app/src/main/java/com/troikoss/continuum_explorer/rules/MiniAppRegistry.kt\n" +
+                                            "• app/src/main/java/com/troikoss/continuum_explorer/rules/WorkspaceWindowController.kt\n" +
+                                            "• Archived Base64 Codec: app/src/main/java/com/troikoss/continuum_explorer/archive/base64/ArchivedBase64Codec.kt",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
                             }
 
-                            HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { showDefaultAppsDialog = true }
-                                    .padding(vertical = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
+                            PixelCategoryCard(
+                                title = "Editors, Previewers & Handlers",
+                                icon = Icons.Default.Apps
                             ) {
-                                Text("Default File Handlers (PDF, Image, Text, Media)", style = MaterialTheme.typography.bodyMedium)
-                                Icon(Icons.Default.ChevronRight, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text("Desktop Hover Preview", style = MaterialTheme.typography.bodyMedium)
+                                        IconButton(
+                                            onClick = {
+                                                explanationDialogText = Pair(
+                                                    "Desktop Hover Preview",
+                                                    "Instantly previews PDFs, archives, images, documents, and code in the right split preview pane when hovering or selecting a file."
+                                                )
+                                            },
+                                            modifier = Modifier.size(28.dp)
+                                        ) {
+                                            Icon(Icons.Default.HelpOutline, contentDescription = null, modifier = Modifier.size(15.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                    }
+                                    Switch(
+                                        checked = isHoverPreviewEnabled,
+                                        onCheckedChange = { SettingsManager.setHoverPreviewEnabled(context, it) }
+                                    )
+                                }
+
+                                HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { showDefaultAppsDialog = true }
+                                        .padding(vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text("Default File Handlers (PDF, Image, Text, Media)", style = MaterialTheme.typography.bodyMedium)
+                                    Icon(Icons.Default.ChevronRight, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
                             }
                         }
                     }

@@ -1,76 +1,136 @@
-# Continuum Explorer — Full UI, Server Hub, Suite, Responsive Layout & CI/CD Upgrade Plan
+# Continuum Explorer (Explorer) — UX, Windowing Rules, Server & Modular Architecture Plan
 
-## 1. Eliminate Window Margins & Fix Text Clipping Across All Pages
-- **Root Cause Identified**: In `FileContent.kt`, `LazyVerticalGrid` applies `.padding(horizontal = 32.dp)` (or `16.dp`), `.padding(end = 16.dp)`, and `contentPadding = PaddingValues(16.dp)`, while `FileExplorer.kt` adds outer container padding. On tablet freeform/split windows, this consumes over `112.dp` of horizontal space and clips the left and right edges of `DetailsHeader` and `FileDetailsView` rows (e.g., clipping `"Name"` to `"ne ^"` and `"Size"` to `"Siz"`).
-- **Fixes**:
-  - Remove the excessive outer `.padding(horizontal = 32.dp)` and redundant `contentPadding` from `FileContent.kt` and `FileExplorer.kt`, replacing them with clean edge-to-edge `6.dp`–`8.dp` responsive padding so the file table and all pages use the full window width.
-  - Make `DetailsHeader.kt` and `FileDetailsView` in `FileView.kt` dynamically size column widths (`NAME`, `DATE`, `TYPE`, `SIZE`) relative to available window width while keeping horizontal scroll synchronized and aligned so text never clips at the left or right borders.
+## 1. Executive Summary & Architectural Goals
 
-## 2. Full-Screen Toggle (Hiding the Tab Bar)
-- **Global Full-Screen State**: Add an `isFullScreenMode` state in `MainActivity.kt` / `FileExplorerState` that hides the top `TabBar` row when enabled, allowing the active page or editor to occupy 100% of the window height.
-- **Accessible Controls**:
-  - Add a Full-Screen toggle icon button (`Fullscreen` / `FullscreenExit`) in `TopBar.kt`, `ViewOnlyFileViewer.kt` (separate-tab file preview), `VibeAreaScreen.kt` ("My suite"), `FtpServerSettingsPanel.kt`, `MarkorTextEngine.kt`, and `NativeImageViewerEditor.kt`.
-  - Support `BackHandler` or floating/header exit button when in Full-Screen mode so users can always restore the tab bar with a single tap.
+This plan addresses all UX, navigation, sidebar, file-handling, server-hosting, and modularity improvements requested:
 
-## 3. Restore List / Grid / Details / Gallery View Switcher & Column Count Slider
-- **Quick View Switcher in `TopBar.kt`**:
-  - Add a dedicated View Mode button in `TopBar.kt` (next to Search and Options) that opens a compact popover/menu allowing instant switching between:
-    - **Details** (multi-column table)
-    - **Content / List** (compact single-column list)
-    - **Grid** (icon/thumbnail cards)
-    - **Gallery** (square media tiles)
-  - Include an interactive **Column Count / Grid Size Slider** (`2` to `8` columns on Grid/Gallery, or dynamic item size scaling) directly inside the View Mode popover, persisted per-folder via `FolderConfigs`.
+1. **Logical File Opening, Previewing & Direct Editing Flow**:
+   - **Editable Files (Text, Code, Markdown, CSV, JSON, XML, Images)**:
+     - **Single-Tap / Open in Explorer**: Opens the clean **File Preview** tab (`ViewOnlyFileViewer`) with a prominent **Edit** button in the top action bar.
+     - **Three-Dot Menu / Context Menu ("Edit") or Opening from My Suite**: Bypasses all intermediate preview/landing screens and opens **directly inside the Editor UI** (`MarkorTextEngine`, `CsvTableEditor`, or `PhotoEditorStudio`).
+     - **Launching Editors in My Suite**: Clicking an editor card in My Suite immediately opens a fresh untitled document or file creation/picker action directly inside the editor—eliminating the redundant middle landing screen.
+   - **Playable / Viewable Non-Editable Files (Video, Audio, PDF, Archives like `.zip`/`.tar`)**:
+     - Opens directly in the rich media/document/archive viewer (never raw binary text).
+   - **APK Files (`.apk`)**:
+     - Never opened as a ZIP folder structure. Tapping an `.apk` displays a dedicated **APK Package Info Sheet** (showing app icon, label, package name, version name/code, target/min SDK, file size, and SHA-256) with a primary **Install with Package Installer** button (`Intent.ACTION_VIEW` with `application/vnd.android.package-archive` via `FileProvider`). No "Browse Archive" button is shown.
+   - **Unsupported / Binary Non-Editable Files**:
+     - Never dumped as raw binary garbage. Shows a clean **File Info & Open-With Sheet** displaying file properties and a **Choose Preferred App to View** (`Intent.createChooser`) button.
 
-## 4. Fix Sidebar Internal Storage Capacity Text (`NavigationPane.kt`)
-- **Responsive Capacity Label**: Update `NavStorageItem` and `NavNetworkItem` in `NavigationPane.kt` so the `"XX GB free of XX GB"` text uses `maxLines = 1`, `TextOverflow.Ellipsis`, adaptive font sizing (`11.sp`), and compact horizontal padding so it never wraps awkwardly or breaks in narrow sidebar widths.
+2. **Leak-Free Tab & Back-Stack Lifecycle**:
+   - Every tab stores an explicit `originTabIndex: Int?` and `returnFolderState` when spawned by opening/editing a file or launching a My Suite tool.
+   - Pressing **Back**, **Save & Close**, or **Close** inside a temporary preview/editor tab cleanly disposes buffers/Bitmaps/ExoPlayer instances, closes the temporary tab, and restores the exact originating tab and scroll position—never dumping the user onto the root `/storage/emulated/0` homepage.
+   - Navigating folders inside a tab pushes onto that tab's `backStack` so system Back steps backward one folder at a time before returning to the parent tab.
 
-## 5. Redesign "My Suite" (`VibeAreaScreen.kt`) with File Creation & Editable File Selection
-- **Minimalist Workspace UI**: Redesign `VibeAreaScreen.kt` with a clean, consistent header (Menu, Title, New File button, Open File button, Fullscreen toggle, View toggle, Search) and streamlined studio cards.
-- **Create New File by Extension**:
-  - Add a **"New File"** dialog in "My Suite" where the user enters a file name with any extension (e.g., `notes.md`, `tasks.todo.txt`, `data.csv`, `script.kt`, `config.json`, `doc.org`, `readme.adoc`, `log.txt`) and selects the target directory (defaulting to Documents or current folder).
-  - Automatically create the file on disk and open it immediately in the matching specialized Markor editor layout (Markdown preview/editor, interactive CSV grid, interactive Todo.txt checklist, syntax-highlighted code editor, or plain text).
-- **Select & Edit Existing Supported Files**:
-  - Add an **"Open File to Edit"** picker in "My Suite" that filters and allows selecting only editable file types (Text/Markdown/Code/CSV/Todo/JSON/XML for Text Studio; PNG/JPG/WEBP for Image Studio; files < 2 MB for Base64 Studio) while gracefully blocking unsupported non-editable formats such as Video or APK files with a clear notice.
+3. **Unified Single Sidebar & Responsive Navigation (Mobile, Tablet, DeX)**:
+   - **Mobile (`ScreenSize.SMALL`)**: Uses a single `ModalNavigationDrawer` opened by the TopBar menu icon.
+   - **Tablet & DeX (`ScreenSize.MEDIUM` / `LARGE`)**: Uses a single collapsible `PermanentDrawerSheet` / Rail controlled by `isSidebarCollapsed` state.
+   - **Eliminate Duplicate Sidebars & Broken Back Buttons**:
+     - When the Tablet/DeX sidebar is visible, the redundant hamburger `Menu` button in subpages (`My Suite`, `FTP/HTTP Server`, `External FTP`, `TopBar`) is either hidden or wired directly to toggle `isSidebarCollapsed`—never opening a second `ModalNavigationDrawer` on top of the permanent sidebar.
+     - The collapse button (`ArrowBack` / `MenuOpen`) inside `NavigationPane` is wired to `onToggleSidebar` so it actually collapses the sidebar on Tablet/DeX.
 
-## 6. Redesign FTP/HTTP & Self-Hosted Website Server Hub (`FtpServerSettingsPanel.kt` & `ContinuumHubService.kt`)
-- **Minimalist Segmented Mode Toggle**:
-  - Redesign `FtpServerSettingsPanel.kt` around a clean top Segmented Button toggle switching between two dedicated workflows:
-    1. **FTP & File Sharing Mode**: Select specific files or folders into the virtual share bucket (or share full storage), configure FTP port, anonymous/authenticated access, and web upload permissions, and start/stop the server with live IP/Port/QR and one-tap copy.
-    2. **Self-Hosted Website Mode (Local Web Repo Hosting)**: Select either a specific `.html` file or a website directory (such as a static web repository downloaded from GitHub containing `index.html`, CSS, JS, images, and sub-routes).
-- **Working Server Engine & Responsive Web Portal (`ContinuumHubService.kt`)**:
-  - In **Self-Hosted Website Mode**, serve the selected `.html` file or folder root directly at `http://<ip>:8080/` with proper relative asset resolution (`.css`, `.js`, `.svg`, `.png`, `.woff2`, sub-paths) and SPA fallback so downloaded GitHub web repos run seamlessly.
-  - In **FTP & File Sharing Mode**, serve a redesigned minimalist Web Portal at `http://<ip>:8080/` featuring a responsive layout switcher for **Mobile**, **Desktop (split-pane table)**, and **Screen Mirroring (live MJPEG stream + side-by-side file browser)**, with working file downloads, multi-file uploads, and live status.
+4. **Workspace, Windowing & Mini-App Rules System (User-Selectable in Settings)**:
+   - Configurable in **Settings -> Workspace & Windowing Mode** with three modes (defaulting to Option 1):
+     1. **Mode 1 (Default)**: *Separate Multi-Instance Windows on DeX/Desktop (`FLAG_ACTIVITY_NEW_DOCUMENT` / `FLAG_ACTIVITY_MULTIPLE_TASK` + Freeform bounds), Animated In-App Tabs on Tablet & Mobile*.
+     2. **Mode 2**: *Animated In-App Tabs across DeX, Tablet, and Mobile*.
+     3. **Mode 3**: *Floating Resizable Desktop Panels on DeX and Tablet, Animated Tabs on Mobile*.
+   - **Exact Rules File Locations**:
+     - `app/src/main/java/com/troikoss/continuum_explorer/rules/MiniAppRulesSpec.md` — Human-readable architectural specification for adding future Mini-Apps, window/tab creation, sidebar visibility, and UI standards.
+     - `app/src/main/java/com/troikoss/continuum_explorer/rules/WorkspaceRulesConfig.kt` — Declarative rules data models (`WindowingPolicy`, `SidebarVisibilityRule`, `MiniAppDescriptor`, `TabAnimationSpec`, `FileOpenResolutionRule`).
+     - `app/src/main/java/com/troikoss/continuum_explorer/rules/MiniAppRegistry.kt` — Central registry of My Suite Mini-Apps and file-extension routing rules.
+     - `app/src/main/java/com/troikoss/continuum_explorer/rules/WorkspaceWindowController.kt` — Runtime engine executing tab transitions, floating window overlays, or DeX multi-window intents based on the user's selected rule.
 
-## 7. Separate-Tab File Preview Action Bar & Metadata Editor (`ViewOnlyFileViewer.kt`)
-- **Logical Top Action Bar Order**:
-  - Standardize the header bar when a file is previewed in a separate tab in the exact logical order:
-    1. **File Type Icon & File Name** (with size & format subtitle)
-    2. **Edit** button (shown for all editable text, code, markdown, CSV, and image files; routes directly to Markor Text Engine or Image Studio)
-    3. **Metadata (View / Edit)** button (opens a comprehensive Metadata & Properties modal)
-    4. **Delete** button (with confirmation dialog and automatic tab cleanup)
-    5. **Share / Open Externally** button
-    6. **Full-Screen Toggle** button
-- **Interactive Metadata Modal**:
-  - Allow viewing and editing file name & extension inline, viewing/editing EXIF metadata (for JPEG/PNG/WebP images: Artist, Copyright, Description, DateTime, GPS strip option) and file attributes/timestamps, plus one-tap copy for full path, MD5/SHA-256 checksums, and byte size.
+5. **My Suite Recent Edited/Created Database**:
+   - Replaces the device-wide `MediaStore` query in My Suite with a dedicated persistence store (`SuiteActivityDatabase.kt`) that records **only files created or edited inside My Suite / Explorer Editors**, sorted by last edited timestamp with tool badge, file type, and quick-resume action.
 
-## 8. PhotoEditor & Markor Desktop vs. Mobile Responsive Layouts (`NativeImageViewerEditor.kt` & `MarkorTextEngine.kt`)
-- **PhotoEditor-Inspired Image Studio (`NativeImageViewerEditor.kt`)**:
-  - **Wide / Desktop / Tablet Layout (`maxWidth >= 680.dp`)**: Keep the image canvas centered on the left/main area and dock all PhotoEditor controls, filter presets, adjustment sliders (Brightness, Contrast, Saturation, Warmth), crop/transform tools, and brush/text overlays in a dedicated right-hand control sidebar (`300.dp` width) so sliders never cover or shift the image.
-  - **Mobile / Compact Layout**: Preserve the bottom toolbar and compact slider sheet layout inspired by the original PhotoEditor app.
-- **Markor-Inspired Text & Markdown Studio (`MarkorTextEngine.kt`)**:
-  - Optimize for desktop/tablet screens by supporting a side-by-side **Live Split Editor + WebView Preview** toggle on wide screens while keeping the stable Title Bar, Heading Bar, and bottom/top formatting bar structure intact on mobile.
+6. **Homepage Quick Preview Bar & Side-Pane Polish**:
+   - Makes the Homepage Quick Preview (`WorkspacePreviewPane` / `ViewAreaWindow`) cleanly toggleable from the TopBar eye icon and file context menu, respecting the new APK/binary/media preview rules without cramping narrow windows.
 
-## 9. Release APK Compression & Performance Optimization (`app/build.gradle.kts` & `proguard-rules.pro`)
-- Enable R8 code shrinking (`isMinifyEnabled = true`) and resource shrinking (`isShrinkResources = true`) for release builds, limit bundled `resConfigs("en")` if appropriate or strip debug symbols, and configure optional ABI split properties (`-PabiTarget`) so architecture-specific APKs are compact and fast.
-- Ensure comprehensive `proguard-rules.pro` keep rules for kotlinx.serialization, Apache Commons Compress, SMBJ, SSHJ, BouncyCastle, and Compose so release builds never crash.
+7. **HTTP/FTP Server Hub, Screen Sharing Fix, Responsive Web Portal & Notification Title**:
+   - **Notification Title**: Changes the foreground notification title in `ContinuumHubService.kt` from `"Continuum Server Hub"` to `"Explorer"`.
+   - **Android 8–15 Screen Mirroring Fix (`ScreenCastManager.kt`)**: Registers `MediaProjection.Callback` before calling `createVirtualDisplay()` (mandatory on Android 14 / API 34+ and Android 15), uses a dedicated background `HandlerThread` for `ImageReader` frame capture, and ensures `ContinuumHubService` starts/attaches the MJPEG stream dynamically even if the HTTP server is already running.
+   - **Hideable Screen-Share Player & Responsive Web Portal (`KtorEmbeddedServer.kt` + `WebPortalTemplates.kt`)**:
+     - On the FTP/HTTP File Hosting portal, the screen-mirror video player is **hidden by default** behind a clean **"Live Screen Stream (Show/Hide)"** toggle pill in the header (and only shown when screen mirroring is active).
+     - Redesigns the hosted web file browser with a responsive grid/table switcher, breadcrumb bar, drag-and-drop upload zone, media preview modal, and adaptive layout for mobile, tablet, and desktop browsers.
 
-## 10. Error-Free GitHub Actions Workflow (`.github/workflows/android-build.yml`)
-- Create `.github/workflows/android-build.yml` modeled directly on the user's verified workflow structure (`JDK 21`, `Gradle 9.3.1`, safe keystore decoding/fallback, zero personal information exposed):
-  - **Inputs**:
-    - `build_target`: `all`, `aab`, `universal-apk`, `arm64-v8a-apk`, `armeabi-v7a-apk`, `x86_64-apk`, `x86-apk`
-    - `build_variant`: `release` or `debug`
-    - `create_release`: boolean toggle to optionally publish a GitHub Release
-    - `release_tag`: optional custom version input; defaults to base version `0.0.1` and automatically increments to `0.0.(x+1)` based on `github.run_number` when left blank.
+8. **Archive Base64 Codec Feature**:
+   - Removes Base64 Codec from active UI (`VibeAreaScreen.kt` and `EditorContainer.kt`) and archives its implementation inside `app/src/main/java/com/troikoss/continuum_explorer/archive/base64/ArchivedBase64Codec.kt` for future reference.
 
-## 11. Mandatory In-App Help Documentation Update (`HelpDocumentationSection.kt`)
-- Update `HelpDocumentationSection.kt` to thoroughly document all new and updated features (Full-Screen Mode, Window Margin fixes, View & Column Switcher, My Suite file creation & editing, FTP/HTTP & Self-Hosted Website Server Hub, Separate-Tab Preview & Metadata Editor, and Desktop/Mobile Editor layouts) and verify zero build or runtime issues via `compile_applet`.
+9. **Strict Modularity (Separate UI, Functionality/Logic, and Database Files)**:
+   - Splits oversized files into focused, fast-compiling modules under `data/db/`, `domain/logic/`, `rules/`, and `ui/` so every file remains concise and easy to maintain.
+
+---
+
+## 2. Where the Rules Files Are Located
+
+The new Mini-App, Tab/Window Creation, Sidebar, and UI Rules system is stored in:
+
+1. **`/app/src/main/java/com/troikoss/continuum_explorer/rules/MiniAppRulesSpec.md`**
+   - Complete developer documentation defining how every new Mini-App in **My Suite** must declare its ID, supported extensions, memory cleanup hook, sidebar behavior, and launch mode across Mobile, Tablet, and DeX.
+2. **`/app/src/main/java/com/troikoss/continuum_explorer/rules/WorkspaceRulesConfig.kt`**
+   - Defines `WorkspaceWindowMode` (`DEX_WINDOWS_MOBILE_TABS`, `ALL_ANIMATED_TABS`, `FLOATING_PANELS_DESKTOP_TABLET`), `SidebarVisibilityMode`, `TabLifecycleRule`, and `FileLaunchRule`.
+3. **`/app/src/main/java/com/troikoss/continuum_explorer/rules/MiniAppRegistry.kt`**
+   - Central registry mapping active Mini-Apps (Markor Text & Code Studio, PhotoEditor Studio, CSV & Table Studio) and archived Mini-Apps (Base64 Codec) with extension routing and direct-launch behavior.
+4. **`/app/src/main/java/com/troikoss/continuum_explorer/rules/WorkspaceWindowController.kt`**
+   - Enforces back-stack origin tracking (`originTabId`), animated tab transitions, floating window state (`FloatingPanelState`), and DeX multi-window `Intent` launching.
+
+---
+
+## 3. File-by-File Modular Implementation Breakdown
+
+### A. Database & Persistence Layer (`data/db/`)
+- **`/app/src/main/java/com/troikoss/continuum_explorer/data/db/SuiteRecentDatabase.kt` (New)**:
+  - Lightweight SQLite / JSON-backed database tracking only files **created or edited** in My Suite or Explorer Editors (`path`, `name`, `extension`, `editorId`, `lastModified`, `actionType = CREATED | EDITED`), with automatic pruning of deleted files and zero memory overhead.
+
+### B. Rules & Domain Logic Layer (`rules/` & `domain/logic/`)
+- **`/app/src/main/java/com/troikoss/continuum_explorer/rules/MiniAppRulesSpec.md` (New)**
+- **`/app/src/main/java/com/troikoss/continuum_explorer/rules/WorkspaceRulesConfig.kt` (New)**
+- **`/app/src/main/java/com/troikoss/continuum_explorer/rules/MiniAppRegistry.kt` (New)**
+- **`/app/src/main/java/com/troikoss/continuum_explorer/rules/WorkspaceWindowController.kt` (New)**
+- **`/app/src/main/java/com/troikoss/continuum_explorer/domain/logic/FileOpenPolicyEngine.kt` (New)**:
+  - Classifies any `UniversalFile` into:
+    - `EDITABLE_TEXT` / `EDITABLE_TABLE` / `EDITABLE_IMAGE` -> Single-tap opens Preview with Edit button; "Edit" menu action opens Editor directly; My Suite opens Editor directly.
+    - `PLAYABLE_MEDIA_OR_DOC` (Video, Audio, PDF, ZIP/TAR/7Z/RAR excluding APK) -> Opens rich viewer.
+    - `APK_PACKAGE` (`.apk`) -> Opens APK Info & Package Installer Sheet (never Archive folder view).
+    - `NON_EDITABLE_BINARY` -> Opens File Info & Choose Preferred App sheet (never raw binary text).
+- **`/app/src/main/java/com/troikoss/continuum_explorer/domain/logic/ApkMetadataExtractor.kt` (New)**:
+  - Uses Android `PackageManager.getPackageArchiveInfo` to extract the APK's application icon, app name, package name, version name, version code, minSdk, targetSdk, and permissions, plus launches the system Package Installer via `FileProvider`.
+
+### C. Archiving Base64 Codec (`archive/base64/`)
+- **`/app/src/main/java/com/troikoss/continuum_explorer/archive/base64/ArchivedBase64Codec.kt` (New)**:
+  - Preserves the Base64 encoder/decoder logic and UI composable in an archived module removed from active UI navigation.
+
+### D. UI Components & Screens (`ui/`)
+- **`/app/src/main/java/com/troikoss/continuum_explorer/ui/dialogs/ApkInstallerSheet.kt` (New)**:
+  - Material 3 modal dialog/sheet showing APK icon, app label, package ID, version, SDK levels, file size, and **Install with Package Installer** primary button (no "Browse Archive" button).
+- **`/app/src/main/java/com/troikoss/continuum_explorer/ui/dialogs/NonEditableFileInfoSheet.kt` (New)**:
+  - Clean file info sheet for unsupported/binary files with a **Choose Preferred App to View** button.
+- **`/app/src/main/java/com/troikoss/continuum_explorer/ui/components/FloatingMiniAppHost.kt` (New)**:
+  - Renders draggable, resizable floating windows on Tablet/DeX when Windowing Mode 3 is selected in Settings.
+- **`/app/src/main/java/com/troikoss/continuum_explorer/ui/FileExplorer.kt` & `/app/src/main/java/com/troikoss/continuum_explorer/utils/FileExplorerState.kt`**:
+  - Adds `originTabIndex` to `ExplorerState` so closing a preview/editor tab returns to the exact source tab and folder scroll state.
+  - Unifies the sidebar into a single collapsible rail/drawer on Tablet & DeX (`isSidebarCollapsed`) and single modal drawer on Mobile—eliminating overlapping drawers.
+  - Adds animated tab creation/closing transitions.
+- **`/app/src/main/java/com/troikoss/continuum_explorer/ui/components/NavigationPane.kt`**:
+  - Connects the collapse/hide button on Tablet & DeX to `onToggleSidebar` and hides it when inappropriate.
+- **`/app/src/main/java/com/troikoss/continuum_explorer/ui/components/VibeAreaScreen.kt` & `/app/src/main/java/com/troikoss/continuum_explorer/ui/editor/EditorContainer.kt`**:
+  - Removes the redundant mid-page before editing; clicking a tool or file opens the editor directly.
+  - Connects the "Recent" section in My Suite exclusively to `SuiteRecentDatabase`.
+  - Removes Base64 Codec from the My Suite grid.
+  - Hides the duplicate hamburger menu button when the Tablet/DeX permanent sidebar is already visible.
+- **`/app/src/main/java/com/troikoss/continuum_explorer/ui/components/ViewOnlyFileViewer.kt` & `/app/src/main/java/com/troikoss/continuum_explorer/ui/components/ItemRow.kt` & `ContextMenus.kt`**:
+  - Adds a direct **Edit** item with icon to the three-dot menu of all supported editable files (`txt`, `md`, `json`, `xml`, `csv`, `html`, `css`, `js`, `kt`, `py`, `jpg`, `png`, `webp`).
+  - Removes `.apk` from `isArchive` in `ViewOnlyFileViewer.kt`.
+- **`/app/src/main/java/com/troikoss/continuum_explorer/ui/activities/SettingsScreen.kt` & `/app/src/main/java/com/troikoss/continuum_explorer/utils/SettingsManager.kt`**:
+  - Adds the **Workspace & Mini-App Windowing Mode** selector (Options 1, 2, and 3, with Option 1 as default).
+
+### E. Server & Screen Sharing Layer (`server/`)
+- **`/app/src/main/java/com/troikoss/continuum_explorer/server/ContinuumHubService.kt`**:
+  - Changes notification title to `"Explorer"`.
+  - Allows starting/stopping Screen Mirroring dynamically while the HTTP server is already running.
+- **`/app/src/main/java/com/troikoss/continuum_explorer/server/ScreenCastManager.kt`**:
+  - Registers `MediaProjection.Callback` before `createVirtualDisplay()` for Android 14/15 compatibility and pumps frames on a dedicated background `HandlerThread`.
+- **`/app/src/main/java/com/troikoss/continuum_explorer/server/WebPortalTemplates.kt` (New) & `/app/src/main/java/com/troikoss/continuum_explorer/server/KtorEmbeddedServer.kt`**:
+  - Extracts and upgrades the web portal HTML/CSS/JS into a responsive, interactive file-hosting UI where the live screen stream player is hidden by default behind a toggle button and scales cleanly across mobile, tablet, and desktop aspect ratios.
+
+### F. Help Documentation (`ui/components/HelpDocumentationSection.kt`)
+- Updates the Help page with complete documentation of the new file opening/editing rules, APK installer flow, My Suite Recent Edited database, Workspace Windowing Modes (1/2/3), unified sidebar, and HTTP/FTP web portal + screen mirroring upgrades.

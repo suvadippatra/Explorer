@@ -231,6 +231,11 @@ fun EditorContainer(
         if (file != null && file.canWrite()) {
             try {
                 file.writeText(fileContent)
+                com.troikoss.continuum_explorer.data.db.SuiteRecentDatabase.recordFileActivity(
+                    context = context,
+                    file = file,
+                    activityType = com.troikoss.continuum_explorer.data.db.SuiteActivityType.EDITED
+                )
                 Toast.makeText(context, "Saved ${file.name}", Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
                 Toast.makeText(context, "Error saving: ${e.message}", Toast.LENGTH_SHORT).show()
@@ -258,92 +263,29 @@ fun EditorContainer(
         // Main Editor Area
         Column(modifier = Modifier.weight(1f).fillMaxHeight()) {
             val currentFile = activeFile
-            if (editorToolId == "base64" || editorToolId == "hex") {
-                Base64CodeViewer(
-                    file = currentFile,
-                    bytes = binaryBytes,
-                    modifier = Modifier.fillMaxSize(),
-                    onChooseFile = { showInAppPicker = true }
-                )
-            } else if (currentFile == null) {
-                // BLANK INITIAL WORKSPACE WITH CHOOSE FILE + CREATE NEW TEXT FILE BUTTONS
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(24.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(16.dp),
-                        modifier = Modifier
-                            .fillMaxWidth(0.92f)
-                            .clip(RoundedCornerShape(16.dp))
-                            .border(
-                                width = 1.5.dp,
-                                color = MaterialTheme.colorScheme.outlineVariant,
-                                shape = RoundedCornerShape(16.dp)
-                            )
-                            .background(MaterialTheme.colorScheme.surfaceContainerLow)
-                            .padding(28.dp)
-                    ) {
-                        Surface(
-                            shape = RoundedCornerShape(16.dp),
-                            color = MaterialTheme.colorScheme.primaryContainer,
-                            modifier = Modifier.size(60.dp)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = Icons.Default.EditNote,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                    modifier = Modifier.size(32.dp)
-                                )
+            if (currentFile == null) {
+                // Auto-create or open default scratchpad so user never lands on an empty middle screen
+                LaunchedEffect(editorToolId) {
+                    val docsDir = File(
+                        Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS),
+                        "ContinuumSuite"
+                    ).apply { if (!exists()) mkdirs() }
+                    val defaultFile = if (editorToolId == "csv_editor") {
+                        File(docsDir, "Sheet1.csv").apply {
+                            if (!exists()) {
+                                createNewFile()
+                                writeText("Item,Category,Value\nSample 1,General,100\n")
                             }
                         }
-
-                        Text(
-                            text = "Markor Text & Code Studio",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold
-                        )
-
-                        Text(
-                            text = "Choose an existing document or create a new text, markdown, code, or CSV file. The layout will configure automatically.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = TextAlign.Center
-                        )
-
-                        // Action Buttons: Choose File & Create New File
-                        Column(
-                            verticalArrangement = Arrangement.spacedBy(10.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Button(
-                                onClick = { showInAppPicker = true },
-                                shape = RoundedCornerShape(10.dp),
-                                modifier = Modifier.fillMaxWidth(0.85f),
-                                contentPadding = PaddingValues(vertical = 12.dp)
-                            ) {
-                                Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("Choose File to Edit", style = MaterialTheme.typography.labelMedium)
-                            }
-
-                            OutlinedButton(
-                                onClick = { showCreateFileDialog = true },
-                                shape = RoundedCornerShape(10.dp),
-                                modifier = Modifier.fillMaxWidth(0.85f),
-                                contentPadding = PaddingValues(vertical = 12.dp)
-                            ) {
-                                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("Create New Text File", style = MaterialTheme.typography.labelMedium)
+                    } else {
+                        File(docsDir, "QuickNote.md").apply {
+                            if (!exists()) {
+                                createNewFile()
+                                writeText("# Quick Note\n\nStart writing here...\n")
                             }
                         }
                     }
+                    activeFile = defaultFile
                 }
             } else if (isLoadingFile) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -390,13 +332,6 @@ fun EditorContainer(
                     }
                     ext in listOf("png", "jpg", "jpeg", "webp", "gif", "bmp", "svg", "mp4", "mkv", "mp3", "wav", "ogg", "flac", "m4a") -> {
                         MediaViewer(file = currentFile)
-                    }
-                    binaryBytes.isNotEmpty() -> {
-                        Base64CodeViewer(
-                            file = currentFile,
-                            bytes = binaryBytes,
-                            modifier = Modifier.fillMaxSize()
-                        )
                     }
                     else -> {
                         com.troikoss.continuum_explorer.ui.editor.text.MarkorTextEngine(

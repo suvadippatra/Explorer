@@ -231,8 +231,14 @@ fun FtpServerSettingsPanel(
                         .padding(horizontal = 6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    IconButton(onClick = onMenuClick) {
-                        Icon(Icons.Default.Menu, contentDescription = "Navigation Drawer")
+                    val showMenuIcon = appState.getScreenSize() == com.troikoss.continuum_explorer.model.ScreenSize.SMALL ||
+                        SettingsManager.isWideSidebarCollapsed.value
+                    if (showMenuIcon) {
+                        IconButton(onClick = onMenuClick) {
+                            Icon(Icons.Default.Menu, contentDescription = "Navigation Sidebar")
+                        }
+                    } else {
+                        Spacer(modifier = Modifier.width(8.dp))
                     }
 
                     Row(

@@ -40,6 +40,7 @@ data class RemoteFtpItem(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ExternalFtpViewerPanel(
+    appState: com.troikoss.continuum_explorer.utils.FileExplorerState? = null,
     modifier: Modifier = Modifier,
     onMenuClick: () -> Unit = {}
 ) {
@@ -131,6 +132,9 @@ fun ExternalFtpViewerPanel(
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         // Top Header Bar: Menu button on left, centered "Add FTP server"
+        val showMenuIcon = appState == null ||
+            appState.getScreenSize() == com.troikoss.continuum_explorer.model.ScreenSize.SMALL ||
+            com.troikoss.continuum_explorer.managers.SettingsManager.isWideSidebarCollapsed.value
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -138,14 +142,18 @@ fun ExternalFtpViewerPanel(
                 .padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(
-                onClick = onMenuClick
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Menu,
-                    contentDescription = "Menu",
-                    tint = MaterialTheme.colorScheme.onSurface
-                )
+            if (showMenuIcon) {
+                IconButton(
+                    onClick = onMenuClick
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Menu,
+                        contentDescription = "Menu",
+                        tint = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+            } else {
+                Spacer(modifier = Modifier.size(48.dp))
             }
 
             Box(

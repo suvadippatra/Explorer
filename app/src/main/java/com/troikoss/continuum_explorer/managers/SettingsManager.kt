@@ -10,6 +10,7 @@ import com.troikoss.continuum_explorer.model.FileColumnType
 import com.troikoss.continuum_explorer.model.SortOrder
 import com.troikoss.continuum_explorer.model.UniversalFile
 import com.troikoss.continuum_explorer.model.ViewMode
+import com.troikoss.continuum_explorer.rules.WorkspaceWindowMode
 import com.troikoss.continuum_explorer.utils.GlobalEvents
 import com.troikoss.continuum_explorer.viewarea.FileMimeGroup
 import com.troikoss.continuum_explorer.viewarea.FileMimeParser
@@ -75,9 +76,31 @@ object SettingsManager {
     private const val KEY_DEFAULT_HEADER_TYPE = "default_header_type"
     private const val KEY_DEFAULT_GRID_ZOOM = "default_grid_zoom"
     private const val KEY_DEFAULT_GRID_COLUMNS = "default_grid_columns"
+    private const val KEY_WORKSPACE_WINDOW_MODE = "workspace_window_mode"
 
     private val _isFullScreenTabBarHidden = mutableStateOf(false)
     val isFullScreenTabBarHidden: State<Boolean> = _isFullScreenTabBarHidden
+
+    private val _isWideSidebarCollapsed = mutableStateOf(false)
+    val isWideSidebarCollapsed: State<Boolean> = _isWideSidebarCollapsed
+
+    fun toggleWideSidebarCollapsed() {
+        _isWideSidebarCollapsed.value = !_isWideSidebarCollapsed.value
+    }
+
+    fun setWideSidebarCollapsed(collapsed: Boolean) {
+        _isWideSidebarCollapsed.value = collapsed
+    }
+
+    private val _workspaceWindowMode = mutableStateOf(WorkspaceWindowMode.DEX_WINDOWS_TABLET_MOBILE_TABS)
+    val workspaceWindowMode: State<WorkspaceWindowMode> = _workspaceWindowMode
+
+    fun setWorkspaceWindowMode(context: Context, mode: WorkspaceWindowMode) {
+        _workspaceWindowMode.value = mode
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putInt(KEY_WORKSPACE_WINDOW_MODE, mode.id).apply()
+        GlobalEvents.triggerConfigUpdate()
+    }
 
     fun setFullScreenTabBarHidden(hidden: Boolean) {
         _isFullScreenTabBarHidden.value = hidden
@@ -322,6 +345,9 @@ object SettingsManager {
         _defaultGridZoom.value = prefs.getInt(KEY_DEFAULT_GRID_ZOOM, 100).coerceIn(60, 300)
 
         _isHoverPreviewEnabled.value = prefs.getBoolean(KEY_HOVER_PREVIEW_ENABLED, false)
+        _workspaceWindowMode.value = WorkspaceWindowMode.fromId(
+            prefs.getInt(KEY_WORKSPACE_WINDOW_MODE, WorkspaceWindowMode.DEX_WINDOWS_TABLET_MOBILE_TABS.id)
+        )
 
         val loadHandler = { key: String ->
             val saved = prefs.getString(key, DefaultAppHandler.INTERNAL_PREVIEWER.name)

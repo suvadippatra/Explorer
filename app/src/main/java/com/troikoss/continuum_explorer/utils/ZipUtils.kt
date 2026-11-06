@@ -39,7 +39,7 @@ object ZipUtils {
         
         try {
             val rawEntries = when {
-                name.endsWith(".zip") || name.endsWith(".jar") || name.endsWith(".apk") -> {
+                name.endsWith(".zip") || name.endsWith(".jar") -> {
                     if (source is File) getZipEntriesFile(source)
                     else getZipEntriesUri(context, source as Uri)
                 }
@@ -69,8 +69,10 @@ object ZipUtils {
     }
 
     fun isArchive(file: UniversalFile): Boolean {
+        if (file.isDirectory) return false
         val name = file.name.lowercase()
-        return name.endsWith(".zip")
+        if (name.endsWith(".apk")) return false
+        return name.endsWith(".zip") || name.endsWith(".jar")
     }
 
     private fun getName(context: Context, source: Any): String {

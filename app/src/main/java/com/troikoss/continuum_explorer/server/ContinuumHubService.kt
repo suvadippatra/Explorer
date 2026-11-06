@@ -236,10 +236,10 @@ class ContinuumHubService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "Continuum Hub Network & Cast Service",
+                "Explorer",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Runs local HTTP dashboard, self-hosted website server, FTP daemon, and live screen casting"
+                description = "Runs local HTTP portal, self-hosted website server, FTP daemon, and live screen casting"
                 setShowBadge(false)
             }
             val manager = getSystemService(NotificationManager::class.java)
@@ -280,13 +280,13 @@ class ContinuumHubService : Service() {
         val statusText = "IP: $serverIpAddress • Run time: ${getFormattedUptime()}"
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Continuum Server Hub")
+            .setContentTitle("Explorer")
             .setContentText(statusText)
             .setSmallIcon(R.drawable.ic_network_server)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop Hub", stopPendingIntent)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop Server", stopPendingIntent)
             .build()
     }
 
