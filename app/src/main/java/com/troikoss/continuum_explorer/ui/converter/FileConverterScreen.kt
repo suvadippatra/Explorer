@@ -785,41 +785,194 @@ fun FileConverterScreen(
                             }
                         }
 
-                        // Output Result Banner for Tab 1
-                        presetOutputResult?.let { out ->
+                        // Live Before vs. After Size & Dimensions Preview Card for Tab 1
+                        val activeSource = if (presetSubMode == 0) studentSourceFile else pdfSourceFile
+                        if (activeSource != null && activeSource.exists()) {
                             item {
+                                val srcDims = remember(activeSource) {
+                                    if (presetSubMode == 0) {
+                                        val opts = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                                        android.graphics.BitmapFactory.decodeFile(activeSource.absolutePath, opts)
+                                        if (opts.outWidth > 0 && opts.outHeight > 0) "${opts.outWidth}×${opts.outHeight} px" else "Image"
+                                    } else "PDF Document"
+                                }
+                                val outFile = presetOutputResult
+                                val outDims = remember(outFile) {
+                                    if (outFile != null && outFile.exists() && presetSubMode == 0) {
+                                        val opts = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                                        android.graphics.BitmapFactory.decodeFile(outFile.absolutePath, opts)
+                                        if (opts.outWidth > 0 && opts.outHeight > 0) "${opts.outWidth}×${opts.outHeight} px" else "JPG"
+                                    } else if (outFile != null) "Compressed PDF" else null
+                                }
+                                val srcKb = (activeSource.length() / 1024.0).coerceAtLeast(0.1)
+                                val outKb = outFile?.let { (it.length() / 1024.0).coerceAtLeast(0.1) }
+                                val savedPct = if (outKb != null && srcKb > 0) {
+                                    (((srcKb - outKb) / srcKb) * 100.0).roundToInt()
+                                } else null
+
                                 Surface(
                                     shape = RoundedCornerShape(14.dp),
-                                    color = MaterialTheme.colorScheme.secondaryContainer,
+                                    color = if (outFile != null) MaterialTheme.colorScheme.secondaryContainer
+                                    else MaterialTheme.colorScheme.surfaceContainerHigh,
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
-                                    Row(
+                                    Column(
                                         modifier = Modifier.padding(14.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.SpaceBetween
+                                        verticalArrangement = Arrangement.spacedBy(10.dp)
                                     ) {
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(
-                                                text = "Ready: ${out.name} (${Formatter.formatFileSize(context, out.length())})",
-                                                style = MaterialTheme.typography.titleSmall,
-                                                fontWeight = FontWeight.Bold,
-                                                color = MaterialTheme.colorScheme.onSecondaryContainer
-                                            )
-                                            Text(
-                                                text = out.absolutePath,
-                                                style = MaterialTheme.typography.labelSmall,
-                                                fontFamily = FontFamily.Monospace,
-                                                color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f),
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                        }
-                                        FilledTonalButton(
-                                            onClick = { appState?.open(out.toUniversal()) }
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            Icon(Icons.Default.Visibility, contentDescription = null, modifier = Modifier.size(16.dp))
-                                            Spacer(modifier = Modifier.width(6.dp))
-                                            Text("Preview")
+                                            Text(
+                                                text = "Before vs. After Size & Dimensions Preview",
+                                                style = MaterialTheme.typography.titleSmall,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                            if (savedPct != null) {
+                                                Surface(
+                                                    shape = RoundedCornerShape(50),
+                                                    color = MaterialTheme.colorScheme.primary
+                                                ) {
+                                                    Text(
+                                                        text = if (savedPct >= 0) "-$savedPct% Saved" else "+${-savedPct}%",
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = MaterialTheme.colorScheme.onPrimary,
+                                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
+
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            // BEFORE Box
+                                            Surface(
+                                                shape = RoundedCornerShape(10.dp),
+                                                color = MaterialTheme.colorScheme.surface,
+                                                modifier = Modifier.weight(1f)
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier.padding(10.dp),
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                                ) {
+                                                    Box(modifier = Modifier.size(48.dp)) {
+                                                        IconHelper.FileThumbnail(
+                                                            file = activeSource.toUniversal(),
+                                                            modifier = Modifier.fillMaxSize()
+                                                        )
+                                                    }
+                                                    Column(modifier = Modifier.weight(1f)) {
+                                                        Text("BEFORE (Original)", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                        Text(
+                                                            text = Formatter.formatFileSize(context, activeSource.length()),
+                                                            style = MaterialTheme.typography.bodyMedium,
+                                                            fontWeight = FontWeight.Bold
+                                                        )
+                                                        Text(
+                                                            text = srcDims,
+                                                            style = MaterialTheme.typography.labelSmall,
+                                                            fontFamily = FontFamily.Monospace,
+                                                            color = MaterialTheme.colorScheme.primary
+                                                        )
+                                                    }
+                                                }
+                                            }
+
+                                            Icon(
+                                                imageVector = Icons.Default.ArrowForward,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.primary
+                                            )
+
+                                            // AFTER Box
+                                            Surface(
+                                                shape = RoundedCornerShape(10.dp),
+                                                color = MaterialTheme.colorScheme.surface,
+                                                modifier = Modifier.weight(1f)
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier.padding(10.dp),
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                                ) {
+                                                    if (outFile != null && outFile.exists()) {
+                                                        Box(modifier = Modifier.size(48.dp)) {
+                                                            IconHelper.FileThumbnail(
+                                                                file = outFile.toUniversal(),
+                                                                modifier = Modifier.fillMaxSize()
+                                                            )
+                                                        }
+                                                        Column(modifier = Modifier.weight(1f)) {
+                                                            Text("AFTER (Output)", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                                                            Text(
+                                                                text = Formatter.formatFileSize(context, outFile.length()),
+                                                                style = MaterialTheme.typography.bodyMedium,
+                                                                fontWeight = FontWeight.Bold
+                                                            )
+                                                            Text(
+                                                                text = outDims ?: "Ready",
+                                                                style = MaterialTheme.typography.labelSmall,
+                                                                fontFamily = FontFamily.Monospace,
+                                                                color = MaterialTheme.colorScheme.primary
+                                                            )
+                                                        }
+                                                    } else {
+                                                        Column(modifier = Modifier.weight(1f)) {
+                                                            Text("TARGET ESTIMATE", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                            Text(
+                                                                text = if (presetSubMode == 0) "${customMinKb.roundToInt()}–${customMaxKb.roundToInt()} KB"
+                                                                else if (pdfTargetMaxKb > 0f) "≤ ${pdfTargetMaxKb.roundToInt()} KB"
+                                                                else selectedPdfCompression.label,
+                                                                style = MaterialTheme.typography.bodyMedium,
+                                                                fontWeight = FontWeight.Bold
+                                                            )
+                                                            Text(
+                                                                text = if (presetSubMode == 0) {
+                                                                    val w = customWidthInput.ifBlank { "Auto" }
+                                                                    val h = customHeightInput.ifBlank { "Auto" }
+                                                                    "${w}×${h} px"
+                                                                } else selectedPdfCompression.label,
+                                                                style = MaterialTheme.typography.labelSmall,
+                                                                fontFamily = FontFamily.Monospace,
+                                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        if (outFile != null && outFile.exists()) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.SpaceBetween
+                                            ) {
+                                                Text(
+                                                    text = outFile.absolutePath,
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    fontFamily = FontFamily.Monospace,
+                                                    color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f),
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                                Spacer(modifier = Modifier.width(8.dp))
+                                                FilledTonalButton(
+                                                    onClick = { appState?.open(outFile.toUniversal()) }
+                                                ) {
+                                                    Icon(Icons.Default.Visibility, contentDescription = null, modifier = Modifier.size(16.dp))
+                                                    Spacer(modifier = Modifier.width(6.dp))
+                                                    Text("Preview")
+                                                }
+                                            }
                                         }
                                     }
                                 }

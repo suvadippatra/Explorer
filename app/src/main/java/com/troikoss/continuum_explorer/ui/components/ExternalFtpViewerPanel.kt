@@ -300,6 +300,200 @@ fun ExternalFtpViewerPanel(
         }
     }
 
+    var showUploadPicker by remember { mutableStateOf(false) }
+    var previewingRemoteItem by remember { mutableStateOf<RemoteFtpItem?>(null) }
+    var previewRemoteText by remember { mutableStateOf<String?>(null) }
+    var isPreviewLoading by remember { mutableStateOf(false) }
+
+    fun uploadLocalFileToServer(server: SavedFtpServer, localFile: File) {
+        scope.launch(Dispatchers.IO) {
+            try {
+                val cleanHost = server.host.trim().removePrefix("http://").removePrefix("ftp://").substringBefore("/")
+                val cleanFtpPort = server.ftpPort.trim().toIntOrNull() ?: 2121
+                val ftp = FTPClient()
+                try {
+                    ftp.connectTimeout = 4000
+                    ftp.connect(cleanHost, cleanFtpPort)
+                    val user = if (server.isAnonymous || server.username.isBlank()) "anonymous" else server.username
+                    val pass = if (server.isAnonymous) "anonymous@" else password
+                    if (ftp.login(user, pass)) {
+                        ftp.enterLocalPassiveMode()
+                        ftp.setFileType(FTP.BINARY_FILE_TYPE)
+                        val remoteTarget = if (currentRemotePath.isBlank() || currentRemotePath == "/") {
+                            "/${localFile.name}"
+                        } else if (currentRemotePath.endsWith("/")) {
+                            "$currentRemotePath${localFile.name}"
+                        } else {
+                            "$currentRemotePath/${localFile.name}"
+                        }
+                        localFile.inputStream().use { input ->
+                            ftp.storeFile(remoteTarget, input)
+                        }
+                        ftp.logout()
+                        ftp.disconnect()
+                        withContext(Dispatchers.Main) {
+                            Toast.makeText(context, "Uploaded ${localFile.name} via FTP", Toast.LENGTH_SHORT).show()
+                            loadDirectoryFromServer(server, currentRemotePath)
+                        }
+                        return@launch
+                    }
+                } catch (_: Exception) {
+                    try { if (ftp.isConnected) ftp.disconnect() } catch (_: Exception) {}
+                }
+
+                // Fallback: HTTP Multipart POST to /upload
+                val cleanWebPort = server.webPort.trim().ifEmpty { "8080" }
+                val boundary = "----ExplorerClientBoundary${System.currentTimeMillis()}"
+                val url = URL("http://$cleanHost:$cleanWebPort/upload")
+                val conn = (url.openConnection() as HttpURLConnection).apply {
+                    connectTimeout = 5000
+                    readTimeout = 10000
+                    doOutput = true
+                    requestMethod = "POST"
+                    setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
+                }
+                conn.outputStream.use { out ->
+                    val header = "--$boundary\r\n" +
+                        "Content-Disposition: form-data; name=\"file_0\"; filename=\"${localFile.name}\"\r\n" +
+                        "Content-Type: application/octet-stream\r\n\r\n"
+                    out.write(header.toByteArray())
+                    localFile.inputStream().use { it.copyTo(out) }
+                    out.write("\r\n--$boundary--\r\n".toByteArray())
+                    out.flush()
+                }
+                val code = conn.responseCode
+                withContext(Dispatchers.Main) {
+                    if (code in 200..299) {
+                        Toast.makeText(context, "Uploaded ${localFile.name} to Host", Toast.LENGTH_SHORT).show()
+                        loadDirectoryFromServer(server, currentRemotePath)
+                    } else {
+                        Toast.makeText(context, "Upload rejected by host (HTTP $code)", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, "Upload failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    fun openInlineRemotePreview(server: SavedFtpServer, item: RemoteFtpItem) {
+        previewingRemoteItem = item
+        previewRemoteText = null
+        val ext = item.name.substringAfterLast('.', "").lowercase()
+        if (ext in listOf("txt", "md", "csv", "tsv", "json", "xml", "kt", "py", "js", "html", "css", "log")) {
+            isPreviewLoading = true
+            scope.launch(Dispatchers.IO) {
+                val txt = try {
+                    if (item.downloadUrl.startsWith("http")) {
+                        URL(item.downloadUrl).openStream().bufferedReader().use { it.readText().take(80_000) }
+                    } else {
+                        val cleanHost = server.host.trim()
+                        val cleanFtpPort = server.ftpPort.trim().toIntOrNull() ?: 2121
+                        val ftp = FTPClient()
+                        ftp.connect(cleanHost, cleanFtpPort)
+                        val user = if (server.isAnonymous || server.username.isBlank()) "anonymous" else server.username
+                        val pass = if (server.isAnonymous) "anonymous@" else password
+                        ftp.login(user, pass)
+                        ftp.enterLocalPassiveMode()
+                        val baos = java.io.ByteArrayOutputStream()
+                        ftp.retrieveFile(item.path, baos)
+                        ftp.logout()
+                        ftp.disconnect()
+                        baos.toString("UTF-8").take(80_000)
+                    }
+                } catch (e: Exception) {
+                    "Unable to preview remote file: ${e.message}"
+                }
+                withContext(Dispatchers.Main) {
+                    previewRemoteText = txt
+                    isPreviewLoading = false
+                }
+            }
+        } else {
+            isPreviewLoading = false
+        }
+    }
+
+    if (showUploadPicker && activeConnectedServer != null) {
+        InAppFilePickerDialog(
+            title = "Select File to Upload to ${activeConnectedServer!!.name}",
+            selectFolders = false,
+            onDismiss = { showUploadPicker = false },
+            onSelected = { pickedFile ->
+                showUploadPicker = false
+                uploadLocalFileToServer(activeConnectedServer!!, pickedFile)
+            }
+        )
+    }
+
+    previewingRemoteItem?.let { remoteItem ->
+        val ext = remoteItem.name.substringAfterLast('.', "").lowercase()
+        AlertDialog(
+            onDismissRequest = { previewingRemoteItem = null },
+            title = { Text(remoteItem.name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold) },
+            text = {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 220.dp, max = 420.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    when {
+                        isPreviewLoading -> CircularProgressIndicator()
+                        ext in listOf("jpg", "jpeg", "png", "webp", "gif", "bmp") && remoteItem.downloadUrl.startsWith("http") -> {
+                            coil.compose.AsyncImage(
+                                model = remoteItem.downloadUrl,
+                                contentDescription = remoteItem.name,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
+                        ext in listOf("csv", "tsv") && previewRemoteText != null -> {
+                            com.troikoss.continuum_explorer.ui.preview.CsvInteractiveTablePreview(
+                                rawText = previewRemoteText!!,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
+                        previewRemoteText != null -> {
+                            LazyColumn(modifier = Modifier.fillMaxSize()) {
+                                item {
+                                    Text(
+                                        text = previewRemoteText!!,
+                                        fontFamily = FontFamily.Monospace,
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                }
+                            }
+                        }
+                        else -> {
+                            Text(
+                                text = "Remote file (${formatRemoteSize(remoteItem.sizeBytes)}). Tap Download to open locally.",
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val srv = activeConnectedServer
+                        previewingRemoteItem = null
+                        if (srv != null) downloadRemoteItem(srv, remoteItem)
+                    }
+                ) {
+                    Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Download")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { previewingRemoteItem = null }) { Text("Close") }
+            }
+        )
+    }
+
     fun handleAddAndConnect() {
         if (remoteHost.isBlank()) {
             Toast.makeText(context, "Please enter remote host IP address", Toast.LENGTH_SHORT).show()
@@ -743,6 +937,16 @@ fun ExternalFtpViewerPanel(
                         }
 
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            FilledTonalButton(
+                                onClick = { showUploadPicker = true },
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                modifier = Modifier.height(32.dp)
+                            ) {
+                                Icon(Icons.Default.UploadFile, contentDescription = null, modifier = Modifier.size(15.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("Upload", style = MaterialTheme.typography.labelSmall)
+                            }
                             Text(
                                 text = connectionProtocolLabel,
                                 style = MaterialTheme.typography.labelSmall,
@@ -800,7 +1004,7 @@ fun ExternalFtpViewerPanel(
                                             if (item.isDirectory) {
                                                 loadDirectoryFromServer(server, item.path)
                                             } else {
-                                                downloadRemoteItem(server, item)
+                                                openInlineRemotePreview(server, item)
                                             }
                                         }
                                 ) {
@@ -845,15 +1049,27 @@ fun ExternalFtpViewerPanel(
                                                 tint = MaterialTheme.colorScheme.onSurfaceVariant
                                             )
                                         } else {
-                                            FilledTonalIconButton(
-                                                onClick = { downloadRemoteItem(server, item) },
-                                                modifier = Modifier.size(34.dp)
-                                            ) {
-                                                Icon(
-                                                    Icons.Default.Download,
-                                                    contentDescription = "Download to Device",
-                                                    modifier = Modifier.size(18.dp)
-                                                )
+                                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                IconButton(
+                                                    onClick = { openInlineRemotePreview(server, item) },
+                                                    modifier = Modifier.size(34.dp)
+                                                ) {
+                                                    Icon(
+                                                        Icons.Default.Visibility,
+                                                        contentDescription = "Inline Preview",
+                                                        modifier = Modifier.size(18.dp)
+                                                    )
+                                                }
+                                                FilledTonalIconButton(
+                                                    onClick = { downloadRemoteItem(server, item) },
+                                                    modifier = Modifier.size(34.dp)
+                                                ) {
+                                                    Icon(
+                                                        Icons.Default.Download,
+                                                        contentDescription = "Download to Device",
+                                                        modifier = Modifier.size(18.dp)
+                                                    )
+                                                }
                                             }
                                         }
                                     }

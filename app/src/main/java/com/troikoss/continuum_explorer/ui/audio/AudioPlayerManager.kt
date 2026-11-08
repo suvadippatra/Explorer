@@ -39,7 +39,8 @@ data class AudioTrackMetadata(
     val artist: String,
     val album: String,
     val albumArt: Bitmap?,
-    val dominantColor: Color
+    val dominantColor: Color,
+    val formatBadge: String = "AUDIO"
 )
 
 /**
@@ -62,7 +63,8 @@ object AudioPlayerManager {
             artist = "Unknown Artist",
             album = "Explorer Audio",
             albumArt = null,
-            dominantColor = Color(0xFF1DB954)
+            dominantColor = Color(0xFF1DB954),
+            formatBadge = "AUDIO"
         )
     )
         private set
@@ -189,6 +191,7 @@ object AudioPlayerManager {
     private fun extractMetadata(context: Context, track: UniversalFile): AudioTrackMetadata {
         val retriever = MediaMetadataRetriever()
         val fallbackTitle = track.name.substringBeforeLast('.')
+        val extUpper = track.name.substringAfterLast('.', "AUDIO").uppercase()
         return try {
             val fileRef = track.fileRef
             val docUri = track.documentFileRef?.uri
@@ -209,6 +212,13 @@ object AudioPlayerManager {
                 ?: track.fileRef?.parentFile?.name
                 ?: "Explorer Music"
 
+            val bitrateBps = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_BITRATE)?.toLongOrNull()
+            val badge = if (bitrateBps != null && bitrateBps > 0) {
+                "$extUpper • ${bitrateBps / 1000} kbps"
+            } else {
+                extUpper
+            }
+
             val pictureBytes = retriever.embeddedPicture
             val bitmap = if (pictureBytes != null) {
                 BitmapFactory.decodeByteArray(pictureBytes, 0, pictureBytes.size)
@@ -225,7 +235,8 @@ object AudioPlayerManager {
                 artist = artist,
                 album = album,
                 albumArt = bitmap,
-                dominantColor = dominant
+                dominantColor = dominant,
+                formatBadge = badge
             )
         } catch (_: Exception) {
             AudioTrackMetadata(
@@ -233,7 +244,8 @@ object AudioPlayerManager {
                 artist = "Local Audio",
                 album = track.fileRef?.parentFile?.name ?: "Explorer Music",
                 albumArt = null,
-                dominantColor = Color(0xFF1E3A5F)
+                dominantColor = Color(0xFF1E3A5F),
+                formatBadge = extUpper
             )
         } finally {
             try {

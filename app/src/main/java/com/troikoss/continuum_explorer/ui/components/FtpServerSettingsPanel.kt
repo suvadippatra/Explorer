@@ -1727,7 +1727,7 @@ private fun ScreenCastCard(
                 ) {
                     Text("Resolution", style = MaterialTheme.typography.bodySmall)
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        listOf("1080p", "720p", "480p").forEach { res ->
+                        listOf("720p", "1080p", "Native").forEach { res ->
                             FilterChip(
                                 selected = screenResolution == res,
                                 onClick = { onResolutionChange(res) },

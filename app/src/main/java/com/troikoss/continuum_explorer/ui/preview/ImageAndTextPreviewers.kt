@@ -331,6 +331,8 @@ fun CsvInteractiveTablePreview(
     modifier: Modifier = Modifier
 ) {
     var filterQuery by remember { mutableStateOf("") }
+    var sortColumnIndex by remember { mutableStateOf<Int?>(null) }
+    var sortAscending by remember { mutableStateOf(true) }
     val delimiter = remember(rawText) {
         val firstLine = rawText.lineSequence().firstOrNull().orEmpty()
         when {
@@ -348,10 +350,27 @@ fun CsvInteractiveTablePreview(
     }
 
     val headerRow = allRows.firstOrNull().orEmpty()
-    val dataRows = remember(allRows, filterQuery) {
+    val dataRows = remember(allRows, filterQuery, sortColumnIndex, sortAscending) {
         val body = if (allRows.size > 1) allRows.drop(1) else emptyList()
-        if (filterQuery.isBlank()) body
+        val filtered = if (filterQuery.isBlank()) body
         else body.filter { row -> row.any { cell -> cell.contains(filterQuery.trim(), ignoreCase = true) } }
+        val sCol = sortColumnIndex
+        if (sCol == null) {
+            filtered
+        } else {
+            val sorted = filtered.sortedWith { a, b ->
+                val va = a.getOrNull(sCol).orEmpty()
+                val vb = b.getOrNull(sCol).orEmpty()
+                val na = va.toDoubleOrNull()
+                val nb = vb.toDoubleOrNull()
+                if (na != null && nb != null) {
+                    na.compareTo(nb)
+                } else {
+                    va.compareTo(vb, ignoreCase = true)
+                }
+            }
+            if (sortAscending) sorted else sorted.reversed()
+        }
     }
     val maxCols = remember(allRows) { (allRows.maxOfOrNull { it.size } ?: 1).coerceAtLeast(1) }
 
@@ -368,12 +387,23 @@ fun CsvInteractiveTablePreview(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text(
-                    text = "${dataRows.size} rows × $maxCols columns",
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary
-                )
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "${dataRows.size} rows × $maxCols columns",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    if (sortColumnIndex != null) {
+                        TextButton(
+                            onClick = { sortColumnIndex = null },
+                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                            modifier = Modifier.height(26.dp)
+                        ) {
+                            Text("Reset Sort", style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                }
 
                 OutlinedTextField(
                     value = filterQuery,
@@ -403,7 +433,7 @@ fun CsvInteractiveTablePreview(
                 .horizontalScroll(hScroll)
         ) {
             Column(modifier = Modifier.fillMaxHeight()) {
-                // Sticky Header Row
+                // Sticky Header Row (Clickable for column sorting)
                 Row(
                     modifier = Modifier
                         .background(MaterialTheme.colorScheme.primaryContainer)
@@ -420,17 +450,31 @@ fun CsvInteractiveTablePreview(
                     }
                     for (colIdx in 0 until maxCols) {
                         val colTitle = headerRow.getOrNull(colIdx)?.ifBlank { "Col ${colIdx + 1}" } ?: "Col ${colIdx + 1}"
+                        val isSorted = sortColumnIndex == colIdx
+                        val sortArrow = if (isSorted) (if (sortAscending) " ▲" else " ▼") else ""
                         Box(
                             modifier = Modifier
                                 .width(150.dp)
+                                .pointerInput(colIdx) {
+                                    detectTapGestures(
+                                        onTap = {
+                                            if (sortColumnIndex == colIdx) {
+                                                sortAscending = !sortAscending
+                                            } else {
+                                                sortColumnIndex = colIdx
+                                                sortAscending = true
+                                            }
+                                        }
+                                    )
+                                }
                                 .padding(horizontal = 8.dp, vertical = 6.dp),
                             contentAlignment = Alignment.CenterStart
                         ) {
                             Text(
-                                text = colTitle,
+                                text = colTitle + sortArrow,
                                 fontWeight = FontWeight.Bold,
                                 style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                color = if (isSorted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onPrimaryContainer,
                                 maxLines = 1
                             )
                         }

@@ -31,14 +31,14 @@ import com.troikoss.continuum_explorer.utils.IconHelper
 import com.troikoss.continuum_explorer.utils.toUniversal
 import java.io.File
 
-private enum class DialogSortBy { NAME, DATE, SIZE }
+private enum class DialogSortBy { NAME, DATE, SIZE, TYPE }
 
 /**
  * Redesigned Universal File & Folder Picker Dialog.
  * Features:
  * 1. List / Grid View Toggle with live image/video/document thumbnails (`IconHelper.FileThumbnail`).
- * 2. Sort Controls (Name, Date, Size, Ascending/Descending).
- * 3. Clickable Breadcrumb Path Bar + Quick Storage Bookmark Chips (Internal, Downloads, Documents, Pictures, DCIM).
+ * 2. Sort Controls (Name, Date, Size, Type, Ascending/Descending).
+ * 3. Clickable Breadcrumb Path Bar + Quick Storage Bookmark Chips (Internal, Downloads, Documents, Pictures, DCIM, Music).
  * 4. Optional `allowedExtensions` filter and Multi-File selection mode (`onMultipleSelected`).
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -75,7 +75,8 @@ fun InAppFilePickerDialog(
             "Downloads" to Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
             "Documents" to Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS),
             "Pictures" to Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),
-            "DCIM" to Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM)
+            "DCIM" to Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM),
+            "Music" to Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC)
         ).filter { it.second.exists() }
     }
 
@@ -109,6 +110,10 @@ fun InAppFilePickerDialog(
             DialogSortBy.SIZE -> filtered.sortedWith(
                 if (sortAscending) compareBy({ !it.isDirectory }, { it.length() })
                 else compareBy<File>({ !it.isDirectory }).thenByDescending { it.length() }
+            )
+            DialogSortBy.TYPE -> filtered.sortedWith(
+                if (sortAscending) compareBy({ !it.isDirectory }, { it.extension.lowercase() }, { it.name.lowercase() })
+                else compareBy<File>({ !it.isDirectory }).thenByDescending { it.extension.lowercase() }.thenBy { it.name.lowercase() }
             )
         }
     }
@@ -228,6 +233,15 @@ fun InAppFilePickerDialog(
                                     onClick = {
                                         if (sortBy == DialogSortBy.SIZE) sortAscending = !sortAscending
                                         else { sortBy = DialogSortBy.SIZE; sortAscending = false }
+                                        showSortMenu = false
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Sort by Type (${if (sortBy == DialogSortBy.TYPE && !sortAscending) "Z-A" else "A-Z"})") },
+                                    leadingIcon = { Icon(Icons.Default.Category, contentDescription = null) },
+                                    onClick = {
+                                        if (sortBy == DialogSortBy.TYPE) sortAscending = !sortAscending
+                                        else { sortBy = DialogSortBy.TYPE; sortAscending = true }
                                         showSortMenu = false
                                     }
                                 )

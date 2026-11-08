@@ -63,8 +63,10 @@ class KtorEmbeddedServer(
     private data class DeviceTelemetry(
         val deviceName: String,
         val batteryPercent: Int,
+        val isCharging: Boolean,
         val freeBytes: Long,
         val totalBytes: Long,
+        val usedPercent: Int,
         val freeFormatted: String,
         val totalFormatted: String
     )
@@ -76,6 +78,7 @@ class KtorEmbeddedServer(
 
         val bm = context.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
         val batteryPct = bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)?.coerceIn(0, 100) ?: 100
+        val charging = bm?.isCharging ?: false
 
         val stat = try {
             StatFs(Environment.getExternalStorageDirectory().absolutePath)
@@ -83,12 +86,15 @@ class KtorEmbeddedServer(
             null
         }
         val freeB = stat?.availableBytes ?: 0L
-        val totalB = stat?.totalBytes ?: 0L
+        val totalB = (stat?.totalBytes ?: 1L).coerceAtLeast(1L)
+        val usedPct = (((totalB - freeB).toDouble() / totalB.toDouble()) * 100.0).toInt().coerceIn(0, 100)
         return DeviceTelemetry(
             deviceName = devName.ifBlank { "Android Host" },
             batteryPercent = batteryPct,
+            isCharging = charging,
             freeBytes = freeB,
             totalBytes = totalB,
+            usedPercent = usedPct,
             freeFormatted = formatBytes(freeB),
             totalFormatted = formatBytes(totalB)
         )
@@ -383,6 +389,8 @@ class KtorEmbeddedServer(
                         val json = JSONObject().apply {
                             put("deviceName", telemetry.deviceName)
                             put("batteryPercent", telemetry.batteryPercent)
+                            put("isCharging", telemetry.isCharging)
+                            put("usedStoragePercent", telemetry.usedPercent)
                             put("freeStorageBytes", telemetry.freeBytes)
                             put("totalStorageBytes", telemetry.totalBytes)
                             put("freeStorageFormatted", telemetry.freeFormatted)
@@ -395,7 +403,7 @@ class KtorEmbeddedServer(
                         call.respondText(json.toString(), ContentType.Application.Json)
                     }
 
-                    // 6. Remote Browser Mini-Apps Save Endpoint (Markor Markdown, Code Studio, CSV Studio)
+                    // 6A. Remote Browser Mini-Apps Save Endpoint (Markor Markdown, Code Studio, CSV Studio)
                     post("/api/miniapp/save-text") {
                         if (!SettingsManager.ftpAllowMiniApps.value) {
                             call.respondText(
@@ -439,6 +447,91 @@ class KtorEmbeddedServer(
                             put("path", targetFile.absolutePath)
                         }
                         call.respondText(resp.toString(), ContentType.Application.Json)
+                    }
+
+                    // 6B. Remote Browser Mini-Apps Host File Converter Endpoint (/api/miniapp/convert)
+                    post("/api/miniapp/convert") {
+                        if (!SettingsManager.ftpAllowMiniApps.value) {
+                            call.respondText(
+                                """{"success":false,"message":"Remote Mini-Apps are disabled by the host administrator."}""",
+                                ContentType.Application.Json,
+                                HttpStatusCode.Forbidden
+                            )
+                            return@post
+                        }
+                        val clientIp = try { call.request.local.remoteHost } catch (_: Exception) { "Client" }
+                        val bodyText = call.receiveText()
+                        val payload = try { JSONObject(bodyText) } catch (_: Exception) { JSONObject() }
+                        val sourcePath = payload.optString("sourcePath", "").trim()
+                        val targetFormat = payload.optString("targetFormat", "pdf").trim().lowercase()
+                        val maxKb = payload.optInt("maxKb", 0)
+
+                        val srcFile = File(sourcePath)
+                        if (!srcFile.exists() || !srcFile.isFile) {
+                            call.respondText(
+                                """{"success":false,"message":"Source file not found on host: $sourcePath"}""",
+                                ContentType.Application.Json,
+                                HttpStatusCode.BadRequest
+                            )
+                            return@post
+                        }
+
+                        val convertedDir = File(
+                            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS),
+                            "ContinuumSuite/Converted"
+                        ).apply { if (!exists()) mkdirs() }
+
+                        val outFile = File(convertedDir, "${srcFile.nameWithoutExtension}_converted.$targetFormat")
+                        val result = if (maxKb > 0 && targetFormat in listOf("jpg", "jpeg")) {
+                            com.troikoss.continuum_explorer.ui.converter.SquooshImageCompressor.compressImageToTargetKb(
+                                context = this@KtorEmbeddedServer.context,
+                                sourceFile = srcFile,
+                                outputFile = outFile,
+                                minTargetKb = (maxKb - 10).coerceAtLeast(5),
+                                maxTargetKb = maxKb
+                            )
+                        } else {
+                            val item = com.troikoss.continuum_explorer.ui.converter.FileConverterDispatcher.createQueueItem(srcFile)
+                            if (item != null) {
+                                item.targetFormat = targetFormat
+                                com.troikoss.continuum_explorer.ui.converter.FileConverterDispatcher.convertSingleItem(
+                                    context = this@KtorEmbeddedServer.context,
+                                    item = item,
+                                    destinationMode = com.troikoss.continuum_explorer.ui.converter.OutputDestinationMode.CUSTOM_FOLDER,
+                                    customFolder = convertedDir,
+                                    onProgress = { _, _ -> }
+                                )
+                            } else {
+                                Result.failure(IllegalArgumentException("Unsupported file type"))
+                            }
+                        }
+
+                        result.fold(
+                            onSuccess = { generated ->
+                                ContinuumHubService.addLog(
+                                    clientIp,
+                                    "Mini-App Convert",
+                                    "Converted ${srcFile.name} -> ${generated.name}",
+                                    "${generated.length() / 1024} KB",
+                                    bytes = generated.length()
+                                )
+                                val encoded = URLEncoder.encode(generated.absolutePath, "UTF-8")
+                                val resp = JSONObject().apply {
+                                    put("success", true)
+                                    put("message", "Converted: ${generated.name} (${generated.length() / 1024} KB)")
+                                    put("outputPath", generated.absolutePath)
+                                    put("downloadUrl", "/download?file=$encoded")
+                                }
+                                call.respondText(resp.toString(), ContentType.Application.Json)
+                            },
+                            onFailure = { err ->
+                                val resp = JSONObject().apply {
+                                    put("success", false)
+                                    put("message", err.message ?: "Host conversion failed")
+                                }
+                                call.respondText(resp.toString(), ContentType.Application.Json)
+                            }
+                        )
                     }
 
                     // 7. Unified Multipart File Upload Route (Honors SettingsManager.ftpUploadFolderPath)
@@ -1037,11 +1130,11 @@ class KtorEmbeddedServer(
                         span("pill pill-online") { +"● Online" }
                         span("pill") {
                             id = "pillBattery"
-                            +"🔋 ${telemetry.batteryPercent}%"
+                            +"${if (telemetry.isCharging) "⚡" else "🔋"} ${telemetry.batteryPercent}%${if (telemetry.isCharging) " (Charging)" else ""}"
                         }
                         span("pill") {
                             id = "pillStorage"
-                            +"💾 ${telemetry.freeFormatted} free / ${telemetry.totalFormatted}"
+                            +"💾 ${telemetry.freeFormatted} free / ${telemetry.totalFormatted} (${telemetry.usedPercent}% used)"
                         }
                     }
                 }
@@ -1110,14 +1203,21 @@ class KtorEmbeddedServer(
                         div("stat-card") {
                             div {
                                 div("stat-label") { +"Battery & Power" }
-                                div("stat-val") { +"${telemetry.batteryPercent}% Charged" }
+                                div("stat-val") { +"${telemetry.batteryPercent}% ${if (telemetry.isCharging) "⚡ Charging" else "On Battery"}" }
                             }
-                            span { style = "font-size: 20px;"; +"🔋" }
+                            span { style = "font-size: 20px;"; +if (telemetry.isCharging) "⚡" else "🔋" }
                         }
                         div("stat-card") {
                             div {
-                                div("stat-label") { +"Available Storage" }
-                                div("stat-val") { +"${telemetry.freeFormatted} / ${telemetry.totalFormatted}" }
+                                style = "flex: 1; margin-right: 10px;"
+                                div("stat-label") { +"Available Storage (${telemetry.usedPercent}% Used)" }
+                                div("stat-val") { +"${telemetry.freeFormatted} free / ${telemetry.totalFormatted}" }
+                                div {
+                                    style = "margin-top: 6px; height: 5px; width: 100%; background: rgba(255,255,255,0.1); border-radius: 99px; overflow: hidden;"
+                                    div {
+                                        style = "height: 100%; width: ${telemetry.usedPercent}%; background: var(--primary);"
+                                    }
+                                }
                             }
                             span { style = "font-size: 20px;"; +"💾" }
                         }
@@ -1193,7 +1293,8 @@ class KtorEmbeddedServer(
                                     val safeJsName = file.name.replace("'", "\\'")
                                     val extLower = file.extension.lowercase(Locale.US)
                                     val isPreviewableMedia = !isDir && extLower in listOf(
-                                        "jpg", "jpeg", "png", "gif", "webp", "svg", "mp4", "webm", "mp3", "wav", "ogg", "pdf"
+                                        "jpg", "jpeg", "png", "gif", "webp", "svg", "mp4", "webm", "mp3", "wav", "ogg", "pdf",
+                                        "csv", "tsv", "md", "txt", "json", "xml", "kt", "py", "js", "html", "css", "log"
                                     )
 
                                     div("file-card file-item-entry") {
@@ -1314,6 +1415,15 @@ class KtorEmbeddedServer(
                                 }
                                 div("toolbar") {
                                     button(classes = "btn") {
+                                        id = "btnPauseStream"
+                                        onClick = "togglePauseScreenStream()"
+                                        +"⏸ Pause"
+                                    }
+                                    button(classes = "btn") {
+                                        onClick = "snapshotScreenStream()"
+                                        +"📸 Snapshot"
+                                    }
+                                    button(classes = "btn") {
                                         onClick = "rotateScreenStream()"
                                         +"↻ Rotate 90°"
                                     }
@@ -1323,7 +1433,7 @@ class KtorEmbeddedServer(
                                     }
                                     button(classes = "btn btn-primary") {
                                         onClick = "reloadScreenStream()"
-                                        +"⟳ Reconnect Stream"
+                                        +"⟳ Reconnect"
                                     }
                                 }
                             }
@@ -1339,28 +1449,51 @@ class KtorEmbeddedServer(
                     }
                 }
 
-                // --- SUBPAGE 3: REMOTE BROWSER MINI-APPS TAB ---
+                // --- SUBPAGE 3: REMOTE BROWSER MINI-APPS TAB (5-Tool Suite) ---
                 if (allowMiniApps) {
                     div("tab-section") {
                         id = "sectionMiniApps"
+                        div("panel") {
+                            style = "margin-bottom: 14px;"
+                            div("panel-header") {
+                                div("panel-title") { +"✨ My Suite Remote Browser Mini-Apps (5 Tools)" }
+                                div("toolbar") {
+                                    button(classes = "btn btn-primary") {
+                                        onClick = "selectMiniAppPreset('markor')"
+                                        +"1. Markor Markdown"
+                                    }
+                                    button(classes = "btn") {
+                                        onClick = "selectMiniAppPreset('code')"
+                                        +"2. Code Studio"
+                                    }
+                                    button(classes = "btn") {
+                                        onClick = "selectMiniAppPreset('csv')"
+                                        +"3. CSV Table Editor"
+                                    }
+                                }
+                            }
+                        }
                         div("miniapps-grid") {
-                            // 1. Remote Markor Markdown / Code / CSV Studio
+                            // Tools 1, 2 & 3: Remote Markor Markdown Studio, Code Studio & CSV Table Editor
                             div("panel") {
                                 div("panel-header") {
-                                    div("panel-title") { +"📝 Remote Markor Text, Code & CSV Studio" }
+                                    div("panel-title") {
+                                        id = "remoteStudioHeading"
+                                        +"📝 1. Markor Markdown, 2. Code Studio & 3. CSV Table Editor"
+                                    }
                                 }
                                 div {
                                     style = "padding: 16px; display: flex; flex-direction: column; gap: 12px;"
                                     p {
                                         style = "color: var(--text-muted); font-size: 0.82rem;"
-                                        +"Create or edit Markdown (.md), Text (.txt), Code (.kt, .py, .js, .json), or CSV (.csv) files directly in your browser and save them to the host device's My Suite workspace."
+                                        +"Author Markdown (.md), Code (.kt, .py, .js, .json), or CSV spreadsheets (.csv) in your browser and save directly to the host device's My Suite workspace."
                                     }
                                     input {
                                         id = "remoteEditorFileName"
                                         classes = setOf("text-input")
                                         type = InputType.text
                                         value = "Remote_Note.md"
-                                        placeholder = "File name (e.g. Note.md, script.py, table.csv)"
+                                        placeholder = "File name (e.g. Note.md, script.py, data.csv)"
                                     }
                                     textArea(classes = "editor-textarea") {
                                         id = "remoteEditorContent"
@@ -1387,16 +1520,16 @@ class KtorEmbeddedServer(
                                 }
                             }
 
-                            // 2. Remote Student Exam Photo/Signature Exact-KB Resizer & Format Converter
+                            // Tool 4: Remote Student Exam Photo/Signature Exact-KB Resizer & Filter Tool
                             div("panel") {
                                 div("panel-header") {
-                                    div("panel-title") { +"⚡ Remote Photo KB Resizer & Format Converter" }
+                                    div("panel-title") { +"🪪 4. Image KB Resizer & Signature Filter Tool" }
                                 }
                                 div {
                                     style = "padding: 16px; display: flex; flex-direction: column; gap: 12px;"
                                     p {
                                         style = "color: var(--text-muted); font-size: 0.82rem;"
-                                        +"Resize Passport Photos (20–50 KB, 200×230 px), Signatures (10–20 KB, 140×60 px), or convert images between JPG, PNG, and WEBP right in your browser."
+                                        +"Resize Passport Photos (20–50 KB, 200×230 px) and Signatures (10–20 KB, 140×60 px) with binary-search JPEG compression right in your browser."
                                     }
                                     div("toolbar") {
                                         button(classes = "btn") {
@@ -1454,12 +1587,57 @@ class KtorEmbeddedServer(
                                     }
                                 }
                             }
+
+                            // Tool 5: Remote Host File Converter (triggers /api/miniapp/convert on the Android Host)
+                            div("panel") {
+                                div("panel-header") {
+                                    div("panel-title") { +"🔄 5. Host File Converter (VERT + Squoosh Engine)" }
+                                }
+                                div {
+                                    style = "padding: 16px; display: flex; flex-direction: column; gap: 12px;"
+                                    p {
+                                        style = "color: var(--text-muted); font-size: 0.82rem;"
+                                        +"Convert any file on the host Android device (Images, PDFs, Markdown, CSV, JSON, Audio/Video) and download the converted output."
+                                    }
+                                    input {
+                                        id = "hostConvertSourcePath"
+                                        classes = setOf("text-input")
+                                        type = InputType.text
+                                        placeholder = "Host file path (e.g. /storage/emulated/0/Download/sample.png)"
+                                    }
+                                    div {
+                                        style = "display: grid; grid-template-columns: 1fr 1fr; gap: 8px;"
+                                        input {
+                                            id = "hostConvertTargetFormat"
+                                            classes = setOf("text-input")
+                                            type = InputType.text
+                                            value = "pdf"
+                                            placeholder = "Target format (pdf, jpg, png, webp, html, json)"
+                                        }
+                                        input {
+                                            id = "hostConvertMaxKb"
+                                            classes = setOf("text-input")
+                                            type = InputType.number
+                                            value = "0"
+                                            placeholder = "Max KB (0 = auto)"
+                                        }
+                                    }
+                                    button(classes = "btn btn-primary") {
+                                        onClick = "runHostFileConversion()"
+                                        +"🔄 Convert on Host & Download"
+                                    }
+                                    span {
+                                        id = "hostConvertStatus"
+                                        style = "font-size: 0.8rem; color: var(--accent);"
+                                    }
+                                }
+                            }
                         }
                     }
                 }
             }
 
-            // Lightbox Media Preview Modal
+            // Lightbox Media, CSV, Markdown & Code Preview Modal
             div("modal-backdrop") {
                 id = "previewModal"
                 div("modal modal-preview") {
@@ -1486,7 +1664,7 @@ class KtorEmbeddedServer(
                 }
             }
 
-            // Upload Modal Dialog
+            // Upload Modal Dialog with Live Progress Bar
             div("modal-backdrop") {
                 id = "uploadModal"
                 div("modal") {
@@ -1521,6 +1699,13 @@ class KtorEmbeddedServer(
                         value = uploadFolder
                     }
                     div {
+                        style = "height: 6px; width: 100%; background: rgba(255,255,255,0.08); border-radius: 99px; overflow: hidden;"
+                        div {
+                            id = "uploadProgressBar"
+                            style = "height: 100%; width: 0%; background: var(--accent); transition: width 0.15s ease;"
+                        }
+                    }
+                    div {
                         style = "display: flex; justify-content: flex-end; gap: 8px;"
                         button(classes = "btn") {
                             onClick = "closeUploadModal()"
@@ -1542,6 +1727,7 @@ class KtorEmbeddedServer(
                 unsafe {
                     raw("""
                         let streamRotation = 0;
+                        let streamPaused = false;
 
                         function switchPortalTab(tab) {
                             const sections = {
@@ -1558,7 +1744,7 @@ class KtorEmbeddedServer(
                                 if (sections[k]) sections[k].classList.toggle('active', k === tab);
                                 if (btns[k]) btns[k].classList.toggle('active', k === tab);
                             });
-                            if (tab === 'screen') {
+                            if (tab === 'screen' && !streamPaused) {
                                 reloadScreenStream();
                             }
                         }
@@ -1571,9 +1757,33 @@ class KtorEmbeddedServer(
 
                         function reloadScreenStream() {
                             const img = document.getElementById('mjpegStreamImg');
+                            streamPaused = false;
+                            const btn = document.getElementById('btnPauseStream');
+                            if (btn) btn.innerText = '⏸ Pause';
                             if (img) {
                                 img.src = '/screencast.mjpeg?t=' + Date.now();
                             }
+                        }
+
+                        function togglePauseScreenStream() {
+                            const img = document.getElementById('mjpegStreamImg');
+                            const btn = document.getElementById('btnPauseStream');
+                            if (!img) return;
+                            streamPaused = !streamPaused;
+                            if (streamPaused) {
+                                img.src = '/screencast-frame?t=' + Date.now();
+                                if (btn) btn.innerText = '▶ Resume';
+                            } else {
+                                img.src = '/screencast.mjpeg?t=' + Date.now();
+                                if (btn) btn.innerText = '⏸ Pause';
+                            }
+                        }
+
+                        function snapshotScreenStream() {
+                            const a = document.createElement('a');
+                            a.href = '/screencast-frame?t=' + Date.now();
+                            a.download = 'Screen_Snapshot_' + Date.now() + '.jpg';
+                            a.click();
                         }
 
                         function rotateScreenStream() {
@@ -1595,7 +1805,7 @@ class KtorEmbeddedServer(
                             });
                         }
 
-                        function openPreviewModal(name, url, ext) {
+                        async function openPreviewModal(name, url, ext) {
                             const modal = document.getElementById('previewModal');
                             const title = document.getElementById('previewModalTitle');
                             const body = document.getElementById('previewModalBody');
@@ -1623,6 +1833,42 @@ class KtorEmbeddedServer(
                                 iframe.style.height = '65vh';
                                 iframe.style.border = 'none';
                                 body.appendChild(iframe);
+                            } else {
+                                try {
+                                    const res = await fetch(url);
+                                    const text = await res.text();
+                                    if (ext === 'csv' || ext === 'tsv') {
+                                        const sep = ext === 'tsv' ? '\t' : ',';
+                                        const rows = text.split(/\r?\n/).filter(r => r.trim().length > 0).slice(0, 150);
+                                        const tbl = document.createElement('table');
+                                        tbl.className = 'file-table';
+                                        rows.forEach((r, idx) => {
+                                            const tr = document.createElement('tr');
+                                            r.split(sep).forEach(cell => {
+                                                const el = document.createElement(idx === 0 ? 'th' : 'td');
+                                                el.innerText = cell.replace(/^"|"$/g, '');
+                                                tr.appendChild(el);
+                                            });
+                                            tbl.appendChild(tr);
+                                        });
+                                        body.style.alignItems = 'flex-start';
+                                        body.style.justifyContent = 'flex-start';
+                                        body.appendChild(tbl);
+                                    } else {
+                                        const pre = document.createElement('pre');
+                                        pre.style.width = '100%';
+                                        pre.style.whiteSpace = 'pre-wrap';
+                                        pre.style.fontFamily = 'monospace';
+                                        pre.style.fontSize = '12.5px';
+                                        pre.style.color = '#e5e7eb';
+                                        pre.innerText = text.slice(0, 100000);
+                                        body.style.alignItems = 'flex-start';
+                                        body.style.justifyContent = 'flex-start';
+                                        body.appendChild(pre);
+                                    }
+                                } catch (e) {
+                                    body.innerText = 'Unable to load preview: ' + e.message;
+                                }
                             }
                             modal.style.display = 'flex';
                         }
@@ -1632,17 +1878,22 @@ class KtorEmbeddedServer(
                             document.getElementById('previewModal').style.display = 'none';
                         }
 
-                        function openUploadModal() { document.getElementById('uploadModal').style.display = 'flex'; }
+                        function openUploadModal() {
+                            document.getElementById('uploadModal').style.display = 'flex';
+                            const bar = document.getElementById('uploadProgressBar');
+                            if (bar) bar.style.width = '0%';
+                        }
                         function closeUploadModal() {
                             document.getElementById('uploadModal').style.display = 'none';
                             document.getElementById('uploadStatusNotice').innerText = '';
                         }
 
-                        async function submitFileUpload() {
+                        function submitFileUpload() {
                             const pass = (document.getElementById('uploadPasswordInput') || {}).value || '';
                             const filesInput = document.getElementById('uploadFilesInput');
                             const targetDir = document.getElementById('currentTargetDir').value;
                             const notice = document.getElementById('uploadStatusNotice');
+                            const bar = document.getElementById('uploadProgressBar');
 
                             if (!filesInput.files || filesInput.files.length === 0) {
                                 alert('Select at least one file to upload.');
@@ -1654,22 +1905,54 @@ class KtorEmbeddedServer(
                             for (let i = 0; i < filesInput.files.length; i++) {
                                 formData.append('file_' + i, filesInput.files[i]);
                             }
-                            notice.innerText = 'Uploading...';
+                            notice.innerText = 'Uploading... 0%';
                             notice.style.color = '#fbbf24';
-                            try {
-                                const res = await fetch('/upload', { method: 'POST', body: formData });
-                                const data = await res.json();
-                                if (res.ok && data.success) {
-                                    notice.innerText = data.message || 'Upload complete!';
-                                    notice.style.color = '#10b981';
-                                    setTimeout(() => window.location.reload(), 800);
-                                } else {
-                                    notice.innerText = data.message || 'Upload failed';
+
+                            const xhr = new XMLHttpRequest();
+                            xhr.open('POST', '/upload', true);
+                            xhr.upload.onprogress = function(e) {
+                                if (e.lengthComputable) {
+                                    const pct = Math.round((e.loaded / e.total) * 100);
+                                    if (bar) bar.style.width = pct + '%';
+                                    notice.innerText = 'Uploading... ' + pct + '%';
+                                }
+                            };
+                            xhr.onload = function() {
+                                try {
+                                    const data = JSON.parse(xhr.responseText || '{}');
+                                    if (xhr.status >= 200 && xhr.status < 300 && data.success) {
+                                        if (bar) bar.style.width = '100%';
+                                        notice.innerText = data.message || 'Upload complete!';
+                                        notice.style.color = '#10b981';
+                                        setTimeout(() => window.location.reload(), 800);
+                                    } else {
+                                        notice.innerText = data.message || 'Upload failed';
+                                        notice.style.color = '#ef4444';
+                                    }
+                                } catch (err) {
+                                    notice.innerText = 'Upload failed';
                                     notice.style.color = '#ef4444';
                                 }
-                            } catch (e) {
-                                notice.innerText = 'Error: ' + e.message;
+                            };
+                            xhr.onerror = function() {
+                                notice.innerText = 'Network error during upload';
                                 notice.style.color = '#ef4444';
+                            };
+                            xhr.send(formData);
+                        }
+
+                        function selectMiniAppPreset(mode) {
+                            const fn = document.getElementById('remoteEditorFileName');
+                            const area = document.getElementById('remoteEditorContent');
+                            if (mode === 'markor') {
+                                fn.value = 'Remote_Note.md';
+                                area.value = '# Remote Markor Note\n\n- [ ] Task item\n- **Bold note**';
+                            } else if (mode === 'code') {
+                                fn.value = 'Remote_Script.kt';
+                                area.value = 'fun main() {\n    println("Hello from Remote Code Studio!")\n}';
+                            } else if (mode === 'csv') {
+                                fn.value = 'Remote_Data.csv';
+                                area.value = 'ID,Name,Department,Score\n1,Alice,Engineering,98\n2,Bob,Design,94';
                             }
                         }
 
@@ -1752,6 +2035,32 @@ class KtorEmbeddedServer(
                                 status.innerText = 'Done! Output size: ' + (bestBlob.size / 1024).toFixed(1) + ' KB (' + targetW + '×' + targetH + ' px)';
                             };
                             img.src = URL.createObjectURL(file);
+                        }
+
+                        async function runHostFileConversion() {
+                            const sourcePath = document.getElementById('hostConvertSourcePath').value || '';
+                            const targetFormat = document.getElementById('hostConvertTargetFormat').value || 'pdf';
+                            const maxKb = parseInt(document.getElementById('hostConvertMaxKb').value || '0', 10);
+                            const status = document.getElementById('hostConvertStatus');
+                            if (!sourcePath.trim()) {
+                                alert('Enter a host file path to convert.');
+                                return;
+                            }
+                            status.innerText = 'Converting on Android host...';
+                            try {
+                                const res = await fetch('/api/miniapp/convert', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ sourcePath, targetFormat, maxKb })
+                                });
+                                const data = await res.json();
+                                status.innerText = data.message || '';
+                                if (data.success && data.downloadUrl) {
+                                    window.open(data.downloadUrl, '_blank');
+                                }
+                            } catch (e) {
+                                status.innerText = 'Conversion error: ' + e.message;
+                            }
                         }
 
                         if ('${initialTab}' === 'screen') switchPortalTab('screen');

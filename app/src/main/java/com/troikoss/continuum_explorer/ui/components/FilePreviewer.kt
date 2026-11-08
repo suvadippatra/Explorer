@@ -579,6 +579,46 @@ fun FilePreviewer(
                         }
                     }
 
+                    extension in listOf("csv", "tsv") && textSnippet != null -> {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(6.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(8.dp))
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                                    .padding(horizontal = 10.dp, vertical = 4.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "CSV Table Preview",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                TextButton(
+                                    onClick = {
+                                        appState?.viewingFile = file
+                                        appState?.openInEditMode = true
+                                    },
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                                    modifier = Modifier.height(24.dp)
+                                ) {
+                                    Text("Edit in CSV Studio", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                            com.troikoss.continuum_explorer.ui.preview.CsvInteractiveTablePreview(
+                                rawText = textSnippet!!,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
+                    }
+
                     isTextDocument && textSnippet != null -> {
                         Column(
                             modifier = Modifier

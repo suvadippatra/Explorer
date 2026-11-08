@@ -607,14 +607,32 @@ private fun SpotifyControlsBlock(
                 )
             }
 
-            // Playback Speed Pill
-            OutlinedButton(
-                onClick = { AudioPlayerManager.cyclePlaybackSpeed() },
-                shape = RoundedCornerShape(50),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text("${speed}x", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                Surface(
+                    shape = RoundedCornerShape(50),
+                    color = Color.White.copy(alpha = 0.12f)
+                ) {
+                    Text(
+                        text = metadata.formatBadge,
+                        color = Color(0xFF1DB954),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                    )
+                }
+
+                // Playback Speed Pill
+                OutlinedButton(
+                    onClick = { AudioPlayerManager.cyclePlaybackSpeed() },
+                    shape = RoundedCornerShape(50),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
+                ) {
+                    Text("${speed}x", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                }
             }
         }
 
@@ -632,6 +650,7 @@ private fun SpotifyControlsBlock(
             )
         )
 
+        val remainingMs = (durMs - posMs).coerceAtLeast(0L)
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween
@@ -642,7 +661,7 @@ private fun SpotifyControlsBlock(
                 fontSize = 12.sp
             )
             Text(
-                text = formatAudioTime(durMs),
+                text = "-${formatAudioTime(remainingMs)} / ${formatAudioTime(durMs)}",
                 color = Color.White.copy(alpha = 0.65f),
                 fontSize = 12.sp
             )

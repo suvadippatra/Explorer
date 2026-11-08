@@ -50,6 +50,7 @@ fun HelpDocumentationSection(
                 summary = "Redesigned 3-tab minimalist File Converter combining Squoosh-style binary-search exact-KB compression for student exam forms, PDF size compression, VERT dynamic single-file conversion, and batch multi-image-to-PDF combining.",
                 bullets = listOf(
                     "Tab 1 — Quick Presets (Student Exam Photo, Signature & PDF Size): One-tap 'Exam Photo (20–50 KB, 200×230 px)', 'Signature (10–20 KB, 140×60 px with high-contrast white paper cleanup)', custom Target KB slider (8–300 KB) using Squoosh binary-search JPEG/WEBP quantization + progressive downscaling, and PDF Size Compressor (100/150/200 DPI re-rasterization).",
+                    "Live Before vs. After Size & Dimensions Preview Card: Shows original vs. compressed thumbnail, exact pixel dimensions (W×H px), KB size reduction, and percentage saved badge.",
                     "Tab 2 — Single File (VERT Dynamic Format Picker): Select any file and the engine automatically detects its category (Image, Document/Data, Audio/Video, or Archive) and presents only compatible target format chips with live conversion.",
                     "Tab 3 — Batch Convert & Combine Images into 1 PDF: Queue multiple files with a global 'Convert All To' selector, per-file format overrides, or combine multiple selected photos/scans into a single multi-page PDF document.",
                     "Guaranteed Writable Output Folder: Automatically saves converted files to the source folder, './Converted/', or falls back to '/Documents/ContinuumSuite/Converted/' on scoped storage, with instant 'Open' and 'Share' buttons on every completed job."
@@ -63,9 +64,9 @@ fun HelpDocumentationSection(
                 summary = "My Suite is organized into 5 distinct Studios, each with its own minimalist Landing Page, a 50.dp Triple-Line Menu heading bar, and a List/Grid switcher for Recently Edited & Created files.",
                 bullets = listOf(
                     "5 Dedicated Studios: (1) File Converter, (2) Markor Text & Markdown Studio (.md, .txt, .todo.txt, .org, .adoc), (3) Code Studio (.kt, .java, .py, .js, .ts, .html, .css, .json, .xml, .yaml, .sh), (4) CSV & Table Studio (.csv, .tsv), and (5) PhotoEditor Image Studio (.png, .jpg, .webp, .bmp).",
-                    "Minimalist Landing Page for Every Studio: Opening any Studio from My Suite displays a clean landing screen with 'Create New File', 'Open Existing File to Edit' (with live thumbnails), and that Studio's recent files.",
+                    "Minimalist Landing Page for Every Studio: Opening any Studio from My Suite displays a clean landing screen with 'Create New File' (including blank canvas generation for Image Studio), 'Open Existing File to Edit' (with live thumbnails), and that Studio's recent files.",
                     "Unified 50.dp Triple-Line Menu Heading Bar: All active editors (Markor, Code Studio, CSV Studio, PhotoEditor, File Converter) use the 50.dp top heading bar with the Triple-Line Menu Button on the left instead of a Close/X button.",
-                    "Interactive CSV Preview & Exclusive CSV Studio Routing: Tapping a .csv/.tsv file shows an interactive spreadsheet table preview with sticky headers, row numbers, and search filter; clicking Edit opens CSV & Table Studio."
+                    "Interactive CSV Preview & Exclusive CSV Studio Routing: Tapping a .csv/.tsv file (or viewing it in Homepage Quick Preview) renders an interactive spreadsheet table with sticky headers, clickable column sorting (▲/▼), alternating row striping, row/column count badge, and search filter; clicking Edit opens CSV & Table Studio."
                 )
             ),
             HelpGuideSection(
@@ -78,7 +79,7 @@ fun HelpDocumentationSection(
                     "Desktop-Class PDF Viewer: Eliminates duplicate top bars and provides a single unified header plus a collapsible desktop control bar with Page Jump ('Page X / Y'), Continuous Vertical / Single Page / 2-Page Desktop Spread modes, Zoom (- / 100% / +), 90° Rotation, Day / Night Inverted / Sepia reading modes, Thumbnail strip, PDF text search, Print (PrintManager), and Quick Compress PDF.",
                     "Mode 1 — Persistent Bottom Mini-Player Bar: Tapping any audio file (.mp3, .wav, .flac, .m4a, .aac, .ogg) starts playback in a sleek bottom bar inside Explorer so you can keep browsing files.",
                     "Mode 2 — Draggable Floating PiP Mini-Card: Minimize the bottom bar into a draggable floating Picture-in-Picture card over your files, with 1-tap buttons to dock back to the Bottom Bar or expand to Fullscreen.",
-                    "Mode 3 — Spotify-Style Fullscreen Music Player: Features dynamic dominant-color gradient background extracted from embedded ID3 album art, large artwork, interactive seek slider, shuffle, repeat (Off/All/One), playback speed (0.75x–2.0x), and an auto-populated Folder Audio Queue."
+                    "Mode 3 — Spotify-Style Fullscreen Music Player: Features dynamic dominant-color gradient background extracted from embedded ID3 album art, audio format & bitrate badge (e.g. 'FLAC • 1411 kbps' / 'MP3 • 320 kbps'), interactive seek slider with elapsed and remaining (-MM:SS) timestamps, shuffle, repeat (Off/All/One), playback speed (0.75x–2.0x), and an auto-populated Folder Audio Queue."
                 )
             ),
             HelpGuideSection(
@@ -86,13 +87,13 @@ fun HelpDocumentationSection(
                 title = "4. FTP/HTTP Server, Live Screen Sharing, Remote Mini-Apps & FTP Client",
                 badge = "Server & FTP",
                 icon = Icons.Default.Dns,
-                summary = "Unified upload controls, 0-file server hosting, Android 8–15 MJPEG/WebSocket screen sharing with FPS & compression sliders, live host telemetry, remote browser Mini-Apps, and a native FTP/HTTP client.",
+                summary = "Unified upload controls, 0-file server hosting, Android 8–15 MJPEG/WebSocket screen sharing with FPS & compression sliders, live host telemetry, 5 remote browser Mini-Apps, and a native FTP/HTTP client.",
                 bullets = listOf(
-                    "Unified Upload Toggle & Destination Folder: Consolidates browser multipart uploads and FTP write permissions into a single 'Allow Browser & FTP Uploads' switch with a configurable Upload Destination Folder.",
-                    "Zero-File Server Hosting & Remote Browser Mini-Apps: Start the server even with 0 selected files/folders. Enable 'Allow Mini-Apps in Browser' so visitors can use Remote Markor Notes/Code/CSV Studio and the Exact-KB Photo Resizer from any web browser.",
-                    "Live Screen Sharing with FPS & Compression Controls: Optional admin-enabled live screen sharing across Android 8–15 (with FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION on Android 10+) featuring adjustable Frame Rate (5–30 FPS) and JPEG Compression Quality (30%–95%) sliders, streamed via '/screencast.mjpeg' and WebSockets.",
-                    "Host Telemetry & 3-Tab Responsive Web Portal: Displays live Host Device Name, Battery %, and Free/Total Storage at the top of the hosted webpage, organized into adaptive 'Files', 'Live Screen', and 'Mini-Apps' sub-navigation tabs.",
-                    "Redesigned 'Add FTP Server' Client: Connects to Explorer hosts and third-party FTP/HTTP servers using a real Native File Browser first (zero mock data), with a 1-tap 'Open in Built-in Web Browser' (WebView) toggle."
+                    "Unified Upload Toggle & Live Upload Progress Bar: Consolidates browser multipart uploads and FTP write permissions into a single 'Allow Browser & FTP Uploads' switch with a configurable Upload Destination Folder and live XMLHttpRequest upload progress bar.",
+                    "Zero-File Server Hosting & 5 Remote Browser Mini-Apps: Start the server even with 0 selected files/folders. Enable 'Allow Mini-Apps in Browser' so visitors can use (1) Markor Markdown Studio, (2) Code Studio, (3) CSV Table Editor, (4) Image KB Resizer & Filter Tool, and (5) Host File Converter ('/api/miniapp/convert') from any web browser.",
+                    "Live Screen Sharing with FPS, Compression & Snapshot Controls: Optional admin-enabled live screen sharing across Android 8–15 (with FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION on Android 10+) featuring adjustable Frame Rate (5–30 FPS), JPEG Compression Quality (30%–95%), and Resolution (720p / 1080p / Native), plus Pause/Resume, Snapshot download, 90° Rotation, and Fullscreen controls on the web portal.",
+                    "Host Telemetry & Inline Web File Previews: Displays live Host Device Name, Battery % + Charging status, and Free/Total Storage with a visual progress bar, plus inline modal previews for images, video, audio, PDF, CSV tables, Markdown, and source code.",
+                    "Redesigned 'Add FTP Server' Client: Connects to Explorer hosts and third-party FTP/HTTP servers using a real Native File Browser first (supporting folder navigation, file download, file upload, and inline remote file preview), with a 1-tap 'Open in Built-in Web Browser' (WebView) toggle."
                 )
             ),
             HelpGuideSection(
@@ -102,7 +103,7 @@ fun HelpDocumentationSection(
                 icon = Icons.Default.Layers,
                 summary = "List/Grid thumbnails in all in-app file pickers, standalone DeX window chrome without duplicate tab bars, and clean GitHub repository exclusions.",
                 bullets = listOf(
-                    "Universal File & Folder Picker Redesign: Both InAppFilePickerDialog and FullPageFilePicker feature List/Grid view toggles with live image/video/APK thumbnails, Sort options (Name, Date, Size), clickable Breadcrumbs, and Quick Storage chips.",
+                    "Universal File & Folder Picker Redesign: Both InAppFilePickerDialog and FullPageFilePicker feature List/Grid view toggles with live image/video/APK thumbnails, Sort options (Name, Date, Size, Type), clickable Breadcrumbs, and Quick Storage chips (Internal, Downloads, Documents, Pictures, DCIM, Music).",
                     "Standalone DeX Window Chrome Rule: When a Mini-App or file editor opens in a separate OS window on DeX/Desktop, the top Explorer TabBar is hidden so it looks and behaves like a standalone native desktop app.",
                     "GitHub Repository Hygiene (.gitignore): Automatically excludes '.aistudio/', 'public/assets/aistudio/', '*.apk', '*.aab', and reference master folders from Git pushes while keeping them available in the AI Studio workspace."
                 )
