@@ -2,37 +2,37 @@ package com.troikoss.continuum_explorer.ui.editor.pdf
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.RectF
 import android.graphics.pdf.PdfRenderer
+import android.os.Bundle
+import android.os.CancellationSignal
 import android.os.ParcelFileDescriptor
+import android.print.PageRange
+import android.print.PrintAttributes
+import android.print.PrintDocumentAdapter
+import android.print.PrintDocumentInfo
+import android.print.PrintManager
 import android.util.LruCache
-import com.troikoss.continuum_explorer.ui.editor.PdfSearchResult
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
-import androidx.compose.foundation.Canvas
+import android.widget.Toast
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.calculatePan
-import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.NavigateBefore
+import androidx.compose.material.icons.automirrored.filled.NavigateNext
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -42,188 +42,965 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
+import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.text.PDFTextStripper
 import com.troikoss.continuum_explorer.model.UniversalFile
-import com.troikoss.continuum_explorer.ui.editor.PdfSearchOcr
 import com.troikoss.continuum_explorer.utils.FileExplorerState
-import com.troikoss.continuum_explorer.utils.formatEllipsizedFileName
-import com.troikoss.continuum_explorer.utils.getUriForUniversalFile
+import com.troikoss.continuum_explorer.utils.openInFileConverter
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
+import kotlin.math.roundToInt
 
-/**
- * Fast multi-level in-memory LruCache for rendered PDF pages and thumbnails.
- */
-class PdfTileCache {
-    private val maxMemory = (Runtime.getRuntime().maxMemory() / 1024).toInt()
-    private val cacheSize = maxMemory / 6 // 1/6th of max memory in KB
+enum class PdfLayoutMode(val label: String) {
+    VERTICAL_CONTINUOUS("Continuous"),
+    HORIZONTAL_PAGED("Single Page"),
+    TWO_PAGE_SPREAD("2-Page Spread")
+}
 
-    private val lruCache = object : LruCache<String, Bitmap>(cacheSize) {
-        override fun sizeOf(key: String, bitmap: Bitmap): Int {
-            return bitmap.byteCount / 1024
-        }
-    }
-
-    fun get(key: String): Bitmap? = lruCache.get(key)
-
-    fun put(key: String, bitmap: Bitmap) {
-        if (lruCache.get(key) == null) {
-            lruCache.put(key, bitmap)
-        }
-    }
-
-    fun clear() {
-        lruCache.evictAll()
-    }
+enum class PdfReadingTheme(val label: String) {
+    NORMAL("Day"),
+    NIGHT_INVERTED("Night"),
+    SEPIA("Sepia")
 }
 
 /**
- * Enhanced PDF Viewer Engine:
- * 1. Two-Page Spread (Booklet / Tablet Mode):
- *    - Auto-detects wide screens (sw600dp or landscape) and renders pages side-by-side like an open book.
- *    - Center book spine crease gradient and realistic page edges.
- * 2. Fast Responsive Page Scrolling:
- *    - Multi-threaded background tile pre-rendering on Dispatchers.IO.
- *    - LruCache memory bitmap cache for fast 60fps scrolling and zoom gestures without lag.
- *    - Multi-touch pinch-to-zoom (up to 4x) & double-tap to toggle zoom.
- * 3. Page Counter Overlay & Scrub Bar:
- *    - Animated floating pill (Page X of Y) appearing during scroll and auto-dismissing after 2s.
- *    - Horizontal page thumbnail scrub bar + fast scrub slider at the bottom.
- * 4. OCR & Text Extraction Search:
- *    - Embedded PDFBox search + ML Kit OCR fallback.
- *    - Real-time bounding box coordinate highlights directly rendered over PDF pages.
+ * Desktop-Class PDF Viewer Engine using Android's native `PdfRenderer` + `PDFBox` text search + `PrintManager`.
+ * Eliminates duplicate headers when hosted inside `ViewOnlyFileViewer` (`showInternalHeader = false`)
+ * while providing a complete desktop control bar:
+ * - Page Jump Dialog & Previous/Next page buttons
+ * - Continuous Vertical, Single Page Horizontal, and Two-Page Book Spread layouts
+ * - Zoom Out / Fit (100%) / Zoom In (50% to 400%)
+ * - 90° Clockwise Page Rotation
+ * - Day / Night Inverted / Sepia Reading Color Filters
+ * - Thumbnail Strip Toggle
+ * - Full-text PDF Search
+ * - Quick Compress PDF & Native Print
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PdfViewerEngine(
     file: UniversalFile,
     appState: FileExplorerState? = null,
+    showInternalHeader: Boolean = false,
+    onBack: (() -> Unit)? = null,
+    onMenuClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val coroutineScope = rememberCoroutineScope()
-    val configuration = LocalConfiguration.current
+    val scope = rememberCoroutineScope()
 
-    // Screen dimensions & orientation detection for Two-Page Spread Booklet Mode
-    val screenWidthDp = configuration.screenWidthDp
-    val screenHeightDp = configuration.screenHeightDp
-    val isWideScreen = remember(screenWidthDp, screenHeightDp) {
-        screenWidthDp >= 600 || screenWidthDp > screenHeightDp
-    }
-
-    var isTwoPageSpread by remember(isWideScreen) { mutableStateOf(isWideScreen) }
-
-    // PDF Renderer state
     var pdfRenderer by remember { mutableStateOf<PdfRenderer?>(null) }
-    var parcelFileDescriptor by remember { mutableStateOf<ParcelFileDescriptor?>(null) }
-    var totalPages by remember { mutableIntStateOf(0) }
-    var isPdfLoading by remember { mutableStateOf(true) }
+    var fileDescriptor by remember { mutableStateOf<ParcelFileDescriptor?>(null) }
+    var tempCopiedFile by remember { mutableStateOf<File?>(null) }
+    var pageCount by remember { mutableIntStateOf(0) }
+    var isLoading by remember { mutableStateOf(true) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
 
-    // Page navigation & pill timer state
-    val listState = rememberLazyListState()
-    var currentPageIndex by remember { mutableIntStateOf(0) }
-    var isPagePillVisible by remember { mutableStateOf(false) }
-    var dismissPillJob by remember { mutableStateOf<Job?>(null) }
+    // Desktop PDF Controls State
+    var layoutMode by remember { mutableStateOf(PdfLayoutMode.VERTICAL_CONTINUOUS) }
+    var readingTheme by remember { mutableStateOf(PdfReadingTheme.NORMAL) }
+    var showThumbnailBar by remember { mutableStateOf(true) }
+    var showSearchBar by remember { mutableStateOf(false) }
+    var showJumpPageDialog by remember { mutableStateOf(false) }
+    var jumpPageInput by remember { mutableStateOf("1") }
 
-    // Zoom & pan state
-    var scale by remember { mutableFloatStateOf(1f) }
-    var offset by remember { mutableStateOf(Offset.Zero) }
-
-    // Scrub bar state
-    var isScrubBarVisible by remember { mutableStateOf(true) }
-
-    // Search state
-    var isSearchOpen by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
-    var searchResults by remember { mutableStateOf<List<PdfSearchResult>>(emptyList()) }
-    var currentSearchMatchIndex by remember { mutableIntStateOf(0) }
     var isSearching by remember { mutableStateOf(false) }
-    var searchProgressText by remember { mutableStateOf("") }
+    var searchMatchingPages by remember { mutableStateOf<List<Int>>(emptyList()) }
+    var currentMatchPointer by remember { mutableIntStateOf(0) }
 
-    // Tile bitmap cache
-    val tileCache = remember { PdfTileCache() }
+    var zoomScale by remember { mutableFloatStateOf(1f) }
+    var panOffset by remember { mutableStateOf(Offset.Zero) }
+    var pageRotationDegrees by remember { mutableFloatStateOf(0f) }
 
-    fun showPill() {
-        isPagePillVisible = true
-        dismissPillJob?.cancel()
-        dismissPillJob = coroutineScope.launch {
-            delay(2000)
-            isPagePillVisible = false
+    val renderMutex = remember { Mutex() }
+
+    val pageBitmapCache = remember {
+        object : LruCache<String, Bitmap>(20 * 1024) {
+            override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount / 1024
         }
     }
 
-    // Initialize PdfRenderer on IO thread safely
-    DisposableEffect(file) {
-        val job = coroutineScope.launch(Dispatchers.IO) {
+    val ReadingColorFilter: ColorFilter? = remember(readingTheme) {
+        when (readingTheme) {
+            PdfReadingTheme.NORMAL -> null
+            PdfReadingTheme.NIGHT_INVERTED -> ColorFilter.colorMatrix(
+                ColorMatrix(
+                    floatArrayOf(
+                        -1f, 0f, 0f, 0f, 255f,
+                        0f, -1f, 0f, 0f, 255f,
+                        0f, 0f, -1f, 0f, 255f,
+                        0f, 0f, 0f, 1f, 0f
+                    )
+                )
+            )
+            PdfReadingTheme.SEPIA -> ColorFilter.colorMatrix(
+                ColorMatrix(
+                    floatArrayOf(
+                        0.94f, 0.04f, 0.0f, 0f, 12f,
+                        0.03f, 0.88f, 0.02f, 0f, 6f,
+                        0.02f, 0.05f, 0.72f, 0f, -18f,
+                        0f, 0f, 0f, 1f, 0f
+                    )
+                )
+            )
+        }
+    }
+
+    LaunchedEffect(file) {
+        isLoading = true
+        errorMessage = null
+        withContext(Dispatchers.IO) {
             try {
-                val fileRef = file.fileRef
-                val pfd = if (fileRef != null && fileRef.exists()) {
-                    ParcelFileDescriptor.open(fileRef, ParcelFileDescriptor.MODE_READ_ONLY)
-                } else {
-                    val uri = file.documentFileRef?.uri ?: getUriForUniversalFile(context, file)
-                    if (uri != null) context.contentResolver.openFileDescriptor(uri, "r") else null
+                PDFBoxResourceLoader.init(context)
+                val targetFile: File = file.fileRef?.takeIf { it.exists() } ?: run {
+                    val temp = File(context.cacheDir, "pdf_preview_${System.currentTimeMillis()}.pdf")
+                    tempCopiedFile = temp
+                    file.provider.openInput(file.providerId).use { input ->
+                        FileOutputStream(temp).use { output ->
+                            input.copyTo(output)
+                        }
+                    }
+                    temp
                 }
 
-                if (pfd != null) {
-                    val renderer = PdfRenderer(pfd)
-                    withContext(Dispatchers.Main) {
-                        parcelFileDescriptor = pfd
-                        pdfRenderer = renderer
-                        totalPages = renderer.pageCount
-                        isPdfLoading = false
-                    }
-                } else {
-                    withContext(Dispatchers.Main) { isPdfLoading = false }
-                }
+                val pfd = ParcelFileDescriptor.open(targetFile, ParcelFileDescriptor.MODE_READ_ONLY)
+                val renderer = PdfRenderer(pfd)
+                fileDescriptor = pfd
+                pdfRenderer = renderer
+                pageCount = renderer.pageCount
+                isLoading = false
             } catch (e: Exception) {
-                e.printStackTrace()
-                withContext(Dispatchers.Main) { isPdfLoading = false }
+                errorMessage = "Failed to open PDF: ${e.localizedMessage ?: "Corrupted or password-protected PDF"}"
+                isLoading = false
+            }
+        }
+    }
+
+    DisposableEffect(file) {
+        onDispose {
+            scope.launch(Dispatchers.IO) {
+                renderMutex.withLock {
+                    try { pdfRenderer?.close() } catch (_: Exception) {}
+                    try { fileDescriptor?.close() } catch (_: Exception) {}
+                    try { tempCopiedFile?.delete() } catch (_: Exception) {}
+                    pageBitmapCache.evictAll()
+                }
+            }
+        }
+    }
+
+    val verticalListState = rememberLazyListState()
+    val horizontalPagerState = rememberPagerState(pageCount = { pageCount.coerceAtLeast(1) })
+    val spreadCount = remember(pageCount) { ((pageCount + 1) / 2).coerceAtLeast(1) }
+    val spreadPagerState = rememberPagerState(pageCount = { spreadCount })
+
+    val currentPageIndex by remember {
+        derivedStateOf {
+            when (layoutMode) {
+                PdfLayoutMode.VERTICAL_CONTINUOUS -> verticalListState.firstVisibleItemIndex
+                PdfLayoutMode.HORIZONTAL_PAGED -> horizontalPagerState.currentPage
+                PdfLayoutMode.TWO_PAGE_SPREAD -> (spreadPagerState.currentPage * 2).coerceAtMost((pageCount - 1).coerceAtLeast(0))
+            }
+        }
+    }
+
+    fun jumpToPage(targetIndex: Int) {
+        val clamped = targetIndex.coerceIn(0, (pageCount - 1).coerceAtLeast(0))
+        scope.launch {
+            when (layoutMode) {
+                PdfLayoutMode.VERTICAL_CONTINUOUS -> verticalListState.scrollToItem(clamped)
+                PdfLayoutMode.HORIZONTAL_PAGED -> horizontalPagerState.scrollToPage(clamped)
+                PdfLayoutMode.TWO_PAGE_SPREAD -> spreadPagerState.scrollToPage(clamped / 2)
+            }
+        }
+    }
+
+    fun executePdfSearch(query: String) {
+        if (query.isBlank()) {
+            searchMatchingPages = emptyList()
+            return
+        }
+        val activePdfFile = file.fileRef ?: tempCopiedFile ?: return
+        scope.launch {
+            isSearching = true
+            val matches = withContext(Dispatchers.IO) {
+                val found = mutableListOf<Int>()
+                try {
+                    PDDocument.load(activePdfFile).use { doc ->
+                        val stripper = PDFTextStripper()
+                        for (pageNum in 1..doc.numberOfPages) {
+                            stripper.startPage = pageNum
+                            stripper.endPage = pageNum
+                            val pageText = stripper.getText(doc)
+                            if (pageText.contains(query, ignoreCase = true)) {
+                                found.add(pageNum - 1)
+                            }
+                        }
+                    }
+                } catch (_: Exception) {}
+                found
+            }
+            searchMatchingPages = matches
+            currentMatchPointer = 0
+            isSearching = false
+            if (matches.isNotEmpty()) {
+                jumpToPage(matches.first())
+            } else {
+                Toast.makeText(context, "No matches for \"$query\"", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    fun printCurrentPdf() {
+        val activePdfFile = file.fileRef ?: tempCopiedFile
+        if (activePdfFile == null || !activePdfFile.exists()) {
+            Toast.makeText(context, "PDF file not ready for printing", Toast.LENGTH_SHORT).show()
+            return
+        }
+        try {
+            val printManager = context.getSystemService(Context.PRINT_SERVICE) as? PrintManager ?: return
+            printManager.print(
+                file.name,
+                object : PrintDocumentAdapter() {
+                    override fun onLayout(
+                        oldAttributes: PrintAttributes?,
+                        newAttributes: PrintAttributes?,
+                        cancellationSignal: CancellationSignal?,
+                        callback: LayoutResultCallback?,
+                        extras: Bundle?
+                    ) {
+                        if (cancellationSignal?.isCanceled == true) {
+                            callback?.onLayoutCancelled()
+                            return
+                        }
+                        val info = PrintDocumentInfo.Builder(file.name)
+                            .setContentType(PrintDocumentInfo.CONTENT_TYPE_DOCUMENT)
+                            .setPageCount(pageCount.coerceAtLeast(1))
+                            .build()
+                        callback?.onLayoutFinished(info, true)
+                    }
+
+                    override fun onWrite(
+                        pages: Array<out PageRange>?,
+                        destination: ParcelFileDescriptor?,
+                        cancellationSignal: CancellationSignal?,
+                        callback: WriteResultCallback?
+                    ) {
+                        if (destination == null) {
+                            callback?.onWriteFailed("No destination")
+                            return
+                        }
+                        try {
+                            FileInputStream(activePdfFile).use { input ->
+                                FileOutputStream(destination.fileDescriptor).use { output ->
+                                    input.copyTo(output)
+                                }
+                            }
+                            callback?.onWriteFinished(arrayOf(PageRange.ALL_PAGES))
+                        } catch (e: Exception) {
+                            callback?.onWriteFailed(e.message)
+                        }
+                    }
+                },
+                null
+            )
+        } catch (e: Exception) {
+            Toast.makeText(context, "Print error: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    if (showJumpPageDialog && pageCount > 0) {
+        AlertDialog(
+            onDismissRequest = { showJumpPageDialog = false },
+            title = { Text("Go to Page (1 – $pageCount)", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold) },
+            text = {
+                OutlinedTextField(
+                    value = jumpPageInput,
+                    onValueChange = { jumpPageInput = it.filter { c -> c.isDigit() } },
+                    label = { Text("Page Number") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val pageNum = jumpPageInput.toIntOrNull()
+                        if (pageNum != null && pageNum in 1..pageCount) {
+                            jumpToPage(pageNum - 1)
+                            showJumpPageDialog = false
+                        } else {
+                            Toast.makeText(context, "Enter a page between 1 and $pageCount", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                ) {
+                    Text("Jump")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showJumpPageDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .background(
+                when (readingTheme) {
+                    PdfReadingTheme.NIGHT_INVERTED -> Color(0xFF0E0E10)
+                    PdfReadingTheme.SEPIA -> Color(0xFFF3EADB)
+                    PdfReadingTheme.NORMAL -> Color(0xFF202124)
+                }
+            )
+    ) {
+        // Optional standalone header only when NOT hosted inside ViewOnlyFileViewer
+        if (showInternalHeader) {
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceContainer,
+                tonalElevation = 2.dp,
+                modifier = Modifier.fillMaxWidth().height(50.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (onMenuClick != null) {
+                        IconButton(onClick = onMenuClick, modifier = Modifier.size(36.dp)) {
+                            Icon(Icons.Default.Menu, contentDescription = "Menu")
+                        }
+                    }
+                    if (onBack != null) {
+                        IconButton(onClick = onBack, modifier = Modifier.size(36.dp)) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        }
+                    }
+                    Text(
+                        text = file.name,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f).padding(start = 6.dp)
+                    )
+                }
             }
         }
 
-        onDispose {
-            job.cancel()
-            tileCache.clear()
-            try {
-                pdfRenderer?.close()
-                parcelFileDescriptor?.close()
-            } catch (_: Exception) {}
+        // UNIFIED DESKTOP PDF CONTROL BAR (No duplicate title, 100% functional controls)
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            tonalElevation = 1.dp,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 10.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                // 1. Page Navigation & Direct Page Jump Pill
+                IconButton(
+                    onClick = { jumpToPage(currentPageIndex - 1) },
+                    enabled = currentPageIndex > 0,
+                    modifier = Modifier.size(30.dp)
+                ) {
+                    Icon(Icons.AutoMirrored.Filled.NavigateBefore, contentDescription = "Previous Page", modifier = Modifier.size(18.dp))
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable(enabled = pageCount > 0) {
+                            jumpPageInput = "${currentPageIndex + 1}"
+                            showJumpPageDialog = true
+                        }
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            text = if (pageCount > 0) "Page ${currentPageIndex + 1} / $pageCount" else "0 / 0",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                        Icon(
+                            Icons.Default.EditLocationAlt,
+                            contentDescription = "Jump to Page",
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.size(13.dp)
+                        )
+                    }
+                }
+
+                IconButton(
+                    onClick = { jumpToPage(currentPageIndex + 1) },
+                    enabled = currentPageIndex < pageCount - 1,
+                    modifier = Modifier.size(30.dp)
+                ) {
+                    Icon(Icons.AutoMirrored.Filled.NavigateNext, contentDescription = "Next Page", modifier = Modifier.size(18.dp))
+                }
+
+                VerticalDivider(modifier = Modifier.height(22.dp))
+
+                // 2. Zoom Controls (-, 100%, +)
+                IconButton(
+                    onClick = {
+                        zoomScale = (zoomScale - 0.25f).coerceIn(0.5f, 4.0f)
+                        if (zoomScale <= 1.02f) panOffset = Offset.Zero
+                    },
+                    modifier = Modifier.size(30.dp)
+                ) {
+                    Icon(Icons.Default.ZoomOut, contentDescription = "Zoom Out", modifier = Modifier.size(18.dp))
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .clickable {
+                            zoomScale = 1f
+                            panOffset = Offset.Zero
+                        }
+                ) {
+                    Text(
+                        text = "${(zoomScale * 100).roundToInt()}%",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+                }
+
+                IconButton(
+                    onClick = { zoomScale = (zoomScale + 0.25f).coerceIn(0.5f, 4.0f) },
+                    modifier = Modifier.size(30.dp)
+                ) {
+                    Icon(Icons.Default.ZoomIn, contentDescription = "Zoom In", modifier = Modifier.size(18.dp))
+                }
+
+                VerticalDivider(modifier = Modifier.height(22.dp))
+
+                // 3. Layout Mode Switcher (Continuous / Single Page / 2-Page Spread)
+                PdfLayoutMode.entries.forEach { mode ->
+                    FilterChip(
+                        selected = layoutMode == mode,
+                        onClick = { layoutMode = mode },
+                        label = { Text(mode.label, fontSize = 11.sp) },
+                        modifier = Modifier.height(28.dp)
+                    )
+                }
+
+                VerticalDivider(modifier = Modifier.height(22.dp))
+
+                // 4. Page Rotation (90° steps)
+                IconButton(
+                    onClick = { pageRotationDegrees = (pageRotationDegrees + 90f) % 360f },
+                    modifier = Modifier.size(30.dp)
+                ) {
+                    Icon(Icons.Default.RotateRight, contentDescription = "Rotate 90°", modifier = Modifier.size(18.dp))
+                }
+
+                // 5. Reading Theme (Day / Night / Sepia)
+                AssistChip(
+                    onClick = {
+                        readingTheme = when (readingTheme) {
+                            PdfReadingTheme.NORMAL -> PdfReadingTheme.NIGHT_INVERTED
+                            PdfReadingTheme.NIGHT_INVERTED -> PdfReadingTheme.SEPIA
+                            PdfReadingTheme.SEPIA -> PdfReadingTheme.NORMAL
+                        }
+                    },
+                    label = { Text(readingTheme.label, fontSize = 11.sp) },
+                    leadingIcon = {
+                        Icon(
+                            when (readingTheme) {
+                                PdfReadingTheme.NORMAL -> Icons.Default.LightMode
+                                PdfReadingTheme.NIGHT_INVERTED -> Icons.Default.DarkMode
+                                PdfReadingTheme.SEPIA -> Icons.Default.AutoStories
+                            },
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp)
+                        )
+                    },
+                    modifier = Modifier.height(28.dp)
+                )
+
+                // 6. Thumbnail Strip Toggle
+                IconButton(
+                    onClick = { showThumbnailBar = !showThumbnailBar },
+                    modifier = Modifier.size(30.dp)
+                ) {
+                    Icon(
+                        Icons.Default.ViewCarousel,
+                        contentDescription = "Toggle Page Thumbnails",
+                        tint = if (showThumbnailBar) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+
+                // 7. Find in PDF Toggle
+                IconButton(
+                    onClick = {
+                        showSearchBar = !showSearchBar
+                        if (!showSearchBar) {
+                            searchQuery = ""
+                            searchMatchingPages = emptyList()
+                        }
+                    },
+                    modifier = Modifier.size(30.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Search,
+                        contentDescription = "Find in PDF",
+                        tint = if (showSearchBar) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+
+                // 8. Print / Export PDF
+                IconButton(
+                    onClick = { printCurrentPdf() },
+                    modifier = Modifier.size(30.dp)
+                ) {
+                    Icon(Icons.Default.Print, contentDescription = "Print PDF", modifier = Modifier.size(18.dp))
+                }
+
+                // 9. Quick Compress PDF in File Converter
+                val localRef = file.fileRef ?: tempCopiedFile
+                if (appState != null && localRef != null) {
+                    AssistChip(
+                        onClick = { appState.openInFileConverter(listOf(localRef)) },
+                        label = { Text("Compress / Convert", fontSize = 11.sp) },
+                        leadingIcon = { Icon(Icons.Default.Compress, contentDescription = null, modifier = Modifier.size(14.dp)) },
+                        modifier = Modifier.height(28.dp)
+                    )
+                }
+            }
+        }
+
+        // Expandable Search Bar
+        if (showSearchBar) {
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceContainer,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        placeholder = { Text("Find text in PDF...", style = MaterialTheme.typography.bodySmall) },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                        trailingIcon = {
+                            if (isSearching) {
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                            } else if (searchQuery.isNotEmpty()) {
+                                IconButton(onClick = { executePdfSearch(searchQuery) }) {
+                                    Icon(Icons.Default.Search, contentDescription = "Run Search")
+                                }
+                            }
+                        }
+                    )
+
+                    Button(
+                        onClick = { executePdfSearch(searchQuery) },
+                        enabled = searchQuery.isNotBlank() && !isSearching
+                    ) {
+                        Text("Find")
+                    }
+
+                    if (searchMatchingPages.isNotEmpty()) {
+                        Text(
+                            text = "${currentMatchPointer + 1}/${searchMatchingPages.size}",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        IconButton(
+                            onClick = {
+                                if (searchMatchingPages.isNotEmpty()) {
+                                    currentMatchPointer = (currentMatchPointer - 1 + searchMatchingPages.size) % searchMatchingPages.size
+                                    jumpToPage(searchMatchingPages[currentMatchPointer])
+                                }
+                            }
+                        ) {
+                            Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Previous Match")
+                        }
+                        IconButton(
+                            onClick = {
+                                if (searchMatchingPages.isNotEmpty()) {
+                                    currentMatchPointer = (currentMatchPointer + 1) % searchMatchingPages.size
+                                    jumpToPage(searchMatchingPages[currentMatchPointer])
+                                }
+                            }
+                        ) {
+                            Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Next Match")
+                        }
+                    }
+                }
+            }
+        }
+
+        // Main PDF Viewport
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .clipToBounds()
+                .pointerInput(Unit) {
+                    detectTransformGestures { _, pan, zoom, _ ->
+                        val newScale = (zoomScale * zoom).coerceIn(0.5f, 4.0f)
+                        zoomScale = newScale
+                        if (newScale > 1.02f) {
+                            val maxPanX = (size.width * (newScale - 1f)) / 2f
+                            val maxPanY = (size.height * (newScale - 1f)) / 2f
+                            panOffset = Offset(
+                                x = (panOffset.x + pan.x).coerceIn(-maxPanX, maxPanX),
+                                y = (panOffset.y + pan.y).coerceIn(-maxPanY, maxPanY)
+                            )
+                        } else {
+                            panOffset = Offset.Zero
+                        }
+                    }
+                }
+                .pointerInput(Unit) {
+                    detectTapGestures(
+                        onDoubleTap = {
+                            if (zoomScale > 1.15f) {
+                                zoomScale = 1f
+                                panOffset = Offset.Zero
+                            } else {
+                                zoomScale = 2.25f
+                            }
+                        }
+                    )
+                }
+        ) {
+            when {
+                isLoading -> {
+                    Column(
+                        modifier = Modifier.align(Alignment.Center),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text("Rendering PDF...", color = Color.White, style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+                errorMessage != null -> {
+                    Column(
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Icon(Icons.Default.ErrorOutline, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(48.dp))
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(errorMessage!!, color = Color.White, style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+                pageCount > 0 && pdfRenderer != null -> {
+                    val pageIndices = remember(pageCount) { (0 until pageCount).toList() }
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .graphicsLayer(
+                                scaleX = zoomScale,
+                                scaleY = zoomScale,
+                                translationX = panOffset.x,
+                                translationY = panOffset.y
+                            )
+                    ) {
+                        when (layoutMode) {
+                            PdfLayoutMode.VERTICAL_CONTINUOUS -> {
+                                LazyColumn(
+                                    state = verticalListState,
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentPadding = PaddingValues(vertical = 16.dp, horizontal = 14.dp),
+                                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    items(pageIndices, key = { it }) { pageIdx ->
+                                        PdfPageCard(
+                                            pageIndex = pageIdx,
+                                            totalPages = pageCount,
+                                            renderer = pdfRenderer!!,
+                                            renderMutex = renderMutex,
+                                            bitmapCache = pageBitmapCache,
+                                            rotationDegrees = pageRotationDegrees,
+                                            colorFilter = ReadingColorFilter,
+                                            isSearchHighlight = searchMatchingPages.contains(pageIdx)
+                                        )
+                                    }
+                                }
+                            }
+                            PdfLayoutMode.HORIZONTAL_PAGED -> {
+                                HorizontalPager(
+                                    state = horizontalPagerState,
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentPadding = PaddingValues(16.dp),
+                                    pageSpacing = 16.dp
+                                ) { pageIdx ->
+                                    Box(
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        PdfPageCard(
+                                            pageIndex = pageIdx,
+                                            totalPages = pageCount,
+                                            renderer = pdfRenderer!!,
+                                            renderMutex = renderMutex,
+                                            bitmapCache = pageBitmapCache,
+                                            rotationDegrees = pageRotationDegrees,
+                                            colorFilter = ReadingColorFilter,
+                                            isSearchHighlight = searchMatchingPages.contains(pageIdx)
+                                        )
+                                    }
+                                }
+                            }
+                            PdfLayoutMode.TWO_PAGE_SPREAD -> {
+                                HorizontalPager(
+                                    state = spreadPagerState,
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentPadding = PaddingValues(16.dp),
+                                    pageSpacing = 16.dp
+                                ) { spreadIdx ->
+                                    val leftPage = spreadIdx * 2
+                                    val rightPage = leftPage + 1
+                                    Row(
+                                        modifier = Modifier.fillMaxSize(),
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                                            PdfPageCard(
+                                                pageIndex = leftPage,
+                                                totalPages = pageCount,
+                                                renderer = pdfRenderer!!,
+                                                renderMutex = renderMutex,
+                                                bitmapCache = pageBitmapCache,
+                                                rotationDegrees = pageRotationDegrees,
+                                                colorFilter = ReadingColorFilter,
+                                                isSearchHighlight = searchMatchingPages.contains(leftPage)
+                                            )
+                                        }
+                                        Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                                            if (rightPage < pageCount) {
+                                                PdfPageCard(
+                                                    pageIndex = rightPage,
+                                                    totalPages = pageCount,
+                                                    renderer = pdfRenderer!!,
+                                                    renderMutex = renderMutex,
+                                                    bitmapCache = pageBitmapCache,
+                                                    rotationDegrees = pageRotationDegrees,
+                                                    colorFilter = ReadingColorFilter,
+                                                    isSearchHighlight = searchMatchingPages.contains(rightPage)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Bottom Thumbnail Strip
+        if (showThumbnailBar && pageCount > 1 && pdfRenderer != null) {
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceContainer,
+                tonalElevation = 4.dp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(84.dp)
+            ) {
+                val thumbIndices = remember(pageCount) { (0 until pageCount).toList() }
+                LazyRow(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    items(thumbIndices, key = { it }) { idx ->
+                        val isSelected = idx == currentPageIndex
+                        PdfThumbnailItem(
+                            pageIndex = idx,
+                            isSelected = isSelected,
+                            renderer = pdfRenderer!!,
+                            renderMutex = renderMutex,
+                            bitmapCache = pageBitmapCache,
+                            onClick = { jumpToPage(idx) }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PdfPageCard(
+    pageIndex: Int,
+    totalPages: Int,
+    renderer: PdfRenderer,
+    renderMutex: Mutex,
+    bitmapCache: LruCache<String, Bitmap>,
+    rotationDegrees: Float,
+    colorFilter: ColorFilter?,
+    isSearchHighlight: Boolean
+) {
+    val cacheKey = "page_$pageIndex"
+    var pageBitmap by remember(pageIndex) { mutableStateOf(bitmapCache.get(cacheKey)) }
+    var aspectRatio by remember(pageIndex) { mutableFloatStateOf(0.707f) }
+
+    LaunchedEffect(pageIndex, renderer) {
+        if (pageBitmap == null) {
+            withContext(Dispatchers.IO) {
+                renderMutex.withLock {
+                    try {
+                        val cached = bitmapCache.get(cacheKey)
+                        if (cached != null && !cached.isRecycled) {
+                            pageBitmap = cached
+                        } else {
+                            renderer.openPage(pageIndex).use { page ->
+                                val w = page.width.coerceAtLeast(1)
+                                val h = page.height.coerceAtLeast(1)
+                                aspectRatio = w.toFloat() / h.toFloat()
+
+                                val renderWidth = (w * 2).coerceIn(800, 2100)
+                                val renderHeight = (renderWidth / aspectRatio).toInt().coerceAtLeast(1)
+
+                                val bmp = Bitmap.createBitmap(renderWidth, renderHeight, Bitmap.Config.ARGB_8888)
+                                bmp.eraseColor(android.graphics.Color.WHITE)
+                                page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                                bitmapCache.put(cacheKey, bmp)
+                                pageBitmap = bmp
+                            }
+                        }
+                    } catch (_: Exception) {}
+                }
+            }
+        } else {
+            val bmp = pageBitmap!!
+            aspectRatio = bmp.width.toFloat() / bmp.height.toFloat().coerceAtLeast(1f)
         }
     }
 
-    // Background tile pre-rendering look-ahead (Dispatchers.IO)
-    LaunchedEffect(currentPageIndex, totalPages, pdfRenderer) {
-        val renderer = pdfRenderer ?: return@LaunchedEffect
-        if (totalPages <= 0) return@LaunchedEffect
+    Box(
+        modifier = Modifier
+            .widthIn(max = 880.dp)
+            .fillMaxWidth()
+            .aspectRatio(aspectRatio)
+            .shadow(6.dp, RoundedCornerShape(8.dp))
+            .clip(RoundedCornerShape(8.dp))
+            .background(Color.White)
+            .then(
+                if (isSearchHighlight) {
+                    Modifier.border(3.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(8.dp))
+                } else Modifier
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        val bmp = pageBitmap
+        if (bmp != null && !bmp.isRecycled) {
+            Image(
+                bitmap = bmp.asImageBitmap(),
+                contentDescription = "PDF Page ${pageIndex + 1}",
+                contentScale = ContentScale.Fit,
+                colorFilter = colorFilter,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer(rotationZ = rotationDegrees)
+            )
+        } else {
+            CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(28.dp))
+        }
 
-        withContext(Dispatchers.IO) {
-            val range = (currentPageIndex - 2)..(currentPageIndex + 3)
-            for (p in range) {
-                if (p in 0 until totalPages && tileCache.get("page_$p") == null) {
+        Surface(
+            color = Color.Black.copy(alpha = 0.58f),
+            shape = RoundedCornerShape(topStart = 8.dp),
+            modifier = Modifier.align(Alignment.BottomEnd)
+        ) {
+            Text(
+                text = "${pageIndex + 1} / $totalPages",
+                color = Color.White,
+                style = MaterialTheme.typography.labelSmall,
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun PdfThumbnailItem(
+    pageIndex: Int,
+    isSelected: Boolean,
+    renderer: PdfRenderer,
+    renderMutex: Mutex,
+    bitmapCache: LruCache<String, Bitmap>,
+    onClick: () -> Unit
+) {
+    val thumbKey = "thumb_$pageIndex"
+    var thumbBitmap by remember(pageIndex) { mutableStateOf(bitmapCache.get(thumbKey)) }
+
+    LaunchedEffect(pageIndex, renderer) {
+        if (thumbBitmap == null) {
+            withContext(Dispatchers.IO) {
+                renderMutex.withLock {
                     try {
-                        synchronized(renderer) {
-                            val page = renderer.openPage(p)
-                            val targetW = 1080
-                            val targetH = (targetW * (page.height.toFloat() / page.width.toFloat())).toInt().coerceAtLeast(100)
-                            val bmp = Bitmap.createBitmap(targetW, targetH, Bitmap.Config.ARGB_8888)
-                            page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                            page.close()
-                            tileCache.put("page_$p", bmp)
+                        val cached = bitmapCache.get(thumbKey)
+                        if (cached != null && !cached.isRecycled) {
+                            thumbBitmap = cached
+                        } else {
+                            renderer.openPage(pageIndex).use { page ->
+                                val thumbW = 110
+                                val thumbH = (thumbW * (page.height.toFloat() / page.width.toFloat().coerceAtLeast(1f))).toInt().coerceAtLeast(120)
+                                val bmp = Bitmap.createBitmap(thumbW, thumbH, Bitmap.Config.ARGB_8888)
+                                bmp.eraseColor(android.graphics.Color.WHITE)
+                                page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                                bitmapCache.put(thumbKey, bmp)
+                                thumbBitmap = bmp
+                            }
                         }
                     } catch (_: Exception) {}
                 }
@@ -231,784 +1008,41 @@ fun PdfViewerEngine(
         }
     }
 
-    // Update current page on scroll
-    LaunchedEffect(listState.firstVisibleItemIndex) {
-        val visibleIndex = listState.firstVisibleItemIndex
-        currentPageIndex = if (isTwoPageSpread) (visibleIndex * 2).coerceAtMost(totalPages - 1) else visibleIndex
-        showPill()
-    }
-
-    // Run Embedded Text & ML Kit OCR search
-    fun runSearch(query: String) {
-        if (query.isBlank()) {
-            searchResults = emptyList()
-            currentSearchMatchIndex = 0
-            searchProgressText = ""
-            return
-        }
-        isSearching = true
-        searchProgressText = "Searching..."
-        coroutineScope.launch {
-            val results = PdfSearchOcr.searchPdf(
-                context = context,
-                file = file,
-                query = query,
-                totalPages = totalPages,
-                onProgress = { current, total ->
-                    searchProgressText = "Scanning page $current of $total..."
-                }
-            )
-            searchResults = results
-            currentSearchMatchIndex = 0
-            isSearching = false
-            searchProgressText = ""
-            if (results.isNotEmpty()) {
-                val matchPage = results[0].pageIndex
-                val targetIndex = if (isTwoPageSpread) matchPage / 2 else matchPage
-                listState.animateScrollToItem(targetIndex)
-            }
-        }
-    }
-
     Column(
-        modifier = modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .clickable(onClick = onClick)
+            .padding(2.dp)
     ) {
-        // ==========================================
-        // 1. Compact Top Bar with Action Controls
-        // ==========================================
-        Surface(
-            color = MaterialTheme.colorScheme.surfaceContainer,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(48.dp),
-            shadowElevation = 2.dp
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.weight(1f)
-                ) {
-                    IconButton(
-                        onClick = { appState?.viewingFile = null },
-                        modifier = Modifier.size(36.dp)
-                    ) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back",
-                            tint = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Icon(
-                        Icons.Default.PictureAsPdf,
-                        contentDescription = null,
-                        tint = Color(0xFFE53935),
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = formatEllipsizedFileName(file.name, 28),
-                        color = MaterialTheme.colorScheme.onSurface,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    // Two-Page Spread Booklet Mode toggle
-                    IconButton(
-                        onClick = {
-                            isTwoPageSpread = !isTwoPageSpread
-                            scale = 1f
-                            offset = Offset.Zero
-                        },
-                        modifier = Modifier.size(32.dp)
-                    ) {
-                        Icon(
-                            imageVector = if (isTwoPageSpread) Icons.Default.MenuBook else Icons.Default.Layers,
-                            contentDescription = if (isTwoPageSpread) "Booklet Mode Active" else "Single Page Mode",
-                            tint = if (isTwoPageSpread) MaterialTheme.colorScheme.primary else Color.LightGray,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-
-                    // Thumbnail Scrub Bar toggle
-                    IconButton(
-                        onClick = { isScrubBarVisible = !isScrubBarVisible },
-                        modifier = Modifier.size(32.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.GridView,
-                            contentDescription = "Thumbnails",
-                            tint = if (isScrubBarVisible) MaterialTheme.colorScheme.primary else Color.LightGray,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-
-                    // Zoom Controls (- / Reset / +)
-                    IconButton(
-                        onClick = {
-                            scale = (scale - 0.5f).coerceIn(1f, 4.5f)
-                            if (scale <= 1.05f) {
-                                scale = 1f
-                                offset = Offset.Zero
-                            }
-                        },
-                        modifier = Modifier.size(32.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.ZoomOut,
-                            contentDescription = "Zoom Out",
-                            tint = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-                    if (scale > 1.05f) {
-                        TextButton(
-                            onClick = {
-                                scale = 1f
-                                offset = Offset.Zero
-                            },
-                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
-                            modifier = Modifier.height(28.dp)
-                        ) {
-                            Text("${(scale * 100).toInt()}%", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                    IconButton(
-                        onClick = {
-                            scale = (scale + 0.5f).coerceIn(1f, 4.5f)
-                        },
-                        modifier = Modifier.size(32.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.ZoomIn,
-                            contentDescription = "Zoom In",
-                            tint = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-
-                    // Search OCR toggle
-                    IconButton(
-                        onClick = {
-                            isSearchOpen = !isSearchOpen
-                            if (!isSearchOpen) {
-                                searchQuery = ""
-                                searchResults = emptyList()
-                            }
-                        },
-                        modifier = Modifier.size(36.dp)
-                    ) {
-                        Icon(
-                            if (isSearchOpen) Icons.Default.Close else Icons.Default.Search,
-                            contentDescription = "Search PDF",
-                            tint = if (isSearchOpen) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-                }
-            }
-        }
-
-        // ==========================================
-        // 2. Search & OCR Keyword Bar
-        // ==========================================
-        if (isSearchOpen) {
-            Surface(
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
-                shape = RoundedCornerShape(8.dp),
-                shadowElevation = 4.dp
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 8.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    BasicTextField(
-                        value = searchQuery,
-                        onValueChange = {
-                            searchQuery = it
-                            runSearch(it)
-                        },
-                        textStyle = MaterialTheme.typography.bodySmall.copy(color = MaterialTheme.colorScheme.onSurface),
-                        modifier = Modifier
-                            .weight(1f)
-                            .padding(horizontal = 8.dp),
-                        singleLine = true,
-                        decorationBox = { inner ->
-                            if (searchQuery.isEmpty()) {
-                                Text("Search text / ML Kit OCR in PDF...", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
-                            }
-                            inner()
-                        }
-                    )
-
-                    if (isSearching) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            if (searchProgressText.isNotEmpty()) {
-                                Text(searchProgressText, color = Color.Gray, fontSize = 11.sp, modifier = Modifier.padding(end = 6.dp))
-                            }
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(16.dp),
-                                color = MaterialTheme.colorScheme.primary,
-                                strokeWidth = 2.dp
-                            )
-                        }
-                    } else if (searchResults.isNotEmpty()) {
-                        Text(
-                            text = "${currentSearchMatchIndex + 1}/${searchResults.size}",
-                            color = Color(0xFF81C784),
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(horizontal = 4.dp)
-                        )
-                        IconButton(
-                            onClick = {
-                                if (searchResults.isNotEmpty()) {
-                                    currentSearchMatchIndex =
-                                        (currentSearchMatchIndex - 1 + searchResults.size) % searchResults.size
-                                    val matchPage = searchResults[currentSearchMatchIndex].pageIndex
-                                    val targetIndex = if (isTwoPageSpread) matchPage / 2 else matchPage
-                                    coroutineScope.launch { listState.animateScrollToItem(targetIndex) }
-                                }
-                            },
-                            modifier = Modifier.size(28.dp)
-                        ) {
-                            Icon(Icons.Default.ChevronLeft, contentDescription = "Previous Match", tint = Color.White)
-                        }
-                        IconButton(
-                            onClick = {
-                                if (searchResults.isNotEmpty()) {
-                                    currentSearchMatchIndex =
-                                        (currentSearchMatchIndex + 1) % searchResults.size
-                                    val matchPage = searchResults[currentSearchMatchIndex].pageIndex
-                                    val targetIndex = if (isTwoPageSpread) matchPage / 2 else matchPage
-                                    coroutineScope.launch { listState.animateScrollToItem(targetIndex) }
-                                }
-                            },
-                            modifier = Modifier.size(28.dp)
-                        ) {
-                            Icon(Icons.Default.ChevronRight, contentDescription = "Next Match", tint = Color.White)
-                        }
-                    } else if (searchQuery.isNotBlank()) {
-                        Text("No match", color = Color(0xFFE57373), fontSize = 12.sp)
-                    }
-                }
-            }
-
-            // Snippet preview banner if matched
-            if (searchResults.isNotEmpty()) {
-                val currentMatch = searchResults.getOrNull(currentSearchMatchIndex)
-                if (currentMatch != null) {
-                    Surface(
-                        color = Color(0xFF1E2836),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 8.dp, vertical = 2.dp),
-                        shape = RoundedCornerShape(4.dp)
-                    ) {
-                        Text(
-                            text = "Page ${currentMatch.pageIndex + 1}: ${currentMatch.matchedTextSnippet}",
-                            color = Color(0xFF90CAF9),
-                            fontSize = 11.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                        )
-                    }
-                }
-            }
-        }
-
-        // ==========================================
-        // 3. Main Viewer Canvas (Single or Two-Page Spread)
-        // ==========================================
         Box(
             modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()
-                .clipToBounds()
+                .width(44.dp)
+                .height(54.dp)
+                .clip(RoundedCornerShape(4.dp))
+                .background(Color.White)
+                .border(
+                    width = if (isSelected) 2.dp else 0.5.dp,
+                    color = if (isSelected) MaterialTheme.colorScheme.primary else Color.Gray,
+                    shape = RoundedCornerShape(4.dp)
+                ),
+            contentAlignment = Alignment.Center
         ) {
-            if (isPdfLoading) {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Text("Rendering PDF...", color = Color.Gray, fontSize = 13.sp)
-                    }
-                }
-            } else if (pdfRenderer == null || totalPages == 0) {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text("Failed to load PDF document", color = Color.Gray, fontSize = 14.sp)
-                }
-            } else {
-                val renderer = pdfRenderer!!
-                val itemCount = if (isTwoPageSpread) (totalPages + 1) / 2 else totalPages
-
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .pointerInput(Unit) {
-                            awaitEachGesture {
-                                awaitFirstDown(requireUnconsumed = false)
-                                do {
-                                    val event = awaitPointerEvent()
-                                    val zoomChange = event.calculateZoom()
-                                    val panChange = event.calculatePan()
-                                    if (event.changes.size >= 2 || scale > 1.02f) {
-                                        scale = (scale * zoomChange).coerceIn(1f, 4.5f)
-                                        if (scale > 1.02f) {
-                                            offset += panChange
-                                        } else {
-                                            scale = 1f
-                                            offset = Offset.Zero
-                                        }
-                                        event.changes.forEach { it.consume() }
-                                    }
-                                } while (event.changes.any { it.pressed })
-                            }
-                        }
-                        .pointerInput(Unit) {
-                            detectTapGestures(
-                                onDoubleTap = {
-                                    scale = if (scale > 1.2f) 1f else 2.25f
-                                    offset = Offset.Zero
-                                },
-                                onTap = { showPill() }
-                            )
-                        }
-                        .graphicsLayer(
-                            scaleX = scale,
-                            scaleY = scale,
-                            translationX = offset.x,
-                            translationY = offset.y
-                        )
-                ) {
-                    LazyColumn(
-                        state = listState,
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(vertical = 12.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        itemsIndexed(
-                            items = List(itemCount) { it }
-                        ) { index, _ ->
-                            if (isTwoPageSpread) {
-                                // Two-Page Spread (Booklet Mode)
-                                val page1Index = index * 2
-                                val page2Index = page1Index + 1
-
-                                val match1 = searchResults.find { it.pageIndex == page1Index }
-                                val match2 = if (page2Index < totalPages) searchResults.find { it.pageIndex == page2Index } else null
-
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 8.dp),
-                                    horizontalArrangement = Arrangement.Center,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    // Left Page
-                                    Box(
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .shadow(6.dp, RoundedCornerShape(topStart = 4.dp, bottomStart = 4.dp))
-                                    ) {
-                                        PdfPageTile(
-                                            renderer = renderer,
-                                            pageIndex = page1Index,
-                                            cache = tileCache,
-                                            searchMatch = match1,
-                                            modifier = Modifier.fillMaxWidth()
-                                        )
-                                        // Spine inner shadow on right edge of left page
-                                        Box(
-                                            modifier = Modifier
-                                                .align(Alignment.CenterEnd)
-                                                .width(10.dp)
-                                                .fillMaxHeight()
-                                                .background(
-                                                    Brush.horizontalGradient(
-                                                        colors = listOf(Color.Transparent, Color(0x33000000))
-                                                    )
-                                                )
-                                        )
-                                    }
-
-                                    // Center Spine Divider Crease
-                                    Box(
-                                        modifier = Modifier
-                                            .width(2.dp)
-                                            .height(300.dp)
-                                            .background(Color(0xFF333333))
-                                    )
-
-                                    // Right Page
-                                    if (page2Index < totalPages) {
-                                        Box(
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                .shadow(6.dp, RoundedCornerShape(topEnd = 4.dp, bottomEnd = 4.dp))
-                                        ) {
-                                            PdfPageTile(
-                                                renderer = renderer,
-                                                pageIndex = page2Index,
-                                                cache = tileCache,
-                                                searchMatch = match2,
-                                                modifier = Modifier.fillMaxWidth()
-                                            )
-                                            // Spine inner shadow on left edge of right page
-                                            Box(
-                                                modifier = Modifier
-                                                    .align(Alignment.CenterStart)
-                                                    .width(10.dp)
-                                                    .fillMaxHeight()
-                                                    .background(
-                                                        Brush.horizontalGradient(
-                                                            colors = listOf(Color(0x33000000), Color.Transparent)
-                                                        )
-                                                    )
-                                            )
-                                        }
-                                    } else {
-                                        Spacer(modifier = Modifier.weight(1f))
-                                    }
-                                }
-                            } else {
-                                // Single Page Mode
-                                val match = searchResults.find { it.pageIndex == index }
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth(0.96f)
-                                        .shadow(6.dp, RoundedCornerShape(4.dp))
-                                ) {
-                                    PdfPageTile(
-                                        renderer = renderer,
-                                        pageIndex = index,
-                                        cache = tileCache,
-                                        searchMatch = match,
-                                        modifier = Modifier.fillMaxWidth()
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // ==========================================
-                // 4. Page Counter Floating Overlay Pill (Auto-dismiss 2s)
-                // ==========================================
-                androidx.compose.animation.AnimatedVisibility(
-                    visible = isPagePillVisible && totalPages > 0,
-                    enter = fadeIn() + scaleIn(initialScale = 0.85f),
-                    exit = fadeOut() + scaleOut(targetScale = 0.85f),
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .padding(top = 16.dp)
-                ) {
-                    Surface(
-                        color = Color.Black.copy(alpha = 0.85f),
-                        shape = RoundedCornerShape(20.dp),
-                        shadowElevation = 8.dp,
-                        border = androidx.compose.foundation.BorderStroke(0.5.dp, Color(0xFF444444))
-                    ) {
-                        val label = if (isTwoPageSpread) {
-                            val endPage = (currentPageIndex + 2).coerceAtMost(totalPages)
-                            "Pages ${currentPageIndex + 1}-$endPage of $totalPages"
-                        } else {
-                            "Page ${currentPageIndex + 1} of $totalPages"
-                        }
-                        Text(
-                            text = label,
-                            color = Color.White,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
-                        )
-                    }
-                }
-            }
-        }
-
-        // ==========================================
-        // 5. Horizontal Page Thumbnail Scrub Bar
-        // ==========================================
-        if (isScrubBarVisible && totalPages > 0 && pdfRenderer != null) {
-            Surface(
-                color = Color(0xFF181818),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(90.dp)
-                    .border(width = 0.5.dp, color = Color(0xFF2C2C2C)),
-                shadowElevation = 8.dp
-            ) {
-                Column(modifier = Modifier.fillMaxSize()) {
-                    LazyRow(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f)
-                            .padding(vertical = 4.dp, horizontal = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        items(totalPages) { p ->
-                            val isSelected = if (isTwoPageSpread) {
-                                p == currentPageIndex || p == currentPageIndex + 1
-                            } else {
-                                p == currentPageIndex
-                            }
-
-                            Box(
-                                modifier = Modifier
-                                    .width(52.dp)
-                                    .fillMaxHeight()
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .border(
-                                        width = if (isSelected) 2.dp else 0.5.dp,
-                                        color = if (isSelected) MaterialTheme.colorScheme.primary else Color.Gray,
-                                        shape = RoundedCornerShape(4.dp)
-                                    )
-                                    .clickable {
-                                        currentPageIndex = p
-                                        showPill()
-                                        coroutineScope.launch {
-                                            val target = if (isTwoPageSpread) p / 2 else p
-                                            listState.animateScrollToItem(target)
-                                        }
-                                    },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                PdfThumbnailTile(
-                                    renderer = pdfRenderer!!,
-                                    pageIndex = p,
-                                    cache = tileCache
-                                )
-                                Surface(
-                                    color = Color.Black.copy(alpha = 0.7f),
-                                    shape = CircleShape,
-                                    modifier = Modifier
-                                        .align(Alignment.BottomEnd)
-                                        .padding(2.dp)
-                                ) {
-                                    Text(
-                                        text = "${p + 1}",
-                                        color = Color.White,
-                                        fontSize = 9.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    // Bottom progress slider line
-                    Slider(
-                        value = currentPageIndex.toFloat(),
-                        onValueChange = { newPage ->
-                            val p = newPage.toInt().coerceIn(0, totalPages - 1)
-                            if (p != currentPageIndex) {
-                                currentPageIndex = p
-                                showPill()
-                                coroutineScope.launch {
-                                    val target = if (isTwoPageSpread) p / 2 else p
-                                    listState.scrollToItem(target)
-                                }
-                            }
-                        },
-                        valueRange = 0f..(totalPages - 1).toFloat(),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(18.dp)
-                            .padding(horizontal = 16.dp),
-                        colors = SliderDefaults.colors(
-                            thumbColor = MaterialTheme.colorScheme.primary,
-                            activeTrackColor = MaterialTheme.colorScheme.primary,
-                            inactiveTrackColor = Color(0xFF333333)
-                        )
-                    )
-                }
-            }
-        }
-    }
-}
-
-/**
- * Individual Page Tile with multi-threaded bitmap rendering and
- * real-time Canvas overlay for search keyword coordinate highlights.
- */
-@Composable
-private fun PdfPageTile(
-    renderer: PdfRenderer,
-    pageIndex: Int,
-    cache: PdfTileCache,
-    searchMatch: PdfSearchResult?,
-    modifier: Modifier = Modifier
-) {
-    var bitmap by remember(pageIndex) { mutableStateOf(cache.get("page_$pageIndex")) }
-
-    LaunchedEffect(pageIndex) {
-        if (bitmap == null) {
-            withContext(Dispatchers.IO) {
-                try {
-                    synchronized(renderer) {
-                        val page = renderer.openPage(pageIndex)
-                        val targetWidth = 1080
-                        val targetHeight = (targetWidth * (page.height.toFloat() / page.width.toFloat())).toInt().coerceAtLeast(100)
-                        val bmp = Bitmap.createBitmap(targetWidth, targetHeight, Bitmap.Config.ARGB_8888)
-                        bmp.eraseColor(android.graphics.Color.WHITE)
-                        page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                        page.close()
-                        cache.put("page_$pageIndex", bmp)
-                        bitmap = bmp
-                    }
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                }
-            }
-        }
-    }
-
-    val isHighlighted = searchMatch != null
-
-    Card(
-        shape = RoundedCornerShape(4.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
-        modifier = modifier
-            .border(
-                width = if (isHighlighted) 2.5.dp else 0.dp,
-                color = if (isHighlighted) Color(0xFFFFD54F) else Color.Transparent,
-                shape = RoundedCornerShape(4.dp)
-            )
-    ) {
-        Box(modifier = Modifier.fillMaxWidth()) {
-            if (bitmap != null) {
+            val bmp = thumbBitmap
+            if (bmp != null && !bmp.isRecycled) {
                 Image(
-                    bitmap = bitmap!!.asImageBitmap(),
+                    bitmap = bmp.asImageBitmap(),
                     contentDescription = "Page ${pageIndex + 1}",
-                    contentScale = ContentScale.FillWidth,
-                    modifier = Modifier.fillMaxWidth()
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
                 )
-
-                // Coordinate highlighting overlay over PDF page
-                if (searchMatch != null && searchMatch.normalizedHighlights.isNotEmpty()) {
-                    Canvas(
-                        modifier = Modifier.matchParentSize()
-                    ) {
-                        val canvasW = size.width
-                        val canvasH = size.height
-
-                        for (rect in searchMatch.normalizedHighlights) {
-                            val left = rect.left * canvasW
-                            val top = rect.top * canvasH
-                            val width = (rect.right - rect.left) * canvasW
-                            val height = (rect.bottom - rect.top) * canvasH
-
-                            // Highlight fill
-                            drawRect(
-                                color = Color(0x66FFEB3B), // Translucent yellow
-                                topLeft = Offset(left, top),
-                                size = Size(width, height)
-                            )
-
-                            // Highlight border
-                            drawRect(
-                                color = Color(0xFFFFC107), // Amber outline
-                                topLeft = Offset(left, top),
-                                size = Size(width, height),
-                                style = Stroke(width = 2.dp.toPx())
-                            )
-                        }
-                    }
-                }
-            } else {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(340.dp)
-                        .background(Color(0xFF262626)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    CircularProgressIndicator(
-                        color = MaterialTheme.colorScheme.primary,
-                        strokeWidth = 2.dp,
-                        modifier = Modifier.size(24.dp)
-                    )
-                }
             }
         }
-    }
-}
-
-/**
- * Thumbnail tile used in horizontal bottom scrub bar.
- */
-@Composable
-private fun PdfThumbnailTile(
-    renderer: PdfRenderer,
-    pageIndex: Int,
-    cache: PdfTileCache
-) {
-    var thumbBitmap by remember(pageIndex) { mutableStateOf(cache.get("thumb_$pageIndex")) }
-
-    LaunchedEffect(pageIndex) {
-        if (thumbBitmap == null) {
-            withContext(Dispatchers.IO) {
-                try {
-                    synchronized(renderer) {
-                        val page = renderer.openPage(pageIndex)
-                        val thumbW = 120
-                        val thumbH = (thumbW * (page.height.toFloat() / page.width.toFloat())).toInt().coerceAtLeast(30)
-                        val bmp = Bitmap.createBitmap(thumbW, thumbH, Bitmap.Config.ARGB_8888)
-                        bmp.eraseColor(android.graphics.Color.WHITE)
-                        page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                        page.close()
-                        cache.put("thumb_$pageIndex", bmp)
-                        thumbBitmap = bmp
-                    }
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                }
-            }
-        }
-    }
-
-    if (thumbBitmap != null) {
-        Image(
-            bitmap = thumbBitmap!!.asImageBitmap(),
-            contentDescription = null,
-            contentScale = ContentScale.Crop,
-            modifier = Modifier.fillMaxSize()
-        )
-    } else {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color(0xFF222222))
+        Text(
+            text = "${pageIndex + 1}",
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
 }

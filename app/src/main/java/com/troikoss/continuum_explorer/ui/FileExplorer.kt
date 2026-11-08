@@ -96,7 +96,8 @@ fun FileExplorer(
     initialOpenFilePath: String? = null,
     initialOpenInEditMode: Boolean = false,
     initialEditorToolId: String? = null,
-    initialConverterFilePaths: List<String> = emptyList()
+    initialConverterFilePaths: List<String> = emptyList(),
+    isSingleAppWindow: Boolean = false
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -328,7 +329,8 @@ fun FileExplorer(
     val canCloseSubpageTabToOrigin = isSpecialSubpageTab && appState.backStack.isEmpty() && tabs.size > 1
 
     BackHandler(
-        enabled = appState.activeApkInstallerFile != null ||
+        enabled = com.troikoss.continuum_explorer.ui.audio.AudioPlayerManager.displayMode == com.troikoss.continuum_explorer.ui.audio.AudioPlayerDisplayMode.FULLSCREEN_SPOTIFY ||
+            appState.activeApkInstallerFile != null ||
             appState.activeNonEditableInfoFile != null ||
             WorkspaceWindowController.activeFloatingPanel != null ||
             drawerState.isOpen ||
@@ -343,6 +345,9 @@ fun FileExplorer(
             appState.canGoUp
     ) {
         when {
+            com.troikoss.continuum_explorer.ui.audio.AudioPlayerManager.displayMode == com.troikoss.continuum_explorer.ui.audio.AudioPlayerDisplayMode.FULLSCREEN_SPOTIFY -> {
+                com.troikoss.continuum_explorer.ui.audio.AudioPlayerManager.displayMode = com.troikoss.continuum_explorer.ui.audio.AudioPlayerDisplayMode.BOTTOM_BAR
+            }
             appState.activeApkInstallerFile != null -> appState.activeApkInstallerFile = null
             appState.activeNonEditableInfoFile != null -> appState.activeNonEditableInfoFile = null
             WorkspaceWindowController.activeFloatingPanel != null -> WorkspaceWindowController.closeFloatingPanel()
@@ -351,12 +356,16 @@ fun FileExplorer(
             appState.viewingFile != null -> {
                 if (appState.isPreviewFullScreen) {
                     appState.isPreviewFullScreen = false
+                } else if (isSingleAppWindow && tabs.size <= 1) {
+                    (context as? android.app.Activity)?.finish()
                 } else {
                     appState.closeViewerOrReturnToOrigin()
                 }
             }
             appState.activeEditorToolId != null -> {
-                if (appState.isDedicatedViewerTab && tabs.size > 1) {
+                if (isSingleAppWindow && tabs.size <= 1) {
+                    (context as? android.app.Activity)?.finish()
+                } else if (appState.isDedicatedViewerTab && tabs.size > 1) {
                     closeTabAndReturnToOrigin(appState)
                 } else {
                     appState.activeEditorToolId = null
@@ -469,7 +478,8 @@ fun FileExplorer(
                             }
                         },
                         onMenuClick = handleUnifiedSidebarToggle,
-                        appState = appState
+                        appState = appState,
+                        isSingleAppWindow = isSingleAppWindow
                     )
                 }
             ) { innerPadding ->
@@ -553,6 +563,11 @@ fun FileExplorer(
                 WorkspacePreviewPane(appState = appState)
             }
         }
+
+        // 3-Mode Audio Player Overlay (Bottom Mini-Bar, Draggable Floating PiP, Fullscreen Spotify Player)
+        com.troikoss.continuum_explorer.ui.audio.SpotifyAudioPlayerOverlay(
+            appState = appState
+        )
     }
 }
 
@@ -590,7 +605,8 @@ private fun ExplorerTopBar(
     onAddTab: () -> Unit,
     onCloseTab: (Int) -> Unit,
     onMenuClick: () -> Unit,
-    appState: FileExplorerState
+    appState: FileExplorerState,
+    isSingleAppWindow: Boolean = false
 ) {
     if (appState.isVideoFullScreen) return
     val isFullScreenTabHidden by SettingsManager.isFullScreenTabBarHidden
@@ -600,7 +616,7 @@ private fun ExplorerTopBar(
             .background(MaterialTheme.colorScheme.surface)
             .statusBarsPadding()
     ) {
-        if (!isFullScreenTabHidden) {
+        if (!isFullScreenTabHidden && !isSingleAppWindow) {
             TabBar(
                 tabs = tabs.map { it.currentName },
                 selectedTabIndex = selectedTabIndex,
@@ -769,6 +785,8 @@ private fun ExplorerBody(
                                 else -> {
                                     com.troikoss.continuum_explorer.ui.editor.EditorContainer(
                                         editorToolId = appState.activeEditorToolId,
+                                        appState = appState,
+                                        onMenuClick = onMenuClick,
                                         modifier = Modifier.fillMaxSize()
                                     )
                                 }

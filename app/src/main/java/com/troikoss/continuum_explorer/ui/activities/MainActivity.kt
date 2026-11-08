@@ -161,6 +161,7 @@ class MainActivity : AppCompatActivity() {
         val initialOpenInEditMode = intent.getBooleanExtra("openInEditMode", false)
         val initialEditorToolId = intent.getStringExtra("editorToolId")
         val initialConverterFilePaths = intent.getStringArrayListExtra("converterFilePaths")?.toList().orEmpty()
+        val isSingleAppWindow = intent.getBooleanExtra("isSingleAppWindow", false)
 
         // Build ImageLoader asynchronously to prevent main thread lag on startup
         lifecycleScope.launch(Dispatchers.IO) {
@@ -187,7 +188,8 @@ class MainActivity : AppCompatActivity() {
                     initialOpenFilePath = initialOpenFilePath,
                     initialOpenInEditMode = initialOpenInEditMode,
                     initialEditorToolId = initialEditorToolId,
-                    initialConverterFilePaths = initialConverterFilePaths
+                    initialConverterFilePaths = initialConverterFilePaths,
+                    isSingleAppWindow = isSingleAppWindow
                 )
             }
         }

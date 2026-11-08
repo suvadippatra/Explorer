@@ -50,11 +50,11 @@ fun TextEditorTopBar(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 modifier = Modifier.weight(1f, fill = false)
             ) {
-                // Left cross mark to exit edit mode
+                // Left Triple-Line Menu button per unified Mini-App Editor Heading rule
                 IconButton(onClick = onMenuClick, modifier = Modifier.size(36.dp)) {
                     Icon(
-                        Icons.Default.Close,
-                        contentDescription = "Close / Exit Edit",
+                        Icons.Default.Menu,
+                        contentDescription = "Toggle Navigation Sidebar / File Tree",
                         tint = MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.size(20.dp)
                     )

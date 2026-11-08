@@ -18,8 +18,8 @@ object MiniAppRegistry {
         MiniAppRuleDescriptor(
             id = "file_converter",
             title = "File Converter",
-            subtitle = "VERT-inspired 100% local batch converter for Images, Docs, Data, Audio/Video & Archives",
-            badge = "VERT Native",
+            subtitle = "Student Photo/Signature KB Resizer, PDF Compressor, VERT Single & Batch Converter",
+            badge = "VERT + Squoosh",
             icon = Icons.Default.Transform,
             accentColor = Color(0xFF0EA5E9),
             supportedExtensions = emptySet(),
@@ -29,32 +29,33 @@ object MiniAppRegistry {
         ),
         MiniAppRuleDescriptor(
             id = "text_editor",
-            title = "Markor Text & Code Studio",
-            subtitle = "Markdown, Todo.txt, Org-Mode, AsciiDoc, LaTeX math, Mermaid diagrams & code",
+            title = "Markor Text & Markdown Studio",
+            subtitle = "Markdown, Todo.txt, Org-Mode, AsciiDoc, LaTeX math, Mermaid diagrams & plain notes",
             badge = "Markor Engine",
             icon = Icons.Default.Description,
             accentColor = Color(0xFF4F46E5),
             supportedExtensions = setOf(
-                "txt", "md", "markdown", "org", "adoc", "asciidoc",
-                "json", "xml", "html", "htm", "css", "js", "ts",
-                "kt", "kts", "java", "py", "sh", "c", "cpp", "h",
-                "ini", "conf", "yaml", "yml", "toml", "log", "prop", "properties"
+                "txt", "md", "markdown", "mdown", "mkd", "org", "adoc", "asciidoc", "rst", "rtf", "log"
             ),
             isActiveInUi = true,
             requiresInitialFileFromDisk = false,
             defaultNewFileName = "QuickNote.md"
         ),
         MiniAppRuleDescriptor(
-            id = "image_studio",
-            title = "PhotoEditor Studio",
-            subtitle = "Non-destructive filters, crop, curves, HSL sliders, brush, text & stickers",
-            badge = "Image Studio",
-            icon = Icons.Default.Image,
-            accentColor = Color(0xFF059669),
-            supportedExtensions = setOf("jpg", "jpeg", "png", "webp", "bmp"),
+            id = "code_studio",
+            title = "Code Studio",
+            subtitle = "Monospace code workbench with line numbers, syntax highlighting, search & UTF-8 stats",
+            badge = "Code IDE",
+            icon = Icons.Default.Code,
+            accentColor = Color(0xFF7C3AED),
+            supportedExtensions = setOf(
+                "kt", "kts", "java", "py", "js", "jsx", "ts", "tsx", "html", "htm", "css", "scss",
+                "json", "xml", "yaml", "yml", "toml", "ini", "conf", "sh", "bash", "c", "cpp", "h",
+                "hpp", "sql", "gradle", "properties", "go", "rs", "dart", "php", "rb", "lua"
+            ),
             isActiveInUi = true,
-            requiresInitialFileFromDisk = true,
-            defaultNewFileName = null
+            requiresInitialFileFromDisk = false,
+            defaultNewFileName = "Main.kt"
         ),
         MiniAppRuleDescriptor(
             id = "csv_editor",
@@ -69,12 +70,24 @@ object MiniAppRegistry {
             defaultNewFileName = "Sheet1.csv"
         ),
         MiniAppRuleDescriptor(
+            id = "image_studio",
+            title = "PhotoEditor Studio",
+            subtitle = "Non-destructive filters, crop, curves, HSL sliders, brush, text & stickers",
+            badge = "Image Studio",
+            icon = Icons.Default.Image,
+            accentColor = Color(0xFF059669),
+            supportedExtensions = setOf("jpg", "jpeg", "png", "webp", "bmp"),
+            isActiveInUi = true,
+            requiresInitialFileFromDisk = true,
+            defaultNewFileName = null
+        ),
+        MiniAppRuleDescriptor(
             id = "base64_codec",
             title = "Base64 & Hex Codec",
             subtitle = "Archived utility preserved in archive/base64/ArchivedBase64Codec.kt",
             badge = "Archived",
             icon = Icons.Default.Code,
-            accentColor = Color(0xFF7C3AED),
+            accentColor = Color(0xFF64748B),
             supportedExtensions = emptySet(),
             isActiveInUi = false,
             archivePackagePath = "com.troikoss.continuum_explorer.archive.base64.ArchivedBase64Codec"

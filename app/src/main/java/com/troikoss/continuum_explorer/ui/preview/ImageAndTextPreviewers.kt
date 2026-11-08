@@ -5,6 +5,7 @@ import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -244,6 +245,12 @@ fun TextFullPageView(
                 }
 
                 if (appState != null) {
+                    val ext = file.name.substringAfterLast('.', "").lowercase()
+                    val studioButtonLabel = when {
+                        formatType == TextFormatType.CSV || ext in listOf("csv", "tsv") -> "Edit in CSV Studio"
+                        ext in listOf("kt", "java", "py", "js", "ts", "html", "css", "json", "xml", "yaml", "yml", "sh", "sql", "c", "cpp") -> "Edit in Code Studio"
+                        else -> "Edit in Markor"
+                    }
                     FilledTonalButton(
                         onClick = {
                             appState.viewingFile = file
@@ -254,7 +261,7 @@ fun TextFullPageView(
                     ) {
                         Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(15.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Edit in Markor", style = MaterialTheme.typography.labelMedium)
+                        Text(studioButtonLabel, style = MaterialTheme.typography.labelMedium)
                     }
                 }
             }
@@ -266,6 +273,12 @@ fun TextFullPageView(
             when {
                 isLoading -> {
                     CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+                }
+                !showRawSource && formatType == TextFormatType.CSV -> {
+                    CsvInteractiveTablePreview(
+                        rawText = textContent ?: "",
+                        modifier = Modifier.fillMaxSize()
+                    )
                 }
                 !showRawSource && formatType == TextFormatType.TODO_TXT -> {
                     TodoTxtInteractiveView(
@@ -306,6 +319,204 @@ fun TextFullPageView(
             }
         }
     }
+}
+
+/**
+ * Interactive formatted Spreadsheet Table Preview for .csv and .tsv files
+ * with sticky header row, row numbers, alternating row striping, and row search filter.
+ */
+@Composable
+fun CsvInteractiveTablePreview(
+    rawText: String,
+    modifier: Modifier = Modifier
+) {
+    var filterQuery by remember { mutableStateOf("") }
+    val delimiter = remember(rawText) {
+        val firstLine = rawText.lineSequence().firstOrNull().orEmpty()
+        when {
+            firstLine.contains('\t') -> '\t'
+            firstLine.count { it == ';' } > firstLine.count { it == ',' } -> ';'
+            else -> ','
+        }
+    }
+
+    val allRows = remember(rawText, delimiter) {
+        rawText.lineSequence()
+            .filter { it.isNotBlank() }
+            .map { line -> parseCsvPreviewLine(line, delimiter) }
+            .toList()
+    }
+
+    val headerRow = allRows.firstOrNull().orEmpty()
+    val dataRows = remember(allRows, filterQuery) {
+        val body = if (allRows.size > 1) allRows.drop(1) else emptyList()
+        if (filterQuery.isBlank()) body
+        else body.filter { row -> row.any { cell -> cell.contains(filterQuery.trim(), ignoreCase = true) } }
+    }
+    val maxCols = remember(allRows) { (allRows.maxOfOrNull { it.size } ?: 1).coerceAtLeast(1) }
+
+    Column(modifier = modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
+        // Table Filter & Stats Strip
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceContainer,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = "${dataRows.size} rows × $maxCols columns",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+
+                OutlinedTextField(
+                    value = filterQuery,
+                    onValueChange = { filterQuery = it },
+                    placeholder = { Text("Filter rows...", style = MaterialTheme.typography.labelSmall) },
+                    singleLine = true,
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(15.dp)) },
+                    trailingIcon = {
+                        if (filterQuery.isNotEmpty()) {
+                            IconButton(onClick = { filterQuery = "" }, modifier = Modifier.size(20.dp)) {
+                                Icon(Icons.Default.Close, contentDescription = "Clear", modifier = Modifier.size(13.dp))
+                            }
+                        }
+                    },
+                    modifier = Modifier
+                        .widthIn(min = 180.dp, max = 280.dp)
+                        .height(44.dp)
+                )
+            }
+        }
+
+        val hScroll = rememberScrollState()
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .horizontalScroll(hScroll)
+        ) {
+            Column(modifier = Modifier.fillMaxHeight()) {
+                // Sticky Header Row
+                Row(
+                    modifier = Modifier
+                        .background(MaterialTheme.colorScheme.primaryContainer)
+                        .padding(vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .width(48.dp)
+                            .padding(6.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("#", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall)
+                    }
+                    for (colIdx in 0 until maxCols) {
+                        val colTitle = headerRow.getOrNull(colIdx)?.ifBlank { "Col ${colIdx + 1}" } ?: "Col ${colIdx + 1}"
+                        Box(
+                            modifier = Modifier
+                                .width(150.dp)
+                                .padding(horizontal = 8.dp, vertical = 6.dp),
+                            contentAlignment = Alignment.CenterStart
+                        ) {
+                            Text(
+                                text = colTitle,
+                                fontWeight = FontWeight.Bold,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                maxLines = 1
+                            )
+                        }
+                    }
+                }
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+                androidx.compose.foundation.lazy.LazyColumn(
+                    modifier = Modifier.fillMaxHeight()
+                ) {
+                    items(dataRows.size) { rowIndex ->
+                        val row = dataRows[rowIndex]
+                        Row(
+                            modifier = Modifier
+                                .background(
+                                    if (rowIndex % 2 == 0) MaterialTheme.colorScheme.surface
+                                    else MaterialTheme.colorScheme.surfaceContainerLow
+                                )
+                                .padding(vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .width(48.dp)
+                                    .padding(6.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "${rowIndex + 1}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
+                            for (colIdx in 0 until maxCols) {
+                                val cell = row.getOrNull(colIdx).orEmpty()
+                                Box(
+                                    modifier = Modifier
+                                        .width(150.dp)
+                                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                                    contentAlignment = Alignment.CenterStart
+                                ) {
+                                    Text(
+                                        text = cell,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        maxLines = 2
+                                    )
+                                }
+                            }
+                        }
+                        HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun parseCsvPreviewLine(line: String, delimiter: Char): List<String> {
+    val cells = mutableListOf<String>()
+    val sb = StringBuilder()
+    var inQuotes = false
+    var i = 0
+    while (i < line.length) {
+        val c = line[i]
+        when {
+            c == '"' -> {
+                if (inQuotes && i + 1 < line.length && line[i + 1] == '"') {
+                    sb.append('"')
+                    i++
+                } else {
+                    inQuotes = !inQuotes
+                }
+            }
+            c == delimiter && !inQuotes -> {
+                cells.add(sb.toString().trim())
+                sb.setLength(0)
+            }
+            else -> sb.append(c)
+        }
+        i++
+    }
+    cells.add(sb.toString().trim())
+    return cells
 }
 
 @Composable

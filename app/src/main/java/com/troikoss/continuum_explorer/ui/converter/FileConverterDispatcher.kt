@@ -35,18 +35,20 @@ object FileConverterDispatcher {
         destinationMode: OutputDestinationMode,
         customFolder: File?
     ): File {
-        val baseParent = sourceFile.parentFile
-            ?: File(
-                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS),
-                "ContinuumSuite"
-            )
+        val fallbackSuiteDir = File(
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS),
+            "ContinuumSuite/Converted"
+        ).apply { if (!exists()) mkdirs() }
+
+        val baseParent = sourceFile.parentFile?.takeIf { it.exists() && it.canWrite() }
+            ?: fallbackSuiteDir
         val dir = when (destinationMode) {
             OutputDestinationMode.CONVERTED_SUBFOLDER -> File(baseParent, "Converted")
             OutputDestinationMode.SAME_AS_SOURCE -> baseParent
-            OutputDestinationMode.CUSTOM_FOLDER -> customFolder ?: File(baseParent, "Converted")
+            OutputDestinationMode.CUSTOM_FOLDER -> customFolder?.takeIf { it.exists() || it.mkdirs() } ?: fallbackSuiteDir
         }
         if (!dir.exists()) dir.mkdirs()
-        return dir
+        return if (dir.exists() && dir.canWrite()) dir else fallbackSuiteDir
     }
 
     fun resolveUniqueOutputFile(

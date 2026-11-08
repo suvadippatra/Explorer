@@ -5,11 +5,11 @@ import android.content.Context
 import android.content.Intent
 import android.media.projection.MediaProjectionManager
 import android.net.Uri
+import android.os.Environment
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -37,7 +37,6 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.troikoss.continuum_explorer.managers.FtpBucketManager
 import com.troikoss.continuum_explorer.managers.FtpHostedMode
 import com.troikoss.continuum_explorer.managers.SettingsManager
@@ -46,15 +45,16 @@ import com.troikoss.continuum_explorer.utils.FileExplorerState
 import com.troikoss.continuum_explorer.utils.QrCodeView
 import kotlinx.coroutines.delay
 import java.io.File
+import kotlin.math.roundToInt
 
 /**
- * Minimalist, Material 3 FTP/HTTP File Sharing & Self-Hosted Website Server Panel.
+ * Minimalist, Material 3 FTP/HTTP File Sharing, Remote Mini-Apps & Self-Hosted Website Server Panel.
  * Features:
- * - Top Heading Bar with Full-Screen Toggle, Live Activity Logs (when running), and QR Code.
- * - Segmented Mode Toggle switching between:
- *   1. FTP & File Sharing Mode (Selected Files/Folders Bucket or Full Storage + FTP/HTTP Portal + Screen Mirroring)
- *   2. Self-Hosted Website Mode (Host a downloaded GitHub web repo folder or specific .html file locally)
- * - Responsive 1-column (mobile) vs 2-column (tablet/desktop) minimalist layout.
+ * - Preserves the 50.dp flush Top Heading Bar with Triple-Line Menu Button, Live Status Dot, Activity Logs, QR Code, and Fullscreen toggle.
+ * - Unifies duplicate upload toggles into a single "Allow Browser & FTP Uploads" control with configurable Upload Destination Folder.
+ * - Supports starting the server with 0 selected files/folders (e.g., for Screen Sharing or Remote Browser Mini-Apps only).
+ * - Admin toggle for "Allow Mini-Apps in Browser" (Markor Studio, Code Studio, CSV Studio, File Converter, Photo Resizer).
+ * - Optional "Enable Live Screen Sharing" admin toggle with FPS (5–30) and JPEG Compression Quality (30%–95%) sliders.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -77,14 +77,17 @@ fun FtpServerSettingsPanel(
     val savedAnonymous by SettingsManager.isFtpAnonymousAllowed
     val savedUsername by SettingsManager.ftpUsername
     val savedPassword by SettingsManager.ftpPassword
-    val savedWritePerm by SettingsManager.ftpWritePermission
     val savedHostedMode by SettingsManager.ftpHostedMode
     val savedHostedPath by SettingsManager.ftpHostedPath
     val savedUploadPass by SettingsManager.ftpUploadPassword
     val savedAllowUpload by SettingsManager.ftpAllowUpload
+    val savedUploadFolder by SettingsManager.ftpUploadFolderPath
+    val savedAllowMiniApps by SettingsManager.ftpAllowMiniApps
 
+    val savedScreenCastEnabled by SettingsManager.screenCastEnabled
     val savedResolution by SettingsManager.screenCastResolution
     val savedFps by SettingsManager.screenCastFps
+    val savedQuality by SettingsManager.screenCastQuality
     val savedRotation by SettingsManager.screenCastRotation
     val savedAudio by SettingsManager.screenCastAudio
 
@@ -94,16 +97,25 @@ fun FtpServerSettingsPanel(
     var usernameInput by remember(savedUsername) { mutableStateOf(savedUsername) }
     var passwordInput by remember(savedPassword) { mutableStateOf(savedPassword) }
     var uploadPasswordInput by remember(savedUploadPass) { mutableStateOf(savedUploadPass) }
-    var allowWebUploads by remember(savedAllowUpload) { mutableStateOf(savedAllowUpload) }
+    var allowUnifiedUploads by remember(savedAllowUpload) { mutableStateOf(savedAllowUpload) }
+    var uploadFolderPath by remember(savedUploadFolder) {
+        mutableStateOf(
+            savedUploadFolder.ifBlank {
+                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS).absolutePath
+            }
+        )
+    }
+    var allowRemoteMiniApps by remember(savedAllowMiniApps) { mutableStateOf(savedAllowMiniApps) }
     var showPassword by remember { mutableStateOf(false) }
     var showUploadPassword by remember { mutableStateOf(false) }
-    var allowWritePermissions by remember(savedWritePerm) { mutableStateOf(savedWritePerm) }
     var hostedMode by remember(savedHostedMode) { mutableStateOf(savedHostedMode) }
     var customFolderPath by remember(savedHostedPath) { mutableStateOf(savedHostedPath) }
 
     // Screen cast form state
+    var screenCastEnabled by remember(savedScreenCastEnabled) { mutableStateOf(savedScreenCastEnabled) }
     var screenResolution by remember(savedResolution) { mutableStateOf(savedResolution) }
     var screenFps by remember(savedFps) { mutableIntStateOf(savedFps) }
+    var screenQuality by remember(savedQuality) { mutableIntStateOf(savedQuality) }
     var screenRotation by remember(savedRotation) { mutableIntStateOf(savedRotation) }
     var screenAudio by remember(savedAudio) { mutableStateOf(savedAudio) }
 
@@ -118,6 +130,7 @@ fun FtpServerSettingsPanel(
     var showQrDialog by remember { mutableStateOf(false) }
     var showLogsDialog by remember { mutableStateOf(false) }
     var showFullPageFilePicker by remember { mutableStateOf(false) }
+    var showUploadFolderPicker by remember { mutableStateOf(false) }
 
     // Screen Cast Launcher
     val mediaProjectionManager = remember(context) {
@@ -128,7 +141,8 @@ fun FtpServerSettingsPanel(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
         if (result.resultCode == Activity.RESULT_OK && result.data != null) {
-            SettingsManager.setScreenCastParams(context, screenResolution, screenFps, screenRotation, screenAudio)
+            SettingsManager.setScreenCastEnabled(context, true)
+            SettingsManager.setScreenCastParams(context, screenResolution, screenFps, screenRotation, screenAudio, screenQuality)
             ContinuumHubService.startScreenCast(context, result.resultCode, result.data!!)
             Toast.makeText(context, "Live Screen Mirroring started", Toast.LENGTH_SHORT).show()
         } else {
@@ -173,12 +187,28 @@ fun FtpServerSettingsPanel(
         SettingsManager.setFtpAnonymousAllowed(context, isAnonymousAccess)
         SettingsManager.setFtpCredentials(context, usernameInput, passwordInput)
         SettingsManager.setFtpUploadPassword(context, uploadPasswordInput)
-        SettingsManager.setFtpAllowUpload(context, allowWebUploads)
-        SettingsManager.setFtpWritePermission(context, allowWritePermissions)
+        SettingsManager.setFtpAllowUpload(context, allowUnifiedUploads)
+        SettingsManager.setFtpUploadFolderPath(context, uploadFolderPath)
+        SettingsManager.setFtpAllowMiniApps(context, allowRemoteMiniApps)
         SettingsManager.setFtpHostedMode(context, hostedMode, customFolderPath)
         if (reloadIfActive && isServerRunning) {
             ContinuumHubService.reloadIfRunning(context)
         }
+    }
+
+    // Upload destination folder picker dialog
+    if (showUploadFolderPicker) {
+        InAppFilePickerDialog(
+            title = "Select Upload Destination Folder",
+            selectFolders = true,
+            initialDirectory = File(uploadFolderPath).takeIf { it.exists() } ?: Environment.getExternalStorageDirectory(),
+            onDismiss = { showUploadFolderPicker = false },
+            onSelected = { folder ->
+                uploadFolderPath = folder.absolutePath
+                SettingsManager.setFtpUploadFolderPath(context, folder.absolutePath)
+                showUploadFolderPicker = false
+            }
+        )
     }
 
     // Full page file picker overlay
@@ -219,7 +249,7 @@ fun FtpServerSettingsPanel(
                 .fillMaxSize()
                 .verticalScroll(scrollState)
         ) {
-            // --- TOP HEADING BAR (Flush under TabBar) ---
+            // --- TOP HEADING BAR (Flush under TabBar - Preserved Design) ---
             Surface(
                 color = MaterialTheme.colorScheme.surfaceContainer,
                 tonalElevation = 1.dp
@@ -292,7 +322,9 @@ fun FtpServerSettingsPanel(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                    .widthIn(max = 1280.dp)
+                    .align(Alignment.CenterHorizontally)
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 // --- SEGMENTED MODE TOGGLE (Minimalist 2-Mode Switcher) ---
@@ -303,11 +335,7 @@ fun FtpServerSettingsPanel(
                         selected = !isWebsiteMode,
                         onClick = {
                             if (isWebsiteMode) {
-                                hostedMode = if (FtpBucketManager.bucketItems.isNotEmpty()) {
-                                    FtpHostedMode.BATCH_FILES
-                                } else {
-                                    FtpHostedMode.FULL_STORAGE
-                                }
+                                hostedMode = FtpHostedMode.BATCH_FILES
                                 SettingsManager.setFtpHostedMode(context, hostedMode, customFolderPath)
                                 ContinuumHubService.reloadIfRunning(context)
                             }
@@ -322,7 +350,7 @@ fun FtpServerSettingsPanel(
                         }
                     ) {
                         Text(
-                            text = "FTP & File Share",
+                            text = "FTP, Portal & Mini-Apps",
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.SemiBold,
                             maxLines = 1,
@@ -384,9 +412,8 @@ fun FtpServerSettingsPanel(
                     }
                 )
 
-                // --- MODE-SPECIFIC CONFIGURATION ---
+                // --- MODE-SPECIFIC MINIMALIST CONFIGURATION ---
                 if (isWebsiteMode) {
-                    // SELF-HOSTED WEBSITE MODE (GitHub Web Repo / Static HTML Folder or File)
                     if (isWideScreen) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -414,19 +441,37 @@ fun FtpServerSettingsPanel(
                                 verticalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
                                 ScreenCastCard(
+                                    screenCastEnabled = screenCastEnabled,
                                     isScreenCasting = isScreenCasting,
                                     screenResolution = screenResolution,
+                                    screenFps = screenFps,
+                                    screenQuality = screenQuality,
                                     screenRotation = screenRotation,
+                                    onEnabledChange = { enabled ->
+                                        screenCastEnabled = enabled
+                                        SettingsManager.setScreenCastEnabled(context, enabled)
+                                        if (!enabled && isScreenCasting) {
+                                            ContinuumHubService.stopScreenCast(context)
+                                        }
+                                    },
                                     onResolutionChange = { res ->
                                         screenResolution = res
-                                        SettingsManager.setScreenCastParams(context, screenResolution, screenFps, screenRotation, screenAudio)
+                                        SettingsManager.setScreenCastParams(context, screenResolution, screenFps, screenRotation, screenAudio, screenQuality)
+                                    },
+                                    onFpsChange = { fps ->
+                                        screenFps = fps
+                                        SettingsManager.setScreenCastParams(context, screenResolution, screenFps, screenRotation, screenAudio, screenQuality)
+                                    },
+                                    onQualityChange = { q ->
+                                        screenQuality = q
+                                        SettingsManager.setScreenCastParams(context, screenResolution, screenFps, screenRotation, screenAudio, screenQuality)
                                     },
                                     onRotationChange = { rot ->
                                         screenRotation = rot
-                                        SettingsManager.setScreenCastParams(context, screenResolution, screenFps, screenRotation, screenAudio)
+                                        SettingsManager.setScreenCastParams(context, screenResolution, screenFps, screenRotation, screenAudio, screenQuality)
                                     },
                                     onStartCast = {
-                                        SettingsManager.setScreenCastParams(context, screenResolution, screenFps, screenRotation, screenAudio)
+                                        SettingsManager.setScreenCastParams(context, screenResolution, screenFps, screenRotation, screenAudio, screenQuality)
                                         screenShareLauncher.launch(mediaProjectionManager.createScreenCaptureIntent())
                                     },
                                     onStopCast = {
@@ -449,19 +494,37 @@ fun FtpServerSettingsPanel(
                             }
                         )
                         ScreenCastCard(
+                            screenCastEnabled = screenCastEnabled,
                             isScreenCasting = isScreenCasting,
                             screenResolution = screenResolution,
+                            screenFps = screenFps,
+                            screenQuality = screenQuality,
                             screenRotation = screenRotation,
+                            onEnabledChange = { enabled ->
+                                screenCastEnabled = enabled
+                                SettingsManager.setScreenCastEnabled(context, enabled)
+                                if (!enabled && isScreenCasting) {
+                                    ContinuumHubService.stopScreenCast(context)
+                                }
+                            },
                             onResolutionChange = { res ->
                                 screenResolution = res
-                                SettingsManager.setScreenCastParams(context, screenResolution, screenFps, screenRotation, screenAudio)
+                                SettingsManager.setScreenCastParams(context, screenResolution, screenFps, screenRotation, screenAudio, screenQuality)
+                            },
+                            onFpsChange = { fps ->
+                                screenFps = fps
+                                SettingsManager.setScreenCastParams(context, screenResolution, screenFps, screenRotation, screenAudio, screenQuality)
+                            },
+                            onQualityChange = { q ->
+                                screenQuality = q
+                                SettingsManager.setScreenCastParams(context, screenResolution, screenFps, screenRotation, screenAudio, screenQuality)
                             },
                             onRotationChange = { rot ->
                                 screenRotation = rot
-                                SettingsManager.setScreenCastParams(context, screenResolution, screenFps, screenRotation, screenAudio)
+                                SettingsManager.setScreenCastParams(context, screenResolution, screenFps, screenRotation, screenAudio, screenQuality)
                             },
                             onStartCast = {
-                                SettingsManager.setScreenCastParams(context, screenResolution, screenFps, screenRotation, screenAudio)
+                                SettingsManager.setScreenCastParams(context, screenResolution, screenFps, screenRotation, screenAudio, screenQuality)
                                 screenShareLauncher.launch(mediaProjectionManager.createScreenCaptureIntent())
                             },
                             onStopCast = {
@@ -470,7 +533,7 @@ fun FtpServerSettingsPanel(
                         )
                     }
                 } else {
-                    // FTP & HTTP FILE SHARING MODE
+                    // FTP, WEB PORTAL & MINI-APPS MODE
                     if (isWideScreen) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -495,20 +558,28 @@ fun FtpServerSettingsPanel(
                                     }
                                 )
 
-                                WebUploadCard(
-                                    allowWebUploads = allowWebUploads,
+                                PortalCapabilitiesAndUploadsCard(
+                                    allowUnifiedUploads = allowUnifiedUploads,
                                     uploadPasswordInput = uploadPasswordInput,
                                     showUploadPassword = showUploadPassword,
+                                    uploadFolderPath = uploadFolderPath,
+                                    allowRemoteMiniApps = allowRemoteMiniApps,
                                     inputShape = inputShape,
-                                    onAllowChange = {
-                                        allowWebUploads = it
+                                    onAllowUploadChange = {
+                                        allowUnifiedUploads = it
                                         SettingsManager.setFtpAllowUpload(context, it)
+                                        if (isServerRunning) ContinuumHubService.reloadIfRunning(context)
                                     },
                                     onPasswordChange = {
                                         uploadPasswordInput = it
                                         SettingsManager.setFtpUploadPassword(context, it)
                                     },
-                                    onToggleShowPass = { showUploadPassword = !showUploadPassword }
+                                    onToggleShowPass = { showUploadPassword = !showUploadPassword },
+                                    onSelectUploadFolder = { showUploadFolderPicker = true },
+                                    onAllowMiniAppsChange = {
+                                        allowRemoteMiniApps = it
+                                        SettingsManager.setFtpAllowMiniApps(context, it)
+                                    }
                                 )
                             }
 
@@ -522,14 +593,12 @@ fun FtpServerSettingsPanel(
                                     usernameInput = usernameInput,
                                     passwordInput = passwordInput,
                                     showPassword = showPassword,
-                                    allowWritePermissions = allowWritePermissions,
                                     inputShape = inputShape,
                                     onPortChange = { portInput = it },
                                     onAnonChange = { isAnonymousAccess = it },
                                     onUserChange = { usernameInput = it },
                                     onPassChange = { passwordInput = it },
                                     onToggleShowPass = { showPassword = !showPassword },
-                                    onAllowWriteChange = { allowWritePermissions = it },
                                     onApplyNetwork = {
                                         saveAllSettings(reloadIfActive = true)
                                         Toast.makeText(
@@ -541,19 +610,37 @@ fun FtpServerSettingsPanel(
                                 )
 
                                 ScreenCastCard(
+                                    screenCastEnabled = screenCastEnabled,
                                     isScreenCasting = isScreenCasting,
                                     screenResolution = screenResolution,
+                                    screenFps = screenFps,
+                                    screenQuality = screenQuality,
                                     screenRotation = screenRotation,
+                                    onEnabledChange = { enabled ->
+                                        screenCastEnabled = enabled
+                                        SettingsManager.setScreenCastEnabled(context, enabled)
+                                        if (!enabled && isScreenCasting) {
+                                            ContinuumHubService.stopScreenCast(context)
+                                        }
+                                    },
                                     onResolutionChange = { res ->
                                         screenResolution = res
-                                        SettingsManager.setScreenCastParams(context, screenResolution, screenFps, screenRotation, screenAudio)
+                                        SettingsManager.setScreenCastParams(context, screenResolution, screenFps, screenRotation, screenAudio, screenQuality)
+                                    },
+                                    onFpsChange = { fps ->
+                                        screenFps = fps
+                                        SettingsManager.setScreenCastParams(context, screenResolution, screenFps, screenRotation, screenAudio, screenQuality)
+                                    },
+                                    onQualityChange = { q ->
+                                        screenQuality = q
+                                        SettingsManager.setScreenCastParams(context, screenResolution, screenFps, screenRotation, screenAudio, screenQuality)
                                     },
                                     onRotationChange = { rot ->
                                         screenRotation = rot
-                                        SettingsManager.setScreenCastParams(context, screenResolution, screenFps, screenRotation, screenAudio)
+                                        SettingsManager.setScreenCastParams(context, screenResolution, screenFps, screenRotation, screenAudio, screenQuality)
                                     },
                                     onStartCast = {
-                                        SettingsManager.setScreenCastParams(context, screenResolution, screenFps, screenRotation, screenAudio)
+                                        SettingsManager.setScreenCastParams(context, screenResolution, screenFps, screenRotation, screenAudio, screenQuality)
                                         screenShareLauncher.launch(mediaProjectionManager.createScreenCaptureIntent())
                                     },
                                     onStopCast = {
@@ -578,20 +665,81 @@ fun FtpServerSettingsPanel(
                             }
                         )
 
+                        PortalCapabilitiesAndUploadsCard(
+                            allowUnifiedUploads = allowUnifiedUploads,
+                            uploadPasswordInput = uploadPasswordInput,
+                            showUploadPassword = showUploadPassword,
+                            uploadFolderPath = uploadFolderPath,
+                            allowRemoteMiniApps = allowRemoteMiniApps,
+                            inputShape = inputShape,
+                            onAllowUploadChange = {
+                                allowUnifiedUploads = it
+                                SettingsManager.setFtpAllowUpload(context, it)
+                                if (isServerRunning) ContinuumHubService.reloadIfRunning(context)
+                            },
+                            onPasswordChange = {
+                                uploadPasswordInput = it
+                                SettingsManager.setFtpUploadPassword(context, it)
+                            },
+                            onToggleShowPass = { showUploadPassword = !showUploadPassword },
+                            onSelectUploadFolder = { showUploadFolderPicker = true },
+                            onAllowMiniAppsChange = {
+                                allowRemoteMiniApps = it
+                                SettingsManager.setFtpAllowMiniApps(context, it)
+                            }
+                        )
+
+                        ScreenCastCard(
+                            screenCastEnabled = screenCastEnabled,
+                            isScreenCasting = isScreenCasting,
+                            screenResolution = screenResolution,
+                            screenFps = screenFps,
+                            screenQuality = screenQuality,
+                            screenRotation = screenRotation,
+                            onEnabledChange = { enabled ->
+                                screenCastEnabled = enabled
+                                SettingsManager.setScreenCastEnabled(context, enabled)
+                                if (!enabled && isScreenCasting) {
+                                    ContinuumHubService.stopScreenCast(context)
+                                }
+                            },
+                            onResolutionChange = { res ->
+                                screenResolution = res
+                                SettingsManager.setScreenCastParams(context, screenResolution, screenFps, screenRotation, screenAudio, screenQuality)
+                            },
+                            onFpsChange = { fps ->
+                                screenFps = fps
+                                SettingsManager.setScreenCastParams(context, screenResolution, screenFps, screenRotation, screenAudio, screenQuality)
+                            },
+                            onQualityChange = { q ->
+                                screenQuality = q
+                                SettingsManager.setScreenCastParams(context, screenResolution, screenFps, screenRotation, screenAudio, screenQuality)
+                            },
+                            onRotationChange = { rot ->
+                                screenRotation = rot
+                                SettingsManager.setScreenCastParams(context, screenResolution, screenFps, screenRotation, screenAudio, screenQuality)
+                            },
+                            onStartCast = {
+                                SettingsManager.setScreenCastParams(context, screenResolution, screenFps, screenRotation, screenAudio, screenQuality)
+                                screenShareLauncher.launch(mediaProjectionManager.createScreenCaptureIntent())
+                            },
+                            onStopCast = {
+                                ContinuumHubService.stopScreenCast(context)
+                            }
+                        )
+
                         NetworkAuthCard(
                             portInput = portInput,
                             isAnonymousAccess = isAnonymousAccess,
                             usernameInput = usernameInput,
                             passwordInput = passwordInput,
                             showPassword = showPassword,
-                            allowWritePermissions = allowWritePermissions,
                             inputShape = inputShape,
                             onPortChange = { portInput = it },
                             onAnonChange = { isAnonymousAccess = it },
                             onUserChange = { usernameInput = it },
                             onPassChange = { passwordInput = it },
                             onToggleShowPass = { showPassword = !showPassword },
-                            onAllowWriteChange = { allowWritePermissions = it },
                             onApplyNetwork = {
                                 saveAllSettings(reloadIfActive = true)
                                 Toast.makeText(
@@ -599,43 +747,6 @@ fun FtpServerSettingsPanel(
                                     if (isServerRunning) "Server reloaded with new settings" else "Settings saved",
                                     Toast.LENGTH_SHORT
                                 ).show()
-                            }
-                        )
-
-                        WebUploadCard(
-                            allowWebUploads = allowWebUploads,
-                            uploadPasswordInput = uploadPasswordInput,
-                            showUploadPassword = showUploadPassword,
-                            inputShape = inputShape,
-                            onAllowChange = {
-                                allowWebUploads = it
-                                SettingsManager.setFtpAllowUpload(context, it)
-                            },
-                            onPasswordChange = {
-                                uploadPasswordInput = it
-                                SettingsManager.setFtpUploadPassword(context, it)
-                            },
-                            onToggleShowPass = { showUploadPassword = !showUploadPassword }
-                        )
-
-                        ScreenCastCard(
-                            isScreenCasting = isScreenCasting,
-                            screenResolution = screenResolution,
-                            screenRotation = screenRotation,
-                            onResolutionChange = { res ->
-                                screenResolution = res
-                                SettingsManager.setScreenCastParams(context, screenResolution, screenFps, screenRotation, screenAudio)
-                            },
-                            onRotationChange = { rot ->
-                                screenRotation = rot
-                                SettingsManager.setScreenCastParams(context, screenResolution, screenFps, screenRotation, screenAudio)
-                            },
-                            onStartCast = {
-                                SettingsManager.setScreenCastParams(context, screenResolution, screenFps, screenRotation, screenAudio)
-                                screenShareLauncher.launch(mediaProjectionManager.createScreenCaptureIntent())
-                            },
-                            onStopCast = {
-                                ContinuumHubService.stopScreenCast(context)
                             }
                         )
                     }
@@ -648,7 +759,6 @@ fun FtpServerSettingsPanel(
 
     // QR Code Dialog
     if (showQrDialog) {
-        val targetQrUrl = if (isWebsiteMode) httpWebUrl else httpWebUrl
         AlertDialog(
             onDismissRequest = { showQrDialog = false },
             title = { Text("Quick Connect QR Code", fontWeight = FontWeight.Bold) },
@@ -664,14 +774,14 @@ fun FtpServerSettingsPanel(
                         modifier = Modifier.padding(4.dp)
                     ) {
                         QrCodeView(
-                            content = targetQrUrl,
+                            content = httpWebUrl,
                             size = 180.dp,
                             darkColor = Color.Black,
                             lightColor = Color.White
                         )
                     }
                     Text(
-                        text = "Web: $httpWebUrl",
+                        text = "Web Portal: $httpWebUrl",
                         style = MaterialTheme.typography.bodySmall,
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Bold,
@@ -857,7 +967,7 @@ private fun ServerMasterStatusCard(
                         text = if (isWebsiteMode) {
                             "Serving static website & assets over local Wi-Fi HTTP"
                         } else {
-                            "Serving FTP daemon & interactive Web Portal over Wi-Fi"
+                            "Serving FTP, Web Portal, Device Telemetry & Remote Mini-Apps (works even with 0 shared files)"
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -873,7 +983,6 @@ private fun ServerMasterStatusCard(
             if (isServerRunning) {
                 HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
 
-                // HTTP Endpoint Row
                 EndpointRow(
                     label = if (isWebsiteMode) "Website URL" else "Web Portal",
                     url = httpWebUrl,
@@ -888,7 +997,6 @@ private fun ServerMasterStatusCard(
                     }
                 )
 
-                // FTP Endpoint Row (Shown in FTP & File Share mode)
                 if (!isWebsiteMode) {
                     EndpointRow(
                         label = "FTP Server",
@@ -993,7 +1101,7 @@ private fun FtpSharedContentCard(
                 FilterChip(
                     selected = isSelectedBucketMode,
                     onClick = { onScopeChange(FtpHostedMode.BATCH_FILES) },
-                    label = { Text("Selected Files / Folders", style = MaterialTheme.typography.labelSmall) },
+                    label = { Text("Selected Items (${bucketItems.size})", style = MaterialTheme.typography.labelSmall) },
                     leadingIcon = {
                         Icon(Icons.Default.Checklist, contentDescription = null, modifier = Modifier.size(15.dp))
                     },
@@ -1019,7 +1127,7 @@ private fun FtpSharedContentCard(
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = if (bucketItems.isEmpty()) {
-                                "No specific items picked yet (serving full storage fallback)"
+                                "0 items selected (Files tab is empty; Screen & Mini-Apps still work)"
                             } else {
                                 "${bucketItems.size} file(s) / folder(s) shared"
                             },
@@ -1104,6 +1212,129 @@ private fun FtpSharedContentCard(
 }
 
 @Composable
+private fun PortalCapabilitiesAndUploadsCard(
+    allowUnifiedUploads: Boolean,
+    uploadPasswordInput: String,
+    showUploadPassword: Boolean,
+    uploadFolderPath: String,
+    allowRemoteMiniApps: Boolean,
+    inputShape: RoundedCornerShape,
+    onAllowUploadChange: (Boolean) -> Unit,
+    onPasswordChange: (String) -> Unit,
+    onToggleShowPass: () -> Unit,
+    onSelectUploadFolder: () -> Unit,
+    onAllowMiniAppsChange: (Boolean) -> Unit
+) {
+    OutlinedCard(
+        shape = RoundedCornerShape(14.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text(
+                "Uploads & Remote Browser Mini-Apps",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
+            )
+
+            // Unified Upload Toggle (Replaces the old duplicate FTP Write + Web Upload switches)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Allow Browser & FTP Uploads", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                    Text(
+                        "Unifies Web Portal multipart uploads and FTP client write access",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(checked = allowUnifiedUploads, onCheckedChange = onAllowUploadChange)
+            }
+
+            if (allowUnifiedUploads) {
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "Upload Destination Folder",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                uploadFolderPath,
+                                style = MaterialTheme.typography.bodySmall,
+                                fontFamily = FontFamily.Monospace,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        TextButton(onClick = onSelectUploadFolder) {
+                            Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Change", style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                }
+
+                OutlinedTextField(
+                    value = uploadPasswordInput,
+                    onValueChange = onPasswordChange,
+                    label = { Text("Upload Password (optional)") },
+                    visualTransformation = if (showUploadPassword) VisualTransformation.None else PasswordVisualTransformation(),
+                    trailingIcon = {
+                        IconButton(onClick = onToggleShowPass) {
+                            Icon(
+                                if (showUploadPassword) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    },
+                    singleLine = true,
+                    shape = inputShape,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+
+            HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
+
+            // Admin Toggle: Allow Mini-Apps Remotely in Browser
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Allow Mini-Apps in Browser", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                    Text(
+                        "Enables remote Markor Notes, Code Studio, CSV Editor & KB Photo/Format Converter in Web Portal",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(checked = allowRemoteMiniApps, onCheckedChange = onAllowMiniAppsChange)
+            }
+        }
+    }
+}
+
+@Composable
 private fun SelfHostedWebsiteTargetCard(
     customFolderPath: String,
     httpWebUrl: String,
@@ -1145,25 +1376,17 @@ private fun SelfHostedWebsiteTargetCard(
             modifier = Modifier.padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "Self-Hosted Website Source",
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                    Text(
-                        text = "Host a local web repository (e.g. from GitHub) or an .html file with CSS/JS assets.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
+            Text(
+                text = "Self-Hosted Website Source",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Text(
+                text = "Host a local web repository (e.g. from GitHub) or an .html file with CSS/JS assets.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
 
             Surface(
                 shape = RoundedCornerShape(10.dp),
@@ -1278,14 +1501,12 @@ private fun NetworkAuthCard(
     usernameInput: String,
     passwordInput: String,
     showPassword: Boolean,
-    allowWritePermissions: Boolean,
     inputShape: RoundedCornerShape,
     onPortChange: (String) -> Unit,
     onAnonChange: (Boolean) -> Unit,
     onUserChange: (String) -> Unit,
     onPassChange: (String) -> Unit,
     onToggleShowPass: () -> Unit,
-    onAllowWriteChange: (Boolean) -> Unit,
     onApplyNetwork: () -> Unit
 ) {
     OutlinedCard(
@@ -1376,83 +1597,22 @@ private fun NetworkAuthCard(
                     )
                 }
             }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text("Allow FTP Write / Upload", style = MaterialTheme.typography.bodyMedium)
-                Switch(checked = allowWritePermissions, onCheckedChange = onAllowWriteChange)
-            }
-        }
-    }
-}
-
-@Composable
-private fun WebUploadCard(
-    allowWebUploads: Boolean,
-    uploadPasswordInput: String,
-    showUploadPassword: Boolean,
-    inputShape: RoundedCornerShape,
-    onAllowChange: (Boolean) -> Unit,
-    onPasswordChange: (String) -> Unit,
-    onToggleShowPass: () -> Unit
-) {
-    OutlinedCard(
-        shape = RoundedCornerShape(14.dp),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Column(
-            modifier = Modifier.padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Text(
-                "Web Portal Upload Security",
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary
-            )
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text("Allow Browser File Uploads", style = MaterialTheme.typography.bodyMedium)
-                Switch(checked = allowWebUploads, onCheckedChange = onAllowChange)
-            }
-
-            if (allowWebUploads) {
-                OutlinedTextField(
-                    value = uploadPasswordInput,
-                    onValueChange = onPasswordChange,
-                    label = { Text("Upload Password (leave blank for none)") },
-                    visualTransformation = if (showUploadPassword) VisualTransformation.None else PasswordVisualTransformation(),
-                    trailingIcon = {
-                        IconButton(onClick = onToggleShowPass) {
-                            Icon(
-                                if (showUploadPassword) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
-                    },
-                    singleLine = true,
-                    shape = inputShape,
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
         }
     }
 }
 
 @Composable
 private fun ScreenCastCard(
+    screenCastEnabled: Boolean,
     isScreenCasting: Boolean,
     screenResolution: String,
+    screenFps: Int,
+    screenQuality: Int,
     screenRotation: Int,
+    onEnabledChange: (Boolean) -> Unit,
     onResolutionChange: (String) -> Unit,
+    onFpsChange: (Int) -> Unit,
+    onQualityChange: (Int) -> Unit,
     onRotationChange: (Int) -> Unit,
     onStartCast: () -> Unit,
     onStopCast: () -> Unit
@@ -1472,74 +1632,127 @@ private fun ScreenCastCard(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        "Live Screen Mirroring",
+                        "Live Screen Sharing (Optional)",
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.primary
                     )
                     Text(
-                        text = if (isScreenCasting) "Streaming live to Web Portal (/screencast)" else "Stream device screen to any browser",
+                        text = if (isScreenCasting) "Streaming live to Web Portal (/screencast.mjpeg)" else "Allow browser visitors to view live device screen",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
 
-                if (!isScreenCasting) {
-                    FilledTonalButton(
-                        onClick = onStartCast,
-                        shape = RoundedCornerShape(10.dp),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
-                    ) {
-                        Icon(Icons.Default.Cast, contentDescription = null, modifier = Modifier.size(15.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Start Mirror", style = MaterialTheme.typography.labelMedium)
-                    }
-                } else {
-                    Button(
-                        onClick = onStopCast,
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
-                        shape = RoundedCornerShape(10.dp),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
-                    ) {
-                        Icon(Icons.Default.CastConnected, contentDescription = null, modifier = Modifier.size(15.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Stop Mirror", style = MaterialTheme.typography.labelMedium)
-                    }
-                }
+                Switch(
+                    checked = screenCastEnabled,
+                    onCheckedChange = onEnabledChange
+                )
             }
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text("Quality", style = MaterialTheme.typography.bodySmall)
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    listOf("1080p", "720p", "480p").forEach { res ->
-                        FilterChip(
-                            selected = screenResolution == res,
-                            onClick = { onResolutionChange(res) },
-                            label = { Text(res, style = MaterialTheme.typography.labelSmall) },
-                            shape = RoundedCornerShape(8.dp)
-                        )
+            if (screenCastEnabled) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = if (isScreenCasting) "Status: Broadcasting Live" else "Status: Ready to Start",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (isScreenCasting) Color(0xFF10B981) else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    if (!isScreenCasting) {
+                        FilledTonalButton(
+                            onClick = onStartCast,
+                            shape = RoundedCornerShape(10.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                        ) {
+                            Icon(Icons.Default.Cast, contentDescription = null, modifier = Modifier.size(15.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Start Screen Share", style = MaterialTheme.typography.labelMedium)
+                        }
+                    } else {
+                        Button(
+                            onClick = onStopCast,
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                            shape = RoundedCornerShape(10.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                        ) {
+                            Icon(Icons.Default.CastConnected, contentDescription = null, modifier = Modifier.size(15.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Stop Sharing", style = MaterialTheme.typography.labelMedium)
+                        }
                     }
                 }
-            }
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text("Orientation", style = MaterialTheme.typography.bodySmall)
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    listOf(0 to "0°", 90 to "90°", 180 to "180°", 270 to "270°").forEach { (deg, label) ->
-                        FilterChip(
-                            selected = screenRotation == deg,
-                            onClick = { onRotationChange(deg) },
-                            label = { Text(label, style = MaterialTheme.typography.labelSmall) },
-                            shape = RoundedCornerShape(8.dp)
-                        )
+                // FPS Control Slider (5 - 30 FPS)
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("Frame Rate (FPS)", style = MaterialTheme.typography.bodySmall)
+                        Text("$screenFps FPS", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                    }
+                    Slider(
+                        value = screenFps.toFloat(),
+                        onValueChange = { onFpsChange(it.roundToInt().coerceIn(5, 30)) },
+                        valueRange = 5f..30f,
+                        steps = 4
+                    )
+                }
+
+                // Frame Compression Quality Slider (30% - 95%)
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("Frame Compression Level (JPEG Quality)", style = MaterialTheme.typography.bodySmall)
+                        Text("$screenQuality%", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                    }
+                    Slider(
+                        value = screenQuality.toFloat(),
+                        onValueChange = { onQualityChange(it.roundToInt().coerceIn(30, 95)) },
+                        valueRange = 30f..95f
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("Resolution", style = MaterialTheme.typography.bodySmall)
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        listOf("1080p", "720p", "480p").forEach { res ->
+                            FilterChip(
+                                selected = screenResolution == res,
+                                onClick = { onResolutionChange(res) },
+                                label = { Text(res, style = MaterialTheme.typography.labelSmall) },
+                                shape = RoundedCornerShape(8.dp)
+                            )
+                        }
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("Orientation", style = MaterialTheme.typography.bodySmall)
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        listOf(0 to "0°", 90 to "90°", 180 to "180°", 270 to "270°").forEach { (deg, label) ->
+                            FilterChip(
+                                selected = screenRotation == deg,
+                                onClick = { onRotationChange(deg) },
+                                label = { Text(label, style = MaterialTheme.typography.labelSmall) },
+                                shape = RoundedCornerShape(8.dp)
+                            )
+                        }
                     }
                 }
             }

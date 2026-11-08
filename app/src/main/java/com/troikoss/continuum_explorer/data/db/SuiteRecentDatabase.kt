@@ -163,19 +163,31 @@ object SuiteRecentDatabase {
     }
 
     fun resolveEditorToolId(file: File): String {
-        return when (file.extension.lowercase()) {
-            "csv", "tsv" -> "csv_editor"
-            "jpg", "jpeg", "png", "webp", "bmp" -> "image_studio"
+        val ext = file.extension.lowercase()
+        return when {
+            ext in setOf("csv", "tsv") -> "csv_editor"
+            ext in setOf("jpg", "jpeg", "png", "webp", "bmp") -> "image_studio"
+            ext in setOf(
+                "kt", "kts", "java", "py", "js", "jsx", "ts", "tsx", "html", "htm", "css", "scss",
+                "json", "xml", "yaml", "yml", "toml", "ini", "conf", "sh", "bash", "c", "cpp", "h",
+                "hpp", "sql", "gradle", "properties", "go", "rs", "dart", "php", "rb", "lua"
+            ) -> "code_studio"
             else -> "text_editor"
         }
     }
 
     fun resolveEditorToolName(file: File): String {
-        return when (file.extension.lowercase()) {
-            "csv", "tsv" -> "CSV & Table Studio"
-            "jpg", "jpeg", "png", "webp", "bmp" -> "PhotoEditor Studio"
-            "md", "markdown" -> "Markdown Studio"
-            else -> "Markor Text & Code Studio"
+        val ext = file.extension.lowercase()
+        return when {
+            ext in setOf("csv", "tsv") -> "CSV & Table Studio"
+            ext in setOf("jpg", "jpeg", "png", "webp", "bmp") -> "PhotoEditor Studio"
+            ext in setOf(
+                "kt", "kts", "java", "py", "js", "jsx", "ts", "tsx", "html", "htm", "css", "scss",
+                "json", "xml", "yaml", "yml", "toml", "ini", "conf", "sh", "bash", "c", "cpp", "h",
+                "hpp", "sql", "gradle", "properties", "go", "rs", "dart", "php", "rb", "lua"
+            ) -> "Code Studio"
+            ext in setOf("md", "markdown") -> "Markor Markdown Studio"
+            else -> "Markor Text Studio"
         }
     }
 }

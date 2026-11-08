@@ -130,9 +130,13 @@ object SettingsManager {
     private const val KEY_FTP_HOSTED_PATH = "ftp_hosted_path"
     private const val KEY_FTP_UPLOAD_PASSWORD = "ftp_upload_password"
     private const val KEY_FTP_ALLOW_UPLOAD = "ftp_allow_upload"
+    private const val KEY_FTP_ALLOW_MINI_APPS = "ftp_allow_mini_apps"
+    private const val KEY_FTP_UPLOAD_FOLDER = "ftp_upload_folder"
 
+    private const val KEY_SCREENCAST_ENABLED = "screencast_enabled"
     private const val KEY_SCREENCAST_RESOLUTION = "screencast_resolution"
     private const val KEY_SCREENCAST_FPS = "screencast_fps"
+    private const val KEY_SCREENCAST_QUALITY = "screencast_quality"
     private const val KEY_SCREENCAST_ROTATION = "screencast_rotation"
     private const val KEY_SCREENCAST_AUDIO = "screencast_audio"
     private const val KEY_BOOKMARKED_FOLDERS = "bookmarked_folders"
@@ -249,11 +253,28 @@ object SettingsManager {
     private val _ftpAllowUpload = mutableStateOf(true)
     val ftpAllowUpload: State<Boolean> = _ftpAllowUpload
 
+    private val _ftpAllowMiniApps = mutableStateOf(true)
+    val ftpAllowMiniApps: State<Boolean> = _ftpAllowMiniApps
+
+    private val _ftpUploadFolderPath = mutableStateOf(
+        java.io.File(
+            android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS),
+            "ExplorerUploads"
+        ).absolutePath
+    )
+    val ftpUploadFolderPath: State<String> = _ftpUploadFolderPath
+
+    private val _screenCastEnabled = mutableStateOf(true)
+    val screenCastEnabled: State<Boolean> = _screenCastEnabled
+
     private val _screenCastResolution = mutableStateOf("720p")
     val screenCastResolution: State<String> = _screenCastResolution
 
-    private val _screenCastFps = mutableIntStateOf(30)
+    private val _screenCastFps = mutableIntStateOf(15)
     val screenCastFps: State<Int> = _screenCastFps
+
+    private val _screenCastQuality = mutableIntStateOf(75)
+    val screenCastQuality: State<Int> = _screenCastQuality
 
     private val _screenCastRotation = mutableIntStateOf(0)
     val screenCastRotation: State<Int> = _screenCastRotation
@@ -378,9 +399,18 @@ object SettingsManager {
         _ftpHostedPath.value = prefs.getString(KEY_FTP_HOSTED_PATH, "") ?: ""
         _ftpUploadPassword.value = prefs.getString(KEY_FTP_UPLOAD_PASSWORD, "admin123") ?: "admin123"
         _ftpAllowUpload.value = prefs.getBoolean(KEY_FTP_ALLOW_UPLOAD, true)
+        _ftpWritePermission.value = _ftpAllowUpload.value
+        _ftpAllowMiniApps.value = prefs.getBoolean(KEY_FTP_ALLOW_MINI_APPS, true)
+        val defaultUploadDir = java.io.File(
+            android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS),
+            "ExplorerUploads"
+        ).absolutePath
+        _ftpUploadFolderPath.value = prefs.getString(KEY_FTP_UPLOAD_FOLDER, defaultUploadDir) ?: defaultUploadDir
 
+        _screenCastEnabled.value = prefs.getBoolean(KEY_SCREENCAST_ENABLED, true)
         _screenCastResolution.value = prefs.getString(KEY_SCREENCAST_RESOLUTION, "720p") ?: "720p"
-        _screenCastFps.value = prefs.getInt(KEY_SCREENCAST_FPS, 30)
+        _screenCastFps.value = prefs.getInt(KEY_SCREENCAST_FPS, 15).coerceIn(5, 30)
+        _screenCastQuality.value = prefs.getInt(KEY_SCREENCAST_QUALITY, 75).coerceIn(30, 95)
         _screenCastRotation.value = prefs.getInt(KEY_SCREENCAST_ROTATION, 0)
         _screenCastAudio.value = prefs.getBoolean(KEY_SCREENCAST_AUDIO, false)
 
@@ -414,20 +444,57 @@ object SettingsManager {
 
     fun setFtpAllowUpload(context: Context, allowed: Boolean) {
         _ftpAllowUpload.value = allowed
+        _ftpWritePermission.value = allowed
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit().putBoolean(KEY_FTP_ALLOW_UPLOAD, allowed).apply()
+        prefs.edit()
+            .putBoolean(KEY_FTP_ALLOW_UPLOAD, allowed)
+            .putBoolean(KEY_FTP_WRITE_PERM, allowed)
+            .apply()
         GlobalEvents.triggerConfigUpdate()
     }
 
-    fun setScreenCastParams(context: Context, resolution: String, fps: Int, rotation: Int, audio: Boolean) {
+    fun setFtpAllowMiniApps(context: Context, allowed: Boolean) {
+        _ftpAllowMiniApps.value = allowed
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putBoolean(KEY_FTP_ALLOW_MINI_APPS, allowed).apply()
+        GlobalEvents.triggerConfigUpdate()
+    }
+
+    fun setFtpUploadFolderPath(context: Context, path: String) {
+        if (path.isBlank()) return
+        _ftpUploadFolderPath.value = path
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putString(KEY_FTP_UPLOAD_FOLDER, path).apply()
+        GlobalEvents.triggerConfigUpdate()
+    }
+
+    fun setScreenCastEnabled(context: Context, enabled: Boolean) {
+        _screenCastEnabled.value = enabled
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putBoolean(KEY_SCREENCAST_ENABLED, enabled).apply()
+        GlobalEvents.triggerConfigUpdate()
+    }
+
+    fun setScreenCastParams(
+        context: Context,
+        resolution: String,
+        fps: Int,
+        rotation: Int,
+        audio: Boolean,
+        quality: Int = _screenCastQuality.value
+    ) {
+        val clampedFps = fps.coerceIn(5, 30)
+        val clampedQuality = quality.coerceIn(30, 95)
         _screenCastResolution.value = resolution
-        _screenCastFps.value = fps
+        _screenCastFps.value = clampedFps
+        _screenCastQuality.value = clampedQuality
         _screenCastRotation.value = rotation
         _screenCastAudio.value = audio
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         prefs.edit()
             .putString(KEY_SCREENCAST_RESOLUTION, resolution)
-            .putInt(KEY_SCREENCAST_FPS, fps)
+            .putInt(KEY_SCREENCAST_FPS, clampedFps)
+            .putInt(KEY_SCREENCAST_QUALITY, clampedQuality)
             .putInt(KEY_SCREENCAST_ROTATION, rotation)
             .putBoolean(KEY_SCREENCAST_AUDIO, audio)
             .apply()

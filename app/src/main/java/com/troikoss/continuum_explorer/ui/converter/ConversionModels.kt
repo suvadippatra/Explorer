@@ -72,6 +72,8 @@ enum class ConversionStatus {
     FAILED
 }
 
+typealias ConversionJobStatus = ConversionStatus
+
 enum class OutputDestinationMode(val title: String, val subtitle: String) {
     CONVERTED_SUBFOLDER("Converted Subfolder", "Saves inside a '/Converted/' folder next to the source file"),
     SAME_AS_SOURCE("Original Folder", "Saves directly alongside the original file"),
@@ -111,14 +113,18 @@ data class ConverterQueueItem(
     val sourceExtension: String,
     val category: ConversionCategory,
     val availableTargets: List<String>,
-    val targetFormat: String,
-    val tuning: ConversionTuningConfig = ConversionTuningConfig(),
-    val status: ConversionStatus = ConversionStatus.IDLE,
-    val progress: Float = 0f,
-    val statusMessage: String = "Ready",
-    val outputFile: File? = null,
-    val errorMessage: String? = null
-)
+    var targetFormat: String,
+    var tuning: ConversionTuningConfig = ConversionTuningConfig(),
+    var status: ConversionStatus = ConversionStatus.IDLE,
+    var progress: Float = 0f,
+    var statusMessage: String = "Ready",
+    var outputFile: File? = null,
+    var errorMessage: String? = null
+) {
+    var statusDetail: String
+        get() = statusMessage
+        set(value) { statusMessage = value }
+}
 
 /**
  * Format compatibility matrix mapping every supported input extension to its category,

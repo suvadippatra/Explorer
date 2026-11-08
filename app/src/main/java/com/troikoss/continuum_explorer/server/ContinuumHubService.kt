@@ -295,9 +295,7 @@ class ContinuumHubService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             var serviceType = ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
             if (isProjection || isScreenCasting) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                    serviceType = serviceType or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
-                }
+                serviceType = serviceType or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
             }
             try {
                 startForeground(NOTIFICATION_ID, notification, serviceType)
@@ -342,11 +340,7 @@ class ContinuumHubService : Service() {
             }
             FtpHostedMode.BATCH_FILES -> {
                 FtpBucketManager.initialize(applicationContext)
-                if (FtpBucketManager.bucketItems.isNotEmpty()) {
-                    Pair(FtpBucketManager.prepareBucketDirectory(applicationContext), null)
-                } else {
-                    Pair(defaultStorage, null)
-                }
+                Pair(FtpBucketManager.prepareBucketDirectory(applicationContext), null)
             }
             FtpHostedMode.FULL_STORAGE -> {
                 Pair(defaultStorage, null)

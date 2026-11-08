@@ -145,31 +145,12 @@ fun VibeAreaScreen(
             }
             return
         }
-        if (descriptor.requiresInitialFileFromDisk) {
-            // PhotoEditor Studio: immediately open file picker to choose an image to edit
-            showOpenFilePicker = true
+        // Open the studio's dedicated minimalist Landing Page (Create New File / Open File to Edit / Recent Studio Files)
+        if (appState != null) {
+            appState.activeEditorToolId = descriptor.id
+            appState.activeEditorToolTitle = descriptor.title
         } else {
-            // Markor Text & Code Studio or CSV & Table Studio: open/create default workspace file directly in editor!
-            try {
-                if (!targetDirectory.exists()) targetDirectory.mkdirs()
-                val fileName = descriptor.defaultNewFileName ?: "QuickNote.md"
-                val file = File(targetDirectory, fileName)
-                val isBrandNew = !file.exists()
-                if (isBrandNew) {
-                    file.createNewFile()
-                    if (file.extension.equals("csv", ignoreCase = true)) {
-                        file.writeText("Column 1,Column 2,Column 3\nItem A,Category 1,100\nItem B,Category 2,250\n")
-                    } else if (file.extension.equals("md", ignoreCase = true)) {
-                        file.writeText("# Quick Note\n\nWrite your markdown, code, or tasks here.\n")
-                    }
-                }
-                openFileDirectlyInEditor(
-                    file = file,
-                    activityType = if (isBrandNew) SuiteActivityType.CREATED else SuiteActivityType.EDITED
-                )
-            } catch (e: Exception) {
-                showCreateFileDialog = true
-            }
+            showOpenFilePicker = true
         }
     }
 
@@ -797,6 +778,83 @@ fun VibeAreaScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 textAlign = TextAlign.Center
                             )
+                        }
+                    }
+                }
+            } else if (isGridView) {
+                val columns = if (isSmallScreen) 2 else 4
+                val chunkedPairs = suiteRecentPairs.chunked(columns)
+                items(chunkedPairs) { rowItems ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        rowItems.forEach { (record, uFile) ->
+                            val relativeTime = remember(record.timestamp) {
+                                DateUtils.getRelativeTimeSpanString(
+                                    record.timestamp,
+                                    System.currentTimeMillis(),
+                                    DateUtils.MINUTE_IN_MILLIS
+                                ).toString()
+                            }
+                            OutlinedCard(
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clickable {
+                                        val f = File(record.absolutePath)
+                                        if (f.exists()) {
+                                            openFileDirectlyInEditor(f, SuiteActivityType.EDITED)
+                                        }
+                                    }
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(12.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(52.dp)
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .background(MaterialTheme.colorScheme.surfaceVariant),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        IconHelper.FileThumbnail(
+                                            file = uFile,
+                                            iconSize = 44.dp,
+                                            modifier = Modifier.size(44.dp)
+                                        )
+                                    }
+                                    Text(
+                                        text = record.fileName,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontWeight = FontWeight.Bold,
+                                        textAlign = TextAlign.Center,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = record.editorToolName,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = "${Formatter.formatFileSize(context, uFile.length)} • $relativeTime",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                        }
+                        repeat(columns - rowItems.size) {
+                            Spacer(modifier = Modifier.weight(1f))
                         }
                     }
                 }

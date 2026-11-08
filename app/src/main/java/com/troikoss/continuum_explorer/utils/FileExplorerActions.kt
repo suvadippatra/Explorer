@@ -77,6 +77,15 @@ fun FileExplorerState.open(item: UniversalFile) {
                 com.troikoss.continuum_explorer.domain.logic.FileOpenCategory.EDITABLE_FILE,
                 com.troikoss.continuum_explorer.domain.logic.FileOpenCategory.PLAYABLE_OR_VIEWABLE_MEDIA -> {
                     if (SettingsManager.shouldOpenWithInternalViewer(item)) {
+                        if (com.troikoss.continuum_explorer.ui.audio.AudioPlayerManager.isAudioFile(item)) {
+                            com.troikoss.continuum_explorer.ui.audio.AudioPlayerManager.playTrack(
+                                context = context,
+                                track = item,
+                                folderCandidates = files.toList(),
+                                initialMode = com.troikoss.continuum_explorer.ui.audio.AudioPlayerDisplayMode.BOTTOM_BAR
+                            )
+                            return
+                        }
                         if (com.troikoss.continuum_explorer.rules.WorkspaceWindowController.openFloatingPanelIfConfigured(
                                 context = context,
                                 title = item.name,

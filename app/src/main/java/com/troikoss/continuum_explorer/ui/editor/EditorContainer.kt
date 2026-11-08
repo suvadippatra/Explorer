@@ -40,10 +40,16 @@ import kotlinx.coroutines.withContext
 fun EditorContainer(
     initialFile: File? = null,
     editorToolId: String? = null,
+    appState: com.troikoss.continuum_explorer.utils.FileExplorerState? = null,
+    onMenuClick: () -> Unit = {},
+    onBackToSuite: () -> Unit = {
+        appState?.activeEditorToolId = null
+        appState?.activeEditorToolTitle = null
+    },
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    var activeFile by remember { mutableStateOf(initialFile) }
+    var activeFile by remember(initialFile) { mutableStateOf(initialFile) }
     var showFileTree by remember { mutableStateOf(false) }
     var fileContent by remember { mutableStateOf("") }
     var binaryBytes by remember { mutableStateOf(byteArrayOf()) }
@@ -51,131 +57,6 @@ fun EditorContainer(
 
     val rootDir = remember(activeFile) {
         activeFile?.parentFile ?: Environment.getExternalStorageDirectory()
-    }
-
-    var showInAppPicker by remember { mutableStateOf(false) }
-    var showCreateFileDialog by remember { mutableStateOf(false) }
-    var newFileNameInput by remember { mutableStateOf("notes.md") }
-
-    if (showInAppPicker) {
-        com.troikoss.continuum_explorer.ui.components.InAppFilePickerDialog(
-            title = "Choose File to Edit",
-            selectFolders = false,
-            initialDirectory = rootDir,
-            onDismiss = { showInAppPicker = false },
-            onSelected = { selectedFile ->
-                activeFile = selectedFile
-                showInAppPicker = false
-            }
-        )
-    }
-
-    // New File Creation Dialog
-    if (showCreateFileDialog) {
-        val extension = remember(newFileNameInput) {
-            newFileNameInput.substringAfterLast('.', "").lowercase()
-        }
-
-        val layoutModeDescription = remember(extension) {
-            when (extension) {
-                "md", "markdown", "mdown" -> "Layout Mode: Markdown Editor (Live Preview & Edit toggle)"
-                "txt", "text", "log" -> "Layout Mode: Plain Text Editor"
-                "csv", "tsv" -> "Layout Mode: CSV Table Editor & Grid View"
-                "todo.txt" -> "Layout Mode: Todo.txt List Editor"
-                "json", "xml", "html", "css", "js", "ts", "kt", "java", "py", "c", "cpp", "sh", "yml", "yaml", "sql", "gradle" ->
-                    "Layout Mode: Code Editor with Syntax Highlighting"
-                else -> "Layout Mode: Text & Code Workspace"
-            }
-        }
-
-        AlertDialog(
-            onDismissRequest = { showCreateFileDialog = false },
-            title = {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Icon(Icons.Default.AddCircleOutline, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                    Text("Create New Text File", fontWeight = FontWeight.Bold)
-                }
-            },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(
-                        "Enter a filename with an extension. The layout mode will adapt automatically.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-
-                    OutlinedTextField(
-                        value = newFileNameInput,
-                        onValueChange = { newFileNameInput = it },
-                        label = { Text("File Name") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-
-                    // Extension Quick Choice Chips
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("Quick Extensions:", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold)
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 2.dp)
-                        ) {
-                            listOf(".txt", ".md", ".json", ".py", ".kt", ".csv").forEach { ext ->
-                                val baseName = newFileNameInput.substringBeforeLast('.', newFileNameInput)
-                                FilterChip(
-                                    selected = newFileNameInput.endsWith(ext, ignoreCase = true),
-                                    onClick = { newFileNameInput = if (baseName.isBlank()) "new_file$ext" else "$baseName$ext" },
-                                    label = { Text(ext, fontSize = 11.sp) }
-                                )
-                            }
-                        }
-                    }
-
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(
-                            text = layoutModeDescription,
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer,
-                            modifier = Modifier.padding(8.dp)
-                        )
-                    }
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        val name = newFileNameInput.trim()
-                        if (name.isNotEmpty()) {
-                            try {
-                                val targetDir = Environment.getExternalStorageDirectory()
-                                var fileToCreate = File(targetDir, name)
-                                if (!fileToCreate.exists()) {
-                                    fileToCreate.createNewFile()
-                                }
-                                activeFile = fileToCreate
-                                showCreateFileDialog = false
-                                Toast.makeText(context, "Created ${fileToCreate.name}", Toast.LENGTH_SHORT).show()
-                            } catch (e: Exception) {
-                                Toast.makeText(context, "Error creating file: ${e.message}", Toast.LENGTH_SHORT).show()
-                            }
-                        }
-                    }
-                ) {
-                    Text("Create & Edit")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showCreateFileDialog = false }) {
-                    Text("Cancel")
-                }
-            }
-        )
     }
 
     // Load content when active file changes with crash safety and max 2MB size cap
@@ -189,7 +70,6 @@ fun EditorContainer(
 
                 withContext(Dispatchers.IO) {
                     if (length > 2 * 1024 * 1024) {
-                        // Truncated safe loading for massive files (>2MB)
                         if (ext in listOf("png", "jpg", "jpeg", "webp", "gif", "mp4", "mp3", "exe", "bin", "so", "class")) {
                             binaryBytes = byteArrayOf()
                             fileContent = ""
@@ -260,33 +140,26 @@ fun EditorContainer(
             )
         }
 
-        // Main Editor Area
+        // Main Studio Area
         Column(modifier = Modifier.weight(1f).fillMaxHeight()) {
             val currentFile = activeFile
             if (currentFile == null) {
-                // Auto-create or open default scratchpad so user never lands on an empty middle screen
-                LaunchedEffect(editorToolId) {
-                    val docsDir = File(
-                        Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS),
-                        "ContinuumSuite"
-                    ).apply { if (!exists()) mkdirs() }
-                    val defaultFile = if (editorToolId == "csv_editor") {
-                        File(docsDir, "Sheet1.csv").apply {
-                            if (!exists()) {
-                                createNewFile()
-                                writeText("Item,Category,Value\nSample 1,General,100\n")
-                            }
+                com.troikoss.continuum_explorer.ui.components.MiniAppLandingScreen(
+                    toolId = editorToolId ?: "text_editor",
+                    appState = appState,
+                    onBackToSuite = onBackToSuite,
+                    onMenuClick = onMenuClick,
+                    onOpenFileInStudio = { chosenFile ->
+                        val ext = chosenFile.extension.lowercase()
+                        if (ext in listOf("jpg", "jpeg", "png", "webp", "bmp") && appState != null) {
+                            appState.openInEditMode = true
+                            appState.viewingFile = chosenFile.toUniversal()
+                        } else {
+                            activeFile = chosenFile
                         }
-                    } else {
-                        File(docsDir, "QuickNote.md").apply {
-                            if (!exists()) {
-                                createNewFile()
-                                writeText("# Quick Note\n\nStart writing here...\n")
-                            }
-                        }
-                    }
-                    activeFile = defaultFile
-                }
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
             } else if (isLoadingFile) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -295,19 +168,16 @@ fun EditorContainer(
                     }
                 }
             } else {
-                // ACTIVE FILE EDITOR DISPATCH
+                // ACTIVE FILE EDITOR DISPATCH (Separated CSV Studio, Code Studio, and Markor Text & Markdown Studio)
                 val ext = currentFile.extension.lowercase()
                 when {
-                    ext in listOf("md", "markdown", "mdown", "mkd", "mkdn", "mdtxt", "mdtext", "adoc", "asciidoc", "org", "rst", "csv", "tsv", "txt", "text", "log") || currentFile.name.lowercase().contains("todo.txt") -> {
-                        com.troikoss.continuum_explorer.ui.editor.text.MarkorTextEngine(
-                            fileName = currentFile.name,
-                            initialContent = fileContent,
-                            onSaveContent = { newContent ->
-                                fileContent = newContent
-                                saveActiveFile()
-                            },
-                            fileRef = currentFile,
-                            onMenuClick = { showFileTree = !showFileTree },
+                    ext in listOf("csv", "tsv") || editorToolId == "csv_editor" -> {
+                        CsvEditorView(
+                            file = currentFile,
+                            content = fileContent,
+                            onContentChange = { fileContent = it },
+                            onSave = { saveActiveFile() },
+                            onMenuClick = onMenuClick,
                             modifier = Modifier.fillMaxSize()
                         )
                     }
@@ -316,12 +186,14 @@ fun EditorContainer(
                         "js", "jsx", "ts", "tsx", "py", "pyw", "c", "cpp", "cc", "cxx", "h", "hpp", "hxx", "sh", "bash", "zsh", "bat", "cmd",
                         "gradle", "properties", "yaml", "yml", "ini", "conf", "toml", "env", "sql", "php", "rb", "go", "rs", "swift", "m", "mm",
                         "r", "lua", "pl", "dart", "cs", "vb", "fs", "asm", "diff", "patch"
-                    ) -> {
+                    ) || editorToolId == "code_studio" -> {
                         CodeEditorView(
                             file = currentFile,
                             content = fileContent,
                             onContentChange = { fileContent = it },
-                            onSave = { saveActiveFile() }
+                            onSave = { saveActiveFile() },
+                            onMenuClick = onMenuClick,
+                            modifier = Modifier.fillMaxSize()
                         )
                     }
                     ext == "pdf" -> {
@@ -330,7 +202,19 @@ fun EditorContainer(
                             modifier = Modifier.fillMaxSize()
                         )
                     }
-                    ext in listOf("png", "jpg", "jpeg", "webp", "gif", "bmp", "svg", "mp4", "mkv", "mp3", "wav", "ogg", "flac", "m4a") -> {
+                    ext in listOf("png", "jpg", "jpeg", "webp", "gif", "bmp", "svg") -> {
+                        if (appState != null) {
+                            com.troikoss.continuum_explorer.ui.components.ViewOnlyFileViewer(
+                                file = currentFile.toUniversal(),
+                                appState = appState,
+                                startInEditMode = true,
+                                onClose = { activeFile = null },
+                                onMenuClick = onMenuClick,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
+                    }
+                    ext in listOf("mp4", "mkv", "mp3", "wav", "ogg", "flac", "m4a") -> {
                         MediaViewer(file = currentFile)
                     }
                     else -> {
@@ -342,7 +226,7 @@ fun EditorContainer(
                                 saveActiveFile()
                             },
                             fileRef = currentFile,
-                            onMenuClick = { showFileTree = !showFileTree },
+                            onMenuClick = onMenuClick,
                             modifier = Modifier.fillMaxSize()
                         )
                     }

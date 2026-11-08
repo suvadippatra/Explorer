@@ -32,6 +32,7 @@ fun CodeEditorView(
     content: String,
     onContentChange: (String) -> Unit,
     onSave: () -> Unit,
+    onMenuClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var textValue by remember(file.absolutePath, content) { mutableStateOf(content) }
@@ -50,15 +51,16 @@ fun CodeEditorView(
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.surface)
     ) {
-        // Toolbar
+        // Unified 50.dp Toolbar with Triple-Line Menu Button on Left
         Surface(
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            tonalElevation = 2.dp
+            tonalElevation = 2.dp,
+            modifier = Modifier.fillMaxWidth().height(50.dp)
         ) {
             Row(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                    .fillMaxSize()
+                    .padding(horizontal = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
@@ -66,9 +68,17 @@ fun CodeEditorView(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
+                    IconButton(onClick = onMenuClick, modifier = Modifier.size(36.dp)) {
+                        Icon(
+                            Icons.Default.Menu,
+                            contentDescription = "Toggle Navigation Sidebar",
+                            tint = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
                     Icon(
                         Icons.Default.Code,
-                        contentDescription = "Code Editor",
+                        contentDescription = "Code Studio",
                         tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(18.dp)
                     )

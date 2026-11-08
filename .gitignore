@@ -18,3 +18,13 @@ local.properties
 markor-master/
 Continuum-Explorer-master/
 PhotoEditor-master/
+.aistudio/
+/.aistudio/
+public/assets/aistudio/
+assets/aistudio/
+*.apk
+*.aab
+*.ap_
+*.dex
+Paste *.txt
+

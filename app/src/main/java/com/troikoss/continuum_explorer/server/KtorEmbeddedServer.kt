@@ -1,8 +1,13 @@
 package com.troikoss.continuum_explorer.server
 
 import android.content.Context
+import android.os.BatteryManager
+import android.os.Build
 import android.os.Environment
+import android.os.StatFs
 import android.util.Log
+import com.troikoss.continuum_explorer.data.db.SuiteActivityType
+import com.troikoss.continuum_explorer.data.db.SuiteRecentDatabase
 import com.troikoss.continuum_explorer.managers.FtpBucketManager
 import com.troikoss.continuum_explorer.managers.FtpHostedMode
 import com.troikoss.continuum_explorer.managers.SettingsManager
@@ -18,8 +23,11 @@ import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import io.ktor.server.websocket.*
 import io.ktor.websocket.*
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.html.*
+import org.json.JSONArray
+import org.json.JSONObject
 import java.io.File
 import java.net.URLDecoder
 import java.net.URLEncoder
@@ -31,13 +39,12 @@ import java.util.Locale
 /**
  * KtorEmbeddedServer
  *
- * Lightweight, Netty-backed Ktor HTTP, Static Website & WebSocket server operating on port 8080.
- * - In Self-Hosted Website Mode (FtpHostedMode.CUSTOM_FOLDER): Serves the selected HTML file or
- *   static web repository (e.g. cloned/downloaded from GitHub) with full relative CSS/JS/media/font
- *   asset resolution and SPA routing fallback.
- * - In FTP & File Share Mode: Serves an interactive, modern, responsive File Hosting Portal optimized
- *   for variable screen sizes and aspect ratios (Grid Cards & Table views, Breadcrumbs, Inline Lightbox
- *   Preview, Drag-and-Drop Uploads, and a Hideable Live Screen Stream Player).
+ * Lightweight, Netty-backed Ktor HTTP, Static Website, MJPEG/WebSocket Screen Stream & Remote Mini-Apps Server on port 8080.
+ * - Supports starting with 0 selected files/folders (empty bucket) so users can host Screen Sharing or Remote Mini-Apps standalone.
+ * - Exposes live host telemetry (Device Name, Battery %, Storage Free/Total) on the web portal and via `/api/device-status`.
+ * - Provides `/api/files` JSON listing for native FTP/HTTP clients (like ExternalFtpViewerPanel).
+ * - Streams live screen via `/screencast.mjpeg` (universal multipart MJPEG), `/screencast` (WebSocket), and `/screencast-frame`.
+ * - Hosts Remote Browser Mini-Apps (`Files`, `Screen`, `Mini-Apps` top sub-navigation tabs) when enabled by admin.
  */
 class KtorEmbeddedServer(
     private val context: Context,
@@ -52,6 +59,40 @@ class KtorEmbeddedServer(
     }
 
     private var engine: ApplicationEngine? = null
+
+    private data class DeviceTelemetry(
+        val deviceName: String,
+        val batteryPercent: Int,
+        val freeBytes: Long,
+        val totalBytes: Long,
+        val freeFormatted: String,
+        val totalFormatted: String
+    )
+
+    private fun readDeviceTelemetry(): DeviceTelemetry {
+        val manufacturer = Build.MANUFACTURER?.replaceFirstChar { it.uppercase() }.orEmpty()
+        val model = Build.MODEL.orEmpty()
+        val devName = if (model.startsWith(manufacturer, ignoreCase = true)) model else "$manufacturer $model".trim()
+
+        val bm = context.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
+        val batteryPct = bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)?.coerceIn(0, 100) ?: 100
+
+        val stat = try {
+            StatFs(Environment.getExternalStorageDirectory().absolutePath)
+        } catch (_: Exception) {
+            null
+        }
+        val freeB = stat?.availableBytes ?: 0L
+        val totalB = stat?.totalBytes ?: 0L
+        return DeviceTelemetry(
+            deviceName = devName.ifBlank { "Android Host" },
+            batteryPercent = batteryPct,
+            freeBytes = freeB,
+            totalBytes = totalB,
+            freeFormatted = formatBytes(freeB),
+            totalFormatted = formatBytes(totalB)
+        )
+    }
 
     fun start() {
         if (engine != null) return
@@ -91,6 +132,7 @@ class KtorEmbeddedServer(
                         val requestedPath = call.parameters["path"]?.let {
                             URLDecoder.decode(it, "UTF-8")
                         }
+                        val initialTab = call.parameters["tab"] ?: "files"
 
                         // If in Self-Hosted Website mode and not explicitly opening ?explorer=true or ?path=...
                         if (hostedMode == FtpHostedMode.CUSTOM_FOLDER && !forceExplorer && requestedPath.isNullOrEmpty()) {
@@ -122,18 +164,18 @@ class KtorEmbeddedServer(
                             effectiveRootDir
                         }
 
-                        val files: List<File> = if (
-                            hostedMode == FtpHostedMode.BATCH_FILES &&
-                            requestedPath.isNullOrEmpty() &&
-                            FtpBucketManager.bucketItems.isNotEmpty()
-                        ) {
-                            FtpBucketManager.bucketItems.filter { it.exists() }.sortedWith(
-                                compareBy({ !it.isDirectory }, { it.name.lowercase() })
-                            )
-                        } else {
-                            currentDir.listFiles()?.sortedWith(
-                                compareBy({ !it.isDirectory }, { it.name.lowercase() })
-                            ) ?: emptyList()
+                        val files: List<File> = when {
+                            hostedMode == FtpHostedMode.BATCH_FILES && requestedPath.isNullOrEmpty() -> {
+                                // Respect 0-selected-files mode: if bucket is empty, return emptyList()!
+                                FtpBucketManager.bucketItems.filter { it.exists() }.sortedWith(
+                                    compareBy({ !it.isDirectory }, { it.name.lowercase() })
+                                )
+                            }
+                            else -> {
+                                currentDir.listFiles()?.sortedWith(
+                                    compareBy({ !it.isDirectory }, { it.name.lowercase() })
+                                ) ?: emptyList()
+                            }
                         }
 
                         ContinuumHubService.addLog(clientIp, "HTTP", "Browsed portal", currentDir.name)
@@ -144,12 +186,61 @@ class KtorEmbeddedServer(
                                 rootDir = effectiveRootDir,
                                 files = files,
                                 isRootView = requestedPath.isNullOrEmpty(),
-                                hasWebsiteEntry = resolvedEntryHtml?.exists() == true
+                                hasWebsiteEntry = resolvedEntryHtml?.exists() == true,
+                                initialTab = initialTab
                             )
                         }
                     }
 
-                    // 2. Direct File Download / Inline Preview Route
+                    // 2. Native JSON File Listing Route (used by ExternalFtpViewerPanel & remote mini-apps)
+                    get("/api/files") {
+                        val requestedPath = call.parameters["path"]?.let {
+                            URLDecoder.decode(it, "UTF-8")
+                        }
+                        val currentDir = if (!requestedPath.isNullOrEmpty()) {
+                            val candidate = File(requestedPath)
+                            if (candidate.exists() && candidate.isDirectory && isAllowedPath(candidate, effectiveRootDir)) {
+                                candidate
+                            } else {
+                                effectiveRootDir
+                            }
+                        } else {
+                            effectiveRootDir
+                        }
+
+                        val files: List<File> = if (hostedMode == FtpHostedMode.BATCH_FILES && requestedPath.isNullOrEmpty()) {
+                            FtpBucketManager.bucketItems.filter { it.exists() }.sortedWith(
+                                compareBy({ !it.isDirectory }, { it.name.lowercase() })
+                            )
+                        } else {
+                            currentDir.listFiles()?.sortedWith(
+                                compareBy({ !it.isDirectory }, { it.name.lowercase() })
+                            ) ?: emptyList()
+                        }
+
+                        val arr = JSONArray()
+                        for (f in files) {
+                            val encoded = URLEncoder.encode(f.absolutePath, "UTF-8")
+                            val obj = JSONObject().apply {
+                                put("name", f.name)
+                                put("path", f.absolutePath)
+                                put("isDirectory", f.isDirectory)
+                                put("sizeBytes", if (f.isDirectory) 0L else f.length())
+                                put("lastModified", f.lastModified())
+                                put("downloadUrl", "/download?file=$encoded")
+                            }
+                            arr.put(obj)
+                        }
+                        val rootObj = JSONObject().apply {
+                            put("currentPath", currentDir.absolutePath)
+                            put("currentName", currentDir.name.ifBlank { "Root" })
+                            put("parentPath", if (requestedPath.isNullOrEmpty()) "" else (currentDir.parentFile?.absolutePath ?: ""))
+                            put("items", arr)
+                        }
+                        call.respondText(rootObj.toString(), ContentType.Application.Json)
+                    }
+
+                    // 3. Direct File Download / Inline Preview Route
                     get("/download") {
                         val clientIp = try { call.request.local.remoteHost } catch (_: Exception) { "Client" }
                         val filePath = call.parameters["file"]?.let {
@@ -187,10 +278,40 @@ class KtorEmbeddedServer(
                         }
                     }
 
-                    // 3A. Live Screen Sharing WebSocket Route
+                    // 4A. Live Screen Sharing MJPEG Stream Route (Universal Browser & Native Client Support)
+                    get("/screencast.mjpeg") {
+                        val screenCast = getScreenCastManager()
+                        if (!SettingsManager.screenCastEnabled.value || screenCast == null || !screenCast.isActive()) {
+                            call.respond(HttpStatusCode.ServiceUnavailable, "Live screen sharing is not active")
+                            return@get
+                        }
+                        call.response.header(HttpHeaders.CacheControl, "no-store, no-cache, must-revalidate, max-age=0")
+                        call.response.header(HttpHeaders.Connection, "keep-alive")
+                        call.respondBytesWriter(
+                            contentType = ContentType.parse("multipart/x-mixed-replace; boundary=frame")
+                        ) {
+                            val boundaryBytes = "--frame\r\nContent-Type: image/jpeg\r\n\r\n".toByteArray()
+                            val tailBytes = "\r\n".toByteArray()
+                            while (true) {
+                                val activeCast = getScreenCastManager()
+                                if (activeCast == null || !activeCast.isActive()) break
+                                val frame = activeCast.getLatestFrame()
+                                if (frame != null) {
+                                    writeFully(boundaryBytes, 0, boundaryBytes.size)
+                                    writeFully(frame, 0, frame.size)
+                                    writeFully(tailBytes, 0, tailBytes.size)
+                                    flush()
+                                }
+                                val fps = SettingsManager.screenCastFps.value.coerceIn(5, 30)
+                                delay((1000L / fps).coerceAtLeast(33L))
+                            }
+                        }
+                    }
+
+                    // 4B. Live Screen Sharing WebSocket Route
                     webSocket("/screencast") {
                         val screenCast = getScreenCastManager()
-                        if (screenCast == null || !screenCast.isActive()) {
+                        if (!SettingsManager.screenCastEnabled.value || screenCast == null || !screenCast.isActive()) {
                             send(Frame.Text("INACTIVE"))
                             close(CloseReason(CloseReason.Codes.CANNOT_ACCEPT, "MediaProjection inactive"))
                             return@webSocket
@@ -218,11 +339,11 @@ class KtorEmbeddedServer(
                         }
                     }
 
-                    // 3B. Live Screen Sharing HTTP Frame Snapshot Fallback Route (works even if WebSockets are blocked)
+                    // 4C. Live Screen Sharing HTTP Frame Snapshot Fallback Route
                     get("/screencast-frame") {
                         val screenCast = getScreenCastManager()
                         val frame = screenCast?.getLatestFrame()
-                        if (screenCast == null || !screenCast.isActive() || frame == null) {
+                        if (!SettingsManager.screenCastEnabled.value || screenCast == null || !screenCast.isActive() || frame == null) {
                             call.respond(HttpStatusCode.NoContent)
                             return@get
                         }
@@ -230,19 +351,97 @@ class KtorEmbeddedServer(
                         call.respondBytes(frame, ContentType.Image.JPEG, HttpStatusCode.OK)
                     }
 
-                    // 4. API Status Route
+                    // 5. API Status & Device Telemetry Route
                     get("/api/status") {
+                        val telemetry = readDeviceTelemetry()
                         val screenCast = getScreenCastManager()
-                        val hasScreencast = screenCast != null && screenCast.isActive()
+                        val hasScreencast = SettingsManager.screenCastEnabled.value && screenCast != null && screenCast.isActive()
                         val activeFtpPort = ContinuumHubService.activeFtpPort
-                        val modeName = hostedMode.name
-                        call.respondText(
-                            """{"status":"online","httpPort":$port,"ftpPort":$activeFtpPort,"mode":"$modeName","screencast":$hasScreencast}""",
-                            ContentType.Application.Json
-                        )
+                        val json = JSONObject().apply {
+                            put("status", "online")
+                            put("httpPort", port)
+                            put("ftpPort", activeFtpPort)
+                            put("mode", hostedMode.name)
+                            put("screencast", hasScreencast)
+                            put("screenCastEnabled", SettingsManager.screenCastEnabled.value)
+                            put("fps", SettingsManager.screenCastFps.value)
+                            put("quality", SettingsManager.screenCastQuality.value)
+                            put("allowMiniApps", SettingsManager.ftpAllowMiniApps.value)
+                            put("allowUploads", SettingsManager.ftpAllowUpload.value)
+                            put("deviceName", telemetry.deviceName)
+                            put("batteryPercent", telemetry.batteryPercent)
+                            put("freeStorage", telemetry.freeFormatted)
+                            put("totalStorage", telemetry.totalFormatted)
+                        }
+                        call.respondText(json.toString(), ContentType.Application.Json)
                     }
 
-                    // 5. Security Password-Gated Multipart File Upload Route
+                    get("/api/device-status") {
+                        val telemetry = readDeviceTelemetry()
+                        val screenCast = getScreenCastManager()
+                        val hasScreencast = SettingsManager.screenCastEnabled.value && screenCast != null && screenCast.isActive()
+                        val json = JSONObject().apply {
+                            put("deviceName", telemetry.deviceName)
+                            put("batteryPercent", telemetry.batteryPercent)
+                            put("freeStorageBytes", telemetry.freeBytes)
+                            put("totalStorageBytes", telemetry.totalBytes)
+                            put("freeStorageFormatted", telemetry.freeFormatted)
+                            put("totalStorageFormatted", telemetry.totalFormatted)
+                            put("screencastActive", hasScreencast)
+                            put("allowMiniApps", SettingsManager.ftpAllowMiniApps.value)
+                            put("allowUploads", SettingsManager.ftpAllowUpload.value)
+                            put("uploadFolder", SettingsManager.ftpUploadFolderPath.value)
+                        }
+                        call.respondText(json.toString(), ContentType.Application.Json)
+                    }
+
+                    // 6. Remote Browser Mini-Apps Save Endpoint (Markor Markdown, Code Studio, CSV Studio)
+                    post("/api/miniapp/save-text") {
+                        if (!SettingsManager.ftpAllowMiniApps.value) {
+                            call.respondText(
+                                """{"success":false,"message":"Remote Mini-Apps are disabled by the host administrator."}""",
+                                ContentType.Application.Json,
+                                HttpStatusCode.Forbidden
+                            )
+                            return@post
+                        }
+                        val clientIp = try { call.request.local.remoteHost } catch (_: Exception) { "Client" }
+                        val bodyText = call.receiveText()
+                        val payload = try { JSONObject(bodyText) } catch (_: Exception) { JSONObject() }
+                        val rawName = payload.optString("fileName", "Remote_Note.md").trim()
+                            .replace("/", "_")
+                            .replace("\\", "_")
+                        val content = payload.optString("content", "")
+
+                        val suiteDir = File(
+                            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS),
+                            "ContinuumSuite"
+                        ).apply { if (!exists()) mkdirs() }
+
+                        val targetFile = File(suiteDir, rawName.ifBlank { "Remote_${System.currentTimeMillis()}.txt" })
+                        targetFile.writeText(content)
+
+                        SuiteRecentDatabase.recordFileActivity(
+                            context = this@KtorEmbeddedServer.context,
+                            file = targetFile,
+                            activityType = SuiteActivityType.CREATED
+                        )
+                        ContinuumHubService.addLog(
+                            clientIp,
+                            "Mini-App",
+                            "Saved ${targetFile.name}",
+                            "${targetFile.length()} B",
+                            bytes = targetFile.length()
+                        )
+                        val resp = JSONObject().apply {
+                            put("success", true)
+                            put("message", "Saved to Host: ${targetFile.absolutePath}")
+                            put("path", targetFile.absolutePath)
+                        }
+                        call.respondText(resp.toString(), ContentType.Application.Json)
+                    }
+
+                    // 7. Unified Multipart File Upload Route (Honors SettingsManager.ftpUploadFolderPath)
                     post("/upload") {
                         val clientIp = try { call.request.local.remoteHost } catch (_: Exception) { "Client" }
                         val expectedPass = SettingsManager.ftpUploadPassword.value
@@ -250,7 +449,7 @@ class KtorEmbeddedServer(
 
                         if (!isUploadAllowed) {
                             call.respondText(
-                                """{"success":false,"message":"Web uploads are disabled on the host device"}""",
+                                """{"success":false,"message":"Uploads are disabled on the host device"}""",
                                 ContentType.Application.Json,
                                 HttpStatusCode.Forbidden
                             )
@@ -258,10 +457,13 @@ class KtorEmbeddedServer(
                         }
 
                         var providedPass = call.request.headers["X-Upload-Password"] ?: ""
-                        var targetFolderPath = if (hostedMode == FtpHostedMode.BATCH_FILES) {
+                        val configuredUploadDir = SettingsManager.ftpUploadFolderPath.value.ifBlank {
                             Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS).absolutePath
+                        }
+                        var targetFolderPath = if (hostedMode == FtpHostedMode.BATCH_FILES) {
+                            configuredUploadDir
                         } else {
-                            effectiveRootDir.absolutePath
+                            configuredUploadDir.ifBlank { effectiveRootDir.absolutePath }
                         }
                         val multipart = call.receiveMultipart()
                         var savedFilesCount = 0
@@ -294,7 +496,7 @@ class KtorEmbeddedServer(
                                             clientIp,
                                             "Upload",
                                             "Uploaded ${saveFile.name}",
-                                            "${saveFile.length() / 1024} KB",
+                                            "${saveFile.length() / 1024} KB -> ${destFolder.name}",
                                             bytes = saveFile.length()
                                         )
                                     }
@@ -313,14 +515,14 @@ class KtorEmbeddedServer(
                             )
                         } else {
                             call.respondText(
-                                """{"success":true,"message":"Uploaded $savedFilesCount file(s)"}""",
+                                """{"success":true,"message":"Uploaded $savedFilesCount file(s) to $targetFolderPath"}""",
                                 ContentType.Application.Json,
                                 HttpStatusCode.OK
                             )
                         }
                     }
 
-                    // 6. Catch-All Static Website Asset Route (CSS, JS, Images, Fonts, Sub-pages & SPA fallback)
+                    // 8. Catch-All Static Website Asset Route
                     get("/{staticPath...}") {
                         val clientIp = try { call.request.local.remoteHost } catch (_: Exception) { "Client" }
                         val segments = call.parameters.getAll("staticPath")?.filter { it.isNotBlank() } ?: emptyList()
@@ -439,12 +641,19 @@ class KtorEmbeddedServer(
         rootDir: File,
         files: List<File>,
         isRootView: Boolean,
-        hasWebsiteEntry: Boolean
+        hasWebsiteEntry: Boolean,
+        initialTab: String
     ) {
+        val telemetry = readDeviceTelemetry()
         val screenCast = getScreenCastManager()
-        val hasScreencast = screenCast != null && screenCast.isActive()
+        val hasScreencast = SettingsManager.screenCastEnabled.value && screenCast != null && screenCast.isActive()
+        val isScreenCastEnabled = SettingsManager.screenCastEnabled.value
         val allowUploads = SettingsManager.ftpAllowUpload.value
+        val allowMiniApps = SettingsManager.ftpAllowMiniApps.value
         val requireUploadPass = SettingsManager.ftpUploadPassword.value.isNotBlank()
+        val uploadFolder = SettingsManager.ftpUploadFolderPath.value.ifBlank {
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS).absolutePath
+        }
         val ftpPort = ContinuumHubService.activeFtpPort
         val dateFormat = SimpleDateFormat("MMM dd, yyyy HH:mm", Locale.US)
 
@@ -453,7 +662,7 @@ class KtorEmbeddedServer(
         val totalBytes = files.filter { !it.isDirectory }.sumOf { it.length() }
 
         head {
-            title("Explorer • File Hosting Portal")
+            title("${telemetry.deviceName} • Explorer Web Portal")
             meta(name = "viewport", content = "width=device-width, initial-scale=1.0, maximum-scale=5.0")
             style {
                 unsafe {
@@ -471,7 +680,6 @@ class KtorEmbeddedServer(
                             --text: #f3f4f6;
                             --text-muted: #94a3b8;
                             --border: #263044;
-                            --danger: #ef4444;
                             --radius: 14px;
                         }
                         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -486,7 +694,7 @@ class KtorEmbeddedServer(
                             line-height: 1.45;
                         }
                         header {
-                            background: rgba(19, 24, 34, 0.88);
+                            background: rgba(19, 24, 34, 0.92);
                             backdrop-filter: blur(14px);
                             border-bottom: 1px solid var(--border);
                             padding: 12px clamp(12px, 2.5vw, 28px);
@@ -506,33 +714,65 @@ class KtorEmbeddedServer(
                             flex-wrap: wrap;
                         }
                         .brand-logo {
-                            width: 34px;
-                            height: 34px;
+                            width: 36px;
+                            height: 36px;
                             border-radius: 10px;
                             background: linear-gradient(135deg, #6366f1, #8b5cf6);
                             display: inline-flex;
                             align-items: center;
                             justify-content: center;
                             font-size: 18px;
-                            box-shadow: 0 4px 14px rgba(99, 102, 241, 0.35);
                         }
                         .brand-title {
-                            font-size: 1.05rem;
+                            font-size: 1rem;
                             font-weight: 700;
-                            letter-spacing: -0.01em;
                             color: #fff;
                         }
-                        .status-pill {
-                            background: var(--accent-soft);
-                            color: var(--accent);
-                            border: 1px solid rgba(16, 185, 129, 0.3);
-                            font-size: 0.73rem;
+                        .telemetry-pills {
+                            display: flex;
+                            align-items: center;
+                            gap: 6px;
+                            flex-wrap: wrap;
+                        }
+                        .pill {
+                            background: var(--surface-elevated);
+                            border: 1px solid var(--border);
+                            color: var(--text);
+                            font-size: 0.74rem;
                             font-weight: 600;
                             padding: 4px 10px;
                             border-radius: 999px;
                             display: inline-flex;
                             align-items: center;
-                            gap: 6px;
+                            gap: 5px;
+                        }
+                        .pill-online {
+                            background: var(--accent-soft);
+                            color: var(--accent);
+                            border-color: rgba(16, 185, 129, 0.3);
+                        }
+                        .nav-tabs {
+                            display: inline-flex;
+                            background: var(--bg);
+                            border: 1px solid var(--border);
+                            border-radius: 11px;
+                            padding: 3px;
+                            gap: 3px;
+                        }
+                        .nav-tab {
+                            background: transparent;
+                            color: var(--text-muted);
+                            border: none;
+                            padding: 7px 14px;
+                            font-size: 0.81rem;
+                            font-weight: 600;
+                            border-radius: 8px;
+                            cursor: pointer;
+                            transition: all 0.15s ease;
+                        }
+                        .nav-tab.active {
+                            background: var(--primary);
+                            color: #fff;
                         }
                         .toolbar {
                             display: flex;
@@ -557,8 +797,6 @@ class KtorEmbeddedServer(
                             font-weight: 600;
                             border-radius: 7px;
                             cursor: pointer;
-                            transition: all 0.16s ease;
-                            white-space: nowrap;
                         }
                         .seg-btn.active {
                             background: var(--primary);
@@ -577,51 +815,27 @@ class KtorEmbeddedServer(
                             display: inline-flex;
                             align-items: center;
                             gap: 6px;
-                            transition: all 0.15s ease;
                             white-space: nowrap;
                         }
-                        .btn:hover {
-                            background: var(--surface-hover);
-                            border-color: #3b4966;
-                            transform: translateY(-1px);
-                        }
+                        .btn:hover { background: var(--surface-hover); }
                         .btn-primary {
                             background: var(--primary);
                             border-color: var(--primary);
                             color: #fff;
                         }
                         .btn-primary:hover { background: var(--primary-hover); }
-                        .btn-cast-active {
-                            background: rgba(16, 185, 129, 0.16);
-                            border-color: rgba(16, 185, 129, 0.45);
-                            color: #34d399;
-                        }
-
-                        /* Main responsive container */
                         .workspace {
                             flex: 1;
                             width: 100%;
-                            max-width: 1680px;
+                            max-width: 1600px;
                             margin: 0 auto;
                             padding: clamp(10px, 2vw, 22px);
-                            display: grid;
-                            gap: 18px;
-                            grid-template-columns: 1fr;
                         }
-                        body[data-layout="desktop"] .workspace.cast-visible {
-                            grid-template-columns: minmax(340px, 42%) 1fr;
-                            align-items: start;
-                        }
-                        @media (max-width: 1024px) {
-                            body[data-layout="desktop"] .workspace.cast-visible {
-                                grid-template-columns: 1fr;
-                            }
-                        }
-
-                        /* Summary Metrics Bar */
+                        .tab-section { display: none; }
+                        .tab-section.active { display: block; }
                         .stats-strip {
                             display: grid;
-                            grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+                            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
                             gap: 10px;
                             margin-bottom: 14px;
                         }
@@ -635,18 +849,16 @@ class KtorEmbeddedServer(
                             justify-content: space-between;
                         }
                         .stat-label {
-                            font-size: 0.74rem;
+                            font-size: 0.72rem;
                             color: var(--text-muted);
                             text-transform: uppercase;
-                            letter-spacing: 0.04em;
                         }
                         .stat-val {
-                            font-size: 1rem;
+                            font-size: 0.96rem;
                             font-weight: 700;
                             color: #fff;
                             margin-top: 2px;
                         }
-
                         .panel {
                             background: var(--surface);
                             border: 1px solid var(--border);
@@ -654,7 +866,6 @@ class KtorEmbeddedServer(
                             overflow: hidden;
                             display: flex;
                             flex-direction: column;
-                            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
                         }
                         .panel-header {
                             padding: 13px 16px;
@@ -673,8 +884,6 @@ class KtorEmbeddedServer(
                             align-items: center;
                             gap: 8px;
                         }
-
-                        /* Interactive Breadcrumbs & Search Subbar */
                         .subbar {
                             padding: 10px 16px;
                             background: #0e131b;
@@ -698,47 +907,30 @@ class KtorEmbeddedServer(
                             padding: 3px 8px;
                             border-radius: 6px;
                             background: rgba(255,255,255,0.04);
-                            transition: all 0.14s;
                         }
-                        .crumb:hover {
-                            color: #fff;
-                            background: var(--primary-soft);
-                        }
-                        .search-box {
-                            display: flex;
-                            align-items: center;
-                            gap: 8px;
-                            flex: 1;
-                            max-width: 340px;
-                            min-width: 200px;
-                        }
-                        .search-input {
+                        .search-input, .editor-textarea, .text-input {
                             width: 100%;
-                            background: var(--surface);
+                            background: var(--bg);
                             border: 1px solid var(--border);
                             color: var(--text);
-                            padding: 7px 12px;
+                            padding: 8px 12px;
                             border-radius: 9px;
-                            font-size: 0.82rem;
+                            font-size: 0.84rem;
                             outline: none;
                         }
-                        .search-input:focus {
-                            border-color: var(--primary);
+                        .editor-textarea {
+                            min-height: 280px;
+                            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+                            resize: vertical;
                         }
-
-                        /* Interactive File Grid View */
                         .file-grid {
                             display: none;
                             grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
                             gap: 12px;
                             padding: 16px;
                         }
-                        body[data-view="grid"] .file-grid {
-                            display: grid;
-                        }
-                        body[data-view="grid"] .table-wrapper {
-                            display: none;
-                        }
+                        body[data-view="grid"] .file-grid { display: grid; }
+                        body[data-view="grid"] .table-wrapper { display: none; }
                         .file-card {
                             background: var(--surface-elevated);
                             border: 1px solid var(--border);
@@ -748,211 +940,136 @@ class KtorEmbeddedServer(
                             flex-direction: column;
                             justify-content: space-between;
                             gap: 12px;
-                            transition: all 0.16s ease;
                         }
-                        .file-card:hover {
-                            background: var(--surface-hover);
-                            border-color: #435375;
-                            transform: translateY(-2px);
-                        }
-                        .card-top {
-                            display: flex;
-                            align-items: flex-start;
-                            gap: 11px;
-                        }
+                        .card-top { display: flex; align-items: flex-start; gap: 11px; }
                         .card-icon {
-                            width: 40px;
-                            height: 40px;
-                            border-radius: 10px;
+                            width: 40px; height: 40px; border-radius: 10px;
                             background: rgba(255,255,255,0.05);
-                            display: flex;
-                            align-items: center;
-                            justify-content: center;
-                            font-size: 20px;
-                            flex-shrink: 0;
+                            display: flex; align-items: center; justify-content: center;
+                            font-size: 20px; flex-shrink: 0;
                         }
                         .card-title {
-                            font-weight: 600;
-                            color: var(--text);
-                            text-decoration: none;
-                            word-break: break-word;
-                            display: -webkit-box;
-                            -webkit-line-clamp: 2;
-                            -webkit-box-orient: vertical;
-                            overflow: hidden;
-                            font-size: 0.86rem;
+                            font-weight: 600; color: var(--text); text-decoration: none;
+                            word-break: break-word; font-size: 0.86rem;
                         }
-                        .card-title:hover { color: #818cf8; }
-                        .card-meta {
-                            font-size: 0.74rem;
-                            color: var(--text-muted);
-                            margin-top: 3px;
-                        }
+                        .card-meta { font-size: 0.74rem; color: var(--text-muted); margin-top: 3px; }
                         .card-actions {
-                            display: flex;
-                            align-items: center;
-                            justify-content: space-between;
-                            gap: 6px;
-                            padding-top: 8px;
-                            border-top: 1px solid rgba(255,255,255,0.06);
+                            display: flex; align-items: center; justify-content: space-between;
+                            gap: 6px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.06);
                         }
                         .badge-ext {
-                            font-size: 0.68rem;
-                            font-weight: 700;
-                            padding: 2px 7px;
-                            border-radius: 5px;
-                            background: rgba(99, 102, 241, 0.15);
-                            color: #a5b4fc;
+                            font-size: 0.68rem; font-weight: 700; padding: 2px 7px;
+                            border-radius: 5px; background: rgba(99, 102, 241, 0.15); color: #a5b4fc;
                         }
-
-                        /* Responsive Table View */
-                        .table-wrapper {
-                            width: 100%;
-                            overflow-x: auto;
-                        }
-                        .file-table {
-                            width: 100%;
-                            border-collapse: collapse;
-                        }
+                        .table-wrapper { width: 100%; overflow-x: auto; }
+                        .file-table { width: 100%; border-collapse: collapse; }
                         .file-table th {
-                            text-align: left;
-                            padding: 11px 16px;
-                            font-size: 0.73rem;
-                            text-transform: uppercase;
-                            letter-spacing: 0.05em;
-                            color: var(--text-muted);
-                            border-bottom: 1px solid var(--border);
-                            background: #10151f;
-                            user-select: none;
+                            text-align: left; padding: 11px 16px; font-size: 0.73rem;
+                            text-transform: uppercase; color: var(--text-muted);
+                            border-bottom: 1px solid var(--border); background: #10151f;
                         }
                         .file-table td {
-                            padding: 11px 16px;
-                            border-bottom: 1px solid rgba(255,255,255,0.05);
-                            vertical-align: middle;
-                        }
-                        .file-table tr:hover td {
-                            background: var(--surface-hover);
+                            padding: 11px 16px; border-bottom: 1px solid rgba(255,255,255,0.05);
                         }
                         .item-link {
-                            color: var(--text);
-                            text-decoration: none;
-                            font-weight: 500;
-                            display: inline-flex;
-                            align-items: center;
-                            gap: 10px;
-                            word-break: break-word;
+                            color: var(--text); text-decoration: none; font-weight: 500;
+                            display: inline-flex; align-items: center; gap: 10px;
                         }
-                        .item-link:hover { color: #818cf8; }
-
-                        @media (max-width: 680px) {
-                            .col-type, .col-date { display: none; }
-                            .file-table th, .file-table td { padding: 10px 12px; }
-                        }
-
-                        /* Hideable Screen Mirroring Stage */
                         .cast-stage {
                             background: #05070b;
-                            min-height: 320px;
-                            max-height: 78vh;
+                            min-height: 360px;
+                            max-height: 80vh;
                             display: flex;
                             align-items: center;
                             justify-content: center;
-                            position: relative;
-                            padding: 12px;
+                            padding: 16px;
                             overflow: hidden;
                         }
-                        #screenCanvas {
+                        #mjpegStreamImg {
                             max-width: 100%;
-                            max-height: 72vh;
-                            width: auto;
-                            height: auto;
-                            border-radius: 8px;
+                            max-height: 74vh;
+                            border-radius: 10px;
                             box-shadow: 0 8px 30px rgba(0,0,0,0.7);
                             transition: transform 0.2s ease;
                         }
-                        .hidden { display: none !important; }
-
-                        /* Modals (Upload & Lightbox Preview) */
+                        .miniapps-grid {
+                            display: grid;
+                            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+                            gap: 16px;
+                        }
                         .modal-backdrop {
-                            position: fixed;
-                            inset: 0;
+                            position: fixed; inset: 0;
                             background: rgba(5, 7, 12, 0.78);
                             backdrop-filter: blur(6px);
-                            display: none;
-                            align-items: center;
-                            justify-content: center;
-                            z-index: 200;
-                            padding: 16px;
+                            display: none; align-items: center; justify-content: center;
+                            z-index: 200; padding: 16px;
                         }
                         .modal {
-                            background: var(--surface);
-                            border: 1px solid var(--border);
-                            border-radius: 16px;
-                            padding: 20px;
-                            width: 100%;
-                            max-width: 480px;
-                            display: flex;
-                            flex-direction: column;
-                            gap: 14px;
-                            box-shadow: 0 20px 50px rgba(0,0,0,0.6);
+                            background: var(--surface); border: 1px solid var(--border);
+                            border-radius: 16px; padding: 20px; width: 100%; max-width: 520px;
+                            display: flex; flex-direction: column; gap: 14px;
                         }
-                        .modal-preview {
-                            max-width: 960px;
-                            max-height: 90vh;
-                        }
+                        .modal-preview { max-width: 960px; max-height: 90vh; }
                         .preview-body {
-                            display: flex;
-                            align-items: center;
-                            justify-content: center;
-                            background: #080a0f;
-                            border-radius: 10px;
-                            overflow: auto;
-                            min-height: 260px;
-                            max-height: 70vh;
-                            padding: 12px;
+                            display: flex; align-items: center; justify-content: center;
+                            background: #080a0f; border-radius: 10px; overflow: auto;
+                            min-height: 260px; max-height: 70vh; padding: 12px;
                         }
-                        .preview-body img, .preview-body video {
-                            max-width: 100%;
-                            max-height: 65vh;
-                            border-radius: 6px;
-                        }
-                        .modal input[type="password"],
-                        .modal input[type="file"] {
-                            background: var(--bg);
-                            border: 1px solid var(--border);
-                            color: var(--text);
-                            padding: 10px;
-                            border-radius: 8px;
-                            width: 100%;
-                        }
+                        .preview-body img, .preview-body video { max-width: 100%; max-height: 65vh; }
                     """)
                 }
             }
         }
         body {
-            attributes["data-layout"] = "desktop"
             attributes["data-view"] = "grid"
 
             header {
                 div("brand") {
                     div("brand-logo") { +"📁" }
                     div {
-                        div("brand-title") { +"Explorer File Portal" }
+                        div("brand-title") { +telemetry.deviceName }
                         div {
-                            style = "font-size: 0.73rem; color: var(--text-muted);"
-                            +"FTP :$ftpPort • HTTP :$port"
+                            style = "font-size: 0.72rem; color: var(--text-muted);"
+                            +"Explorer Portal • FTP :$ftpPort • HTTP :$port"
                         }
                     }
-                    span("status-pill") { +"● Online" }
-                    if (hasWebsiteEntry) {
-                        a(href = "/", classes = "btn") {
-                            +"🌐 Open Hosted Site"
+                    div("telemetry-pills") {
+                        span("pill pill-online") { +"● Online" }
+                        span("pill") {
+                            id = "pillBattery"
+                            +"🔋 ${telemetry.batteryPercent}%"
+                        }
+                        span("pill") {
+                            id = "pillStorage"
+                            +"💾 ${telemetry.freeFormatted} free / ${telemetry.totalFormatted}"
+                        }
+                    }
+                }
+
+                // Top Sub-Navigation Tabs (Files | Screen | Mini-Apps)
+                div("nav-tabs") {
+                    button(classes = "nav-tab active") {
+                        id = "tabBtnFiles"
+                        onClick = "switchPortalTab('files')"
+                        +"🗂️ Files (${files.size})"
+                    }
+                    if (isScreenCastEnabled) {
+                        button(classes = "nav-tab") {
+                            id = "tabBtnScreen"
+                            onClick = "switchPortalTab('screen')"
+                            +if (hasScreencast) "📺 Live Screen (LIVE)" else "📺 Live Screen"
+                        }
+                    }
+                    if (allowMiniApps) {
+                        button(classes = "nav-tab") {
+                            id = "tabBtnMiniApps"
+                            onClick = "switchPortalTab('miniapps')"
+                            +"✨ Mini-Apps"
                         }
                     }
                 }
 
                 div("toolbar") {
-                    // View Mode Switcher (Interactive Cards Grid vs Table View)
                     div("segmented") {
                         button(classes = "seg-btn active") {
                             id = "btnViewGrid"
@@ -965,14 +1082,9 @@ class KtorEmbeddedServer(
                             +"☰ Table"
                         }
                     }
-
-                    // Hideable Screen Mirroring Toggle Button (Hidden by default so file hosting UI is clean)
-                    button(classes = if (hasScreencast) "btn btn-cast-active" else "btn") {
-                        id = "btnToggleCastPlayer"
-                        onClick = "toggleCastPlayer()"
-                        +if (hasScreencast) "📺 Show Live Screen (Active)" else "📺 Show Live Screen"
+                    if (hasWebsiteEntry) {
+                        a(href = "/", classes = "btn") { +"🌐 Hosted Site" }
                     }
-
                     if (allowUploads) {
                         button(classes = "btn btn-primary") {
                             onClick = "openUploadModal()"
@@ -982,87 +1094,49 @@ class KtorEmbeddedServer(
                 }
             }
 
-            // Main Responsive Workspace (Screen Share Player starts HIDDEN by default)
-            div(classes = "workspace") {
-                id = "mainWorkspace"
+            div("workspace") {
+                // --- SUBPAGE 1: FILES TAB ---
+                div("tab-section active") {
+                    id = "sectionFiles"
 
-                // Hideable Live Screen Mirroring Panel
-                div(classes = "panel hidden") {
-                    id = "castPanel"
-                    div("panel-header") {
-                        div("panel-title") {
-                            +"📺 Live Device Screen Stream"
-                            span("status-pill") {
-                                id = "castStatusBadge"
-                                +if (hasScreencast) "LIVE" else "STANDBY"
-                            }
-                        }
-                        div("toolbar") {
-                            button(classes = "btn") {
-                                onClick = "rotateClientCanvas()"
-                                +"↻ Rotate"
-                            }
-                            button(classes = "btn") {
-                                onClick = "fullscreenCanvas()"
-                                +"⛶ Fullscreen"
-                            }
-                            button(classes = "btn") {
-                                onClick = "toggleCastPlayer(false)"
-                                +"✕ Hide Player"
-                            }
-                        }
-                    }
-                    div("cast-stage") {
-                        id = "castStage"
-                        canvas {
-                            id = "screenCanvas"
-                            width = "1280"
-                            height = "720"
-                        }
-                    }
-                }
-
-                // Main File Hosting & Explorer Panel
-                div {
-                    // Summary Metrics Strip
                     div("stats-strip") {
                         div("stat-card") {
                             div {
-                                div("stat-label") { +"Hosted Mode" }
-                                div("stat-val") {
-                                    +when (hostedMode) {
-                                        FtpHostedMode.BATCH_FILES -> "Selected Bucket"
-                                        FtpHostedMode.CUSTOM_FOLDER -> "Website Folder"
-                                        FtpHostedMode.FULL_STORAGE -> "Device Storage"
-                                    }
-                                }
+                                div("stat-label") { +"Host Device" }
+                                div("stat-val") { +telemetry.deviceName }
                             }
-                            span { style = "font-size: 20px;"; +"🗂️" }
+                            span { style = "font-size: 20px;"; +"📱" }
                         }
                         div("stat-card") {
                             div {
-                                div("stat-label") { +"Folders & Files" }
-                                div("stat-val") { +"$folderCount folders • $fileCount files" }
+                                div("stat-label") { +"Battery & Power" }
+                                div("stat-val") { +"${telemetry.batteryPercent}% Charged" }
                             }
-                            span { style = "font-size: 20px;"; +"📊" }
+                            span { style = "font-size: 20px;"; +"🔋" }
                         }
                         div("stat-card") {
                             div {
-                                div("stat-label") { +"Directory Size" }
-                                div("stat-val") { +formatBytes(totalBytes) }
+                                div("stat-label") { +"Available Storage" }
+                                div("stat-val") { +"${telemetry.freeFormatted} / ${telemetry.totalFormatted}" }
                             }
                             span { style = "font-size: 20px;"; +"💾" }
+                        }
+                        div("stat-card") {
+                            div {
+                                div("stat-label") { +"Shared Scope" }
+                                div("stat-val") { +"$folderCount folders • $fileCount files (${formatBytes(totalBytes)})" }
+                            }
+                            span { style = "font-size: 20px;"; +"📊" }
                         }
                     }
 
                     div("panel") {
-                        id = "explorerPanel"
                         div("panel-header") {
                             div("panel-title") {
                                 +when (hostedMode) {
                                     FtpHostedMode.BATCH_FILES -> "Shared Files & Folders (${files.size})"
                                     FtpHostedMode.CUSTOM_FOLDER -> "Website Assets (${currentDir.name})"
-                                    FtpHostedMode.FULL_STORAGE -> currentDir.name.ifBlank { "Storage" }
+                                    FtpHostedMode.FULL_STORAGE -> currentDir.name.ifBlank { "Device Storage" }
                                 }
                             }
                             div("toolbar") {
@@ -1074,9 +1148,7 @@ class KtorEmbeddedServer(
                                     }
                                 }
                                 if (!isRootView) {
-                                    a(href = "/?explorer=true", classes = "btn") {
-                                        +"⌂ Root"
-                                    }
+                                    a(href = "/?explorer=true", classes = "btn") { +"⌂ Root" }
                                 }
                             }
                         }
@@ -1089,24 +1161,23 @@ class KtorEmbeddedServer(
                                     span("crumb") { +currentDir.name }
                                 }
                             }
-                            div("search-box") {
+                            div {
+                                style = "min-width: 220px; max-width: 340px; flex: 1;"
                                 input {
-                                    id = "fileSearchInput"
                                     classes = setOf("search-input")
                                     type = InputType.search
-                                    placeholder = "Search files & folders..."
+                                    placeholder = "Filter files & folders..."
                                     onInput = "filterPortalFiles(this.value)"
                                 }
                             }
                         }
 
-                        // 1. INTERACTIVE GRID CARDS VIEW
+                        // Grid View
                         div("file-grid") {
-                            id = "fileGridContainer"
                             if (files.isEmpty()) {
                                 div {
-                                    style = "grid-column: 1 / -1; text-align: center; padding: 36px; color: var(--text-muted);"
-                                    +"This directory is empty."
+                                    style = "grid-column: 1 / -1; text-align: center; padding: 40px; color: var(--text-muted);"
+                                    +"No files or folders shared in this view. You can still use Live Screen or Remote Mini-Apps from the top tabs."
                                 }
                             } else {
                                 for (file in files) {
@@ -1122,7 +1193,7 @@ class KtorEmbeddedServer(
                                     val safeJsName = file.name.replace("'", "\\'")
                                     val extLower = file.extension.lowercase(Locale.US)
                                     val isPreviewableMedia = !isDir && extLower in listOf(
-                                        "jpg", "jpeg", "png", "gif", "webp", "svg", "mp4", "webm", "mp3", "wav", "ogg"
+                                        "jpg", "jpeg", "png", "gif", "webp", "svg", "mp4", "webm", "mp3", "wav", "ogg", "pdf"
                                     )
 
                                     div("file-card file-item-entry") {
@@ -1136,10 +1207,7 @@ class KtorEmbeddedServer(
                                                         +file.name
                                                     }
                                                 } else if (isPreviewableMedia) {
-                                                    a(
-                                                        classes = "card-title",
-                                                        href = "javascript:void(0)"
-                                                    ) {
+                                                    a(classes = "card-title", href = "javascript:void(0)") {
                                                         attributes["onclick"] = "openPreviewModal('$safeJsName', '/download?file=$encodedPath&inline=true', '$extLower')"
                                                         +file.name
                                                     }
@@ -1157,9 +1225,7 @@ class KtorEmbeddedServer(
                                             span("badge-ext") { +badge }
                                             div("toolbar") {
                                                 if (isDir) {
-                                                    a(classes = "btn", href = "/?explorer=true&path=$encodedPath") {
-                                                        +"Open →"
-                                                    }
+                                                    a(classes = "btn", href = "/?explorer=true&path=$encodedPath") { +"Open →" }
                                                 } else {
                                                     if (isPreviewableMedia) {
                                                         button(classes = "btn") {
@@ -1167,9 +1233,7 @@ class KtorEmbeddedServer(
                                                             +"👁 Preview"
                                                         }
                                                     }
-                                                    a(classes = "btn btn-primary", href = "/download?file=$encodedPath") {
-                                                        +"⬇ Save"
-                                                    }
+                                                    a(classes = "btn btn-primary", href = "/download?file=$encodedPath") { +"⬇ Save" }
                                                 }
                                             }
                                         }
@@ -1178,29 +1242,25 @@ class KtorEmbeddedServer(
                             }
                         }
 
-                        // 2. DETAILED TABLE VIEW
+                        // Table View
                         div("table-wrapper") {
                             table("file-table") {
                                 thead {
                                     tr {
                                         th { +"Name" }
-                                        th(classes = "col-type") { +"Type" }
+                                        th { +"Type" }
                                         th { +"Size" }
-                                        th(classes = "col-date") { +"Modified" }
-                                        th {
-                                            style = "text-align: right;"
-                                            +"Actions"
-                                        }
+                                        th { +"Modified" }
+                                        th { style = "text-align: right;"; +"Actions" }
                                     }
                                 }
                                 tbody {
-                                    id = "fileTableBody"
                                     if (files.isEmpty()) {
                                         tr {
                                             td {
                                                 colSpan = "5"
                                                 style = "text-align: center; padding: 32px; color: var(--text-muted);"
-                                                +"This directory is empty."
+                                                +"No shared files in this folder."
                                             }
                                         }
                                     } else {
@@ -1208,49 +1268,189 @@ class KtorEmbeddedServer(
                                             val encodedPath = URLEncoder.encode(file.absolutePath, "UTF-8")
                                             val isDir = file.isDirectory
                                             val (emoji, badge) = getFileEmojiAndBadge(file)
-                                            tr(classes = "file-row file-item-entry") {
+                                            tr(classes = "file-item-entry") {
                                                 attributes["data-name"] = file.name.lowercase(Locale.US)
                                                 td {
                                                     if (isDir) {
-                                                        a(classes = "item-link", href = "/?explorer=true&path=$encodedPath") {
-                                                            +"$emoji ${file.name}"
-                                                        }
+                                                        a(classes = "item-link", href = "/?explorer=true&path=$encodedPath") { +"$emoji ${file.name}" }
                                                     } else {
-                                                        a(classes = "item-link", href = "/download?file=$encodedPath&inline=true", target = "_blank") {
-                                                            +"$emoji ${file.name}"
-                                                        }
+                                                        a(classes = "item-link", href = "/download?file=$encodedPath&inline=true", target = "_blank") { +"$emoji ${file.name}" }
                                                     }
                                                 }
-                                                td(classes = "col-type") {
-                                                    span("badge-ext") { +badge }
-                                                }
+                                                td { span("badge-ext") { +badge } }
                                                 td {
-                                                    style = "color: var(--text-muted); font-size: 0.82rem;"
-                                                    +if (isDir) {
-                                                        val count = try { file.list()?.size ?: 0 } catch (_: Exception) { 0 }
-                                                        "$count items"
-                                                    } else {
-                                                        formatBytes(file.length())
-                                                    }
+                                                    +if (isDir) "Folder" else formatBytes(file.length())
                                                 }
-                                                td(classes = "col-date") {
-                                                    style = "color: var(--text-muted); font-size: 0.78rem;"
-                                                    +dateFormat.format(Date(file.lastModified()))
-                                                }
+                                                td { +dateFormat.format(Date(file.lastModified())) }
                                                 td {
                                                     style = "text-align: right;"
                                                     if (isDir) {
-                                                        a(classes = "btn", href = "/?explorer=true&path=$encodedPath") {
-                                                            +"Open"
-                                                        }
+                                                        a(classes = "btn", href = "/?explorer=true&path=$encodedPath") { +"Open" }
                                                     } else {
-                                                        a(classes = "btn btn-primary", href = "/download?file=$encodedPath") {
-                                                            +"⬇ Download"
-                                                        }
+                                                        a(classes = "btn btn-primary", href = "/download?file=$encodedPath") { +"⬇ Download" }
                                                     }
                                                 }
                                             }
                                         }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // --- SUBPAGE 2: LIVE SCREEN SHARING TAB ---
+                if (isScreenCastEnabled) {
+                    div("tab-section") {
+                        id = "sectionScreen"
+                        div("panel") {
+                            div("panel-header") {
+                                div("panel-title") {
+                                    +"📺 Live Screen Stream (${telemetry.deviceName})"
+                                    span("pill pill-online") {
+                                        id = "castStatusBadge"
+                                        +if (hasScreencast) "LIVE (${SettingsManager.screenCastFps.value} FPS • ${SettingsManager.screenCastQuality.value}%)" else "STANDBY"
+                                    }
+                                }
+                                div("toolbar") {
+                                    button(classes = "btn") {
+                                        onClick = "rotateScreenStream()"
+                                        +"↻ Rotate 90°"
+                                    }
+                                    button(classes = "btn") {
+                                        onClick = "fullscreenScreenStream()"
+                                        +"⛶ Fullscreen"
+                                    }
+                                    button(classes = "btn btn-primary") {
+                                        onClick = "reloadScreenStream()"
+                                        +"⟳ Reconnect Stream"
+                                    }
+                                }
+                            }
+                            div("cast-stage") {
+                                id = "castStage"
+                                img {
+                                    id = "mjpegStreamImg"
+                                    alt = "Start Screen Sharing in the Explorer app to view live stream"
+                                    src = if (hasScreencast) "/screencast.mjpeg" else ""
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // --- SUBPAGE 3: REMOTE BROWSER MINI-APPS TAB ---
+                if (allowMiniApps) {
+                    div("tab-section") {
+                        id = "sectionMiniApps"
+                        div("miniapps-grid") {
+                            // 1. Remote Markor Markdown / Code / CSV Studio
+                            div("panel") {
+                                div("panel-header") {
+                                    div("panel-title") { +"📝 Remote Markor Text, Code & CSV Studio" }
+                                }
+                                div {
+                                    style = "padding: 16px; display: flex; flex-direction: column; gap: 12px;"
+                                    p {
+                                        style = "color: var(--text-muted); font-size: 0.82rem;"
+                                        +"Create or edit Markdown (.md), Text (.txt), Code (.kt, .py, .js, .json), or CSV (.csv) files directly in your browser and save them to the host device's My Suite workspace."
+                                    }
+                                    input {
+                                        id = "remoteEditorFileName"
+                                        classes = setOf("text-input")
+                                        type = InputType.text
+                                        value = "Remote_Note.md"
+                                        placeholder = "File name (e.g. Note.md, script.py, table.csv)"
+                                    }
+                                    textArea(classes = "editor-textarea") {
+                                        id = "remoteEditorContent"
+                                        placeholder = "# Welcome to Remote Markor Studio\nWrite markdown, code, or CSV rows here..."
+                                    }
+                                    div {
+                                        style = "display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap;"
+                                        span {
+                                            id = "remoteEditorStatus"
+                                            style = "font-size: 0.8rem; color: var(--text-muted);"
+                                            +"Saves to /Documents/ContinuumSuite/"
+                                        }
+                                        div("toolbar") {
+                                            button(classes = "btn") {
+                                                onClick = "downloadRemoteTextLocal()"
+                                                +"⬇ Download to PC/Phone"
+                                            }
+                                            button(classes = "btn btn-primary") {
+                                                onClick = "saveRemoteTextToHost()"
+                                                +"💾 Save to Host Device"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // 2. Remote Student Exam Photo/Signature Exact-KB Resizer & Format Converter
+                            div("panel") {
+                                div("panel-header") {
+                                    div("panel-title") { +"⚡ Remote Photo KB Resizer & Format Converter" }
+                                }
+                                div {
+                                    style = "padding: 16px; display: flex; flex-direction: column; gap: 12px;"
+                                    p {
+                                        style = "color: var(--text-muted); font-size: 0.82rem;"
+                                        +"Resize Passport Photos (20–50 KB, 200×230 px), Signatures (10–20 KB, 140×60 px), or convert images between JPG, PNG, and WEBP right in your browser."
+                                    }
+                                    div("toolbar") {
+                                        button(classes = "btn") {
+                                            onClick = "applyConverterPreset(200, 230, 35)"
+                                            +"🪪 Exam Photo (200×230 • 35 KB)"
+                                        }
+                                        button(classes = "btn") {
+                                            onClick = "applyConverterPreset(140, 60, 15)"
+                                            +"✍️ Signature (140×60 • 15 KB)"
+                                        }
+                                    }
+                                    input {
+                                        id = "remoteConvInput"
+                                        classes = setOf("text-input")
+                                        type = InputType.file
+                                        attributes["accept"] = "image/*"
+                                    }
+                                    div {
+                                        style = "display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px;"
+                                        div {
+                                            label { style = "font-size: 0.74rem; color: var(--text-muted);"; +"Width (px)" }
+                                            input {
+                                                id = "convWidth"
+                                                classes = setOf("text-input")
+                                                type = InputType.number
+                                                value = "200"
+                                            }
+                                        }
+                                        div {
+                                            label { style = "font-size: 0.74rem; color: var(--text-muted);"; +"Height (px)" }
+                                            input {
+                                                id = "convHeight"
+                                                classes = setOf("text-input")
+                                                type = InputType.number
+                                                value = "230"
+                                            }
+                                        }
+                                        div {
+                                            label { style = "font-size: 0.74rem; color: var(--text-muted);"; +"Max Size (KB)" }
+                                            input {
+                                                id = "convTargetKb"
+                                                classes = setOf("text-input")
+                                                type = InputType.number
+                                                value = "35"
+                                            }
+                                        }
+                                    }
+                                    button(classes = "btn btn-primary") {
+                                        onClick = "runBrowserPhotoResizer()"
+                                        +"⚡ Compress & Download Exact-KB Image"
+                                    }
+                                    span {
+                                        id = "remoteConvStatus"
+                                        style = "font-size: 0.8rem; color: var(--accent);"
                                     }
                                 }
                             }
@@ -1275,9 +1475,7 @@ class KtorEmbeddedServer(
                             +"✕ Close"
                         }
                     }
-                    div("preview-body") {
-                        id = "previewModalBody"
-                    }
+                    div("preview-body") { id = "previewModalBody" }
                     div {
                         style = "display: flex; justify-content: flex-end; gap: 8px;"
                         a(classes = "btn btn-primary", href = "#") {
@@ -1295,11 +1493,12 @@ class KtorEmbeddedServer(
                     h3 { +"Upload Files to Host" }
                     p {
                         style = "font-size: 0.8rem; color: var(--text-muted);"
-                        +"Destination: ${currentDir.name}"
+                        +"Destination Folder on Host: $uploadFolder"
                     }
                     if (requireUploadPass) {
                         input {
                             id = "uploadPasswordInput"
+                            classes = setOf("text-input")
                             type = InputType.password
                             placeholder = "Upload Security Password"
                         }
@@ -1312,13 +1511,14 @@ class KtorEmbeddedServer(
                     }
                     input {
                         id = "uploadFilesInput"
+                        classes = setOf("text-input")
                         type = InputType.file
                         multiple = true
                     }
                     input {
                         id = "currentTargetDir"
                         type = InputType.hidden
-                        value = currentDir.absolutePath
+                        value = uploadFolder
                     }
                     div {
                         style = "display: flex; justify-content: flex-end; gap: 8px;"
@@ -1341,48 +1541,55 @@ class KtorEmbeddedServer(
             script {
                 unsafe {
                     raw("""
-                        let canvasRotation = 0;
-                        let isCastVisible = false;
-                        let castSocket = null;
-                        let castPollingTimer = null;
+                        let streamRotation = 0;
+
+                        function switchPortalTab(tab) {
+                            const sections = {
+                                'files': document.getElementById('sectionFiles'),
+                                'screen': document.getElementById('sectionScreen'),
+                                'miniapps': document.getElementById('sectionMiniApps')
+                            };
+                            const btns = {
+                                'files': document.getElementById('tabBtnFiles'),
+                                'screen': document.getElementById('tabBtnScreen'),
+                                'miniapps': document.getElementById('tabBtnMiniApps')
+                            };
+                            Object.keys(sections).forEach(k => {
+                                if (sections[k]) sections[k].classList.toggle('active', k === tab);
+                                if (btns[k]) btns[k].classList.toggle('active', k === tab);
+                            });
+                            if (tab === 'screen') {
+                                reloadScreenStream();
+                            }
+                        }
 
                         function setViewMode(mode) {
                             document.body.setAttribute('data-view', mode);
                             document.getElementById('btnViewGrid').classList.toggle('active', mode === 'grid');
                             document.getElementById('btnViewTable').classList.toggle('active', mode === 'table');
-                            try { localStorage.setItem('explorer_portal_view', mode); } catch (e) {}
                         }
 
-                        // Restore saved view preference
-                        try {
-                            const savedView = localStorage.getItem('explorer_portal_view');
-                            if (savedView === 'table' || savedView === 'grid') {
-                                setViewMode(savedView);
+                        function reloadScreenStream() {
+                            const img = document.getElementById('mjpegStreamImg');
+                            if (img) {
+                                img.src = '/screencast.mjpeg?t=' + Date.now();
                             }
-                        } catch (e) {}
+                        }
 
-                        function toggleCastPlayer(forceState) {
-                            const castPanel = document.getElementById('castPanel');
-                            const ws = document.getElementById('mainWorkspace');
-                            const btn = document.getElementById('btnToggleCastPlayer');
-                            isCastVisible = typeof forceState === 'boolean' ? forceState : !isCastVisible;
+                        function rotateScreenStream() {
+                            streamRotation = (streamRotation + 90) % 360;
+                            const img = document.getElementById('mjpegStreamImg');
+                            if (img) img.style.transform = 'rotate(' + streamRotation + 'deg)';
+                        }
 
-                            if (isCastVisible) {
-                                castPanel.classList.remove('hidden');
-                                ws.classList.add('cast-visible');
-                                btn.innerText = '📺 Hide Live Screen';
-                                startCastConnection();
-                            } else {
-                                castPanel.classList.add('hidden');
-                                ws.classList.remove('cast-visible');
-                                btn.innerText = '📺 Show Live Screen';
-                            }
+                        function fullscreenScreenStream() {
+                            const stage = document.getElementById('castStage');
+                            if (stage && stage.requestFullscreen) stage.requestFullscreen();
                         }
 
                         function filterPortalFiles(query) {
                             const q = (query || '').toLowerCase().trim();
-                            const items = document.querySelectorAll('.file-item-entry');
-                            items.forEach(el => {
+                            document.querySelectorAll('.file-item-entry').forEach(el => {
                                 const name = el.getAttribute('data-name') || '';
                                 el.style.display = (!q || name.includes(q)) ? '' : 'none';
                             });
@@ -1403,53 +1610,36 @@ class KtorEmbeddedServer(
                                 body.appendChild(img);
                             } else if (['mp4','webm'].includes(ext)) {
                                 const vid = document.createElement('video');
-                                vid.src = url;
-                                vid.controls = true;
-                                vid.autoplay = true;
+                                vid.src = url; vid.controls = true; vid.autoplay = true;
                                 body.appendChild(vid);
                             } else if (['mp3','wav','ogg'].includes(ext)) {
                                 const aud = document.createElement('audio');
-                                aud.src = url;
-                                aud.controls = true;
-                                aud.autoplay = true;
+                                aud.src = url; aud.controls = true; aud.autoplay = true;
                                 body.appendChild(aud);
+                            } else if (ext === 'pdf') {
+                                const iframe = document.createElement('iframe');
+                                iframe.src = url;
+                                iframe.style.width = '100%';
+                                iframe.style.height = '65vh';
+                                iframe.style.border = 'none';
+                                body.appendChild(iframe);
                             }
                             modal.style.display = 'flex';
                         }
 
                         function closePreviewModal() {
-                            const modal = document.getElementById('previewModal');
-                            const body = document.getElementById('previewModalBody');
-                            body.innerHTML = '';
-                            modal.style.display = 'none';
+                            document.getElementById('previewModalBody').innerHTML = '';
+                            document.getElementById('previewModal').style.display = 'none';
                         }
 
-                        function rotateClientCanvas() {
-                            canvasRotation = (canvasRotation + 90) % 360;
-                            const canvas = document.getElementById('screenCanvas');
-                            if (canvas) {
-                                canvas.style.transform = 'rotate(' + canvasRotation + 'deg)';
-                            }
-                        }
-
-                        function fullscreenCanvas() {
-                            const stage = document.getElementById('castStage');
-                            if (stage && stage.requestFullscreen) {
-                                stage.requestFullscreen();
-                            }
-                        }
-
-                        function openUploadModal() {
-                            document.getElementById('uploadModal').style.display = 'flex';
-                        }
+                        function openUploadModal() { document.getElementById('uploadModal').style.display = 'flex'; }
                         function closeUploadModal() {
                             document.getElementById('uploadModal').style.display = 'none';
                             document.getElementById('uploadStatusNotice').innerText = '';
                         }
 
                         async function submitFileUpload() {
-                            const passEl = document.getElementById('uploadPasswordInput');
-                            const pass = passEl ? passEl.value : '';
+                            const pass = (document.getElementById('uploadPasswordInput') || {}).value || '';
                             const filesInput = document.getElementById('uploadFilesInput');
                             const targetDir = document.getElementById('currentTargetDir').value;
                             const notice = document.getElementById('uploadStatusNotice');
@@ -1458,17 +1648,14 @@ class KtorEmbeddedServer(
                                 alert('Select at least one file to upload.');
                                 return;
                             }
-
                             const formData = new FormData();
                             formData.append('password', pass);
                             formData.append('targetDir', targetDir);
                             for (let i = 0; i < filesInput.files.length; i++) {
                                 formData.append('file_' + i, filesInput.files[i]);
                             }
-
                             notice.innerText = 'Uploading...';
                             notice.style.color = '#fbbf24';
-
                             try {
                                 const res = await fetch('/upload', { method: 'POST', body: formData });
                                 const data = await res.json();
@@ -1486,85 +1673,89 @@ class KtorEmbeddedServer(
                             }
                         }
 
-                        function drawBlobToCanvas(blob) {
-                            const canvas = document.getElementById('screenCanvas');
-                            const ctx = canvas ? canvas.getContext('2d') : null;
-                            if (!canvas || !ctx) return;
-                            const img = new Image();
-                            const url = URL.createObjectURL(blob);
-                            img.onload = function() {
-                                if (canvas.width !== img.width || canvas.height !== img.height) {
-                                    canvas.width = img.width;
-                                    canvas.height = img.height;
-                                }
-                                ctx.drawImage(img, 0, 0);
-                                URL.revokeObjectURL(url);
-                            };
-                            img.src = url;
+                        async function saveRemoteTextToHost() {
+                            const fileName = document.getElementById('remoteEditorFileName').value || 'Remote_Note.md';
+                            const content = document.getElementById('remoteEditorContent').value || '';
+                            const status = document.getElementById('remoteEditorStatus');
+                            status.innerText = 'Saving to host...';
+                            try {
+                                const res = await fetch('/api/miniapp/save-text', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ fileName, content })
+                                });
+                                const data = await res.json();
+                                status.innerText = data.message || 'Saved!';
+                                status.style.color = data.success ? '#10b981' : '#ef4444';
+                            } catch (e) {
+                                status.innerText = 'Save failed: ' + e.message;
+                                status.style.color = '#ef4444';
+                            }
                         }
 
-                        function startHttpSnapshotFallback() {
-                            if (castPollingTimer) return;
-                            const badge = document.getElementById('castStatusBadge');
-                            castPollingTimer = setInterval(async () => {
-                                if (!isCastVisible) return;
-                                try {
-                                    const res = await fetch('/screencast-frame?t=' + Date.now(), { cache: 'no-store' });
-                                    if (res.status === 200) {
-                                        const blob = await res.blob();
-                                        drawBlobToCanvas(blob);
-                                        if (badge) {
-                                            badge.innerText = 'LIVE STREAM';
-                                            badge.style.color = '#10b981';
-                                        }
-                                    } else if (badge) {
-                                        badge.innerText = 'STANDBY (Start Mirroring in App)';
-                                    }
-                                } catch (e) {}
-                            }, 160);
+                        function downloadRemoteTextLocal() {
+                            const fileName = document.getElementById('remoteEditorFileName').value || 'Remote_Note.md';
+                            const content = document.getElementById('remoteEditorContent').value || '';
+                            const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+                            const a = document.createElement('a');
+                            a.href = URL.createObjectURL(blob);
+                            a.download = fileName;
+                            a.click();
                         }
 
-                        function startCastConnection() {
-                            if (castSocket && (castSocket.readyState === WebSocket.OPEN || castSocket.readyState === WebSocket.CONNECTING)) {
+                        function applyConverterPreset(w, h, kb) {
+                            document.getElementById('convWidth').value = w;
+                            document.getElementById('convHeight').value = h;
+                            document.getElementById('convTargetKb').value = kb;
+                        }
+
+                        async function runBrowserPhotoResizer() {
+                            const input = document.getElementById('remoteConvInput');
+                            const status = document.getElementById('remoteConvStatus');
+                            if (!input.files || !input.files[0]) {
+                                alert('Please choose an image file first.');
                                 return;
                             }
-                            const badge = document.getElementById('castStatusBadge');
-                            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-                            const wsUrl = protocol + '//' + window.location.host + '/screencast';
+                            const targetW = parseInt(document.getElementById('convWidth').value || '200', 10);
+                            const targetH = parseInt(document.getElementById('convHeight').value || '230', 10);
+                            const maxKb = parseInt(document.getElementById('convTargetKb').value || '35', 10);
+                            const file = input.files[0];
 
-                            try {
-                                castSocket = new WebSocket(wsUrl);
-                                castSocket.binaryType = 'arraybuffer';
+                            const img = new Image();
+                            img.onload = async function() {
+                                const canvas = document.createElement('canvas');
+                                canvas.width = targetW;
+                                canvas.height = targetH;
+                                const ctx = canvas.getContext('2d');
+                                ctx.fillStyle = '#FFFFFF';
+                                ctx.fillRect(0, 0, targetW, targetH);
+                                ctx.drawImage(img, 0, 0, targetW, targetH);
 
-                                castSocket.onopen = function() {
-                                    if (badge) {
-                                        badge.innerText = 'LIVE STREAM';
-                                        badge.style.color = '#10b981';
+                                let low = 0.1, high = 0.95, bestBlob = null;
+                                for (let i = 0; i < 7; i++) {
+                                    const mid = (low + high) / 2;
+                                    const blob = await new Promise(r => canvas.toBlob(r, 'image/jpeg', mid));
+                                    if (blob.size <= maxKb * 1024) {
+                                        bestBlob = blob;
+                                        low = mid;
+                                    } else {
+                                        high = mid;
                                     }
-                                };
-
-                                castSocket.onmessage = function(ev) {
-                                    if (typeof ev.data === 'string') {
-                                        if (ev.data === 'INACTIVE' && badge) {
-                                            badge.innerText = 'STANDBY (Start Mirroring in App)';
-                                        }
-                                        return;
-                                    }
-                                    const blob = new Blob([ev.data], { type: 'image/jpeg' });
-                                    drawBlobToCanvas(blob);
-                                };
-
-                                castSocket.onerror = function() {
-                                    startHttpSnapshotFallback();
-                                };
-
-                                castSocket.onclose = function() {
-                                    startHttpSnapshotFallback();
-                                };
-                            } catch (e) {
-                                startHttpSnapshotFallback();
-                            }
+                                }
+                                if (!bestBlob) {
+                                    bestBlob = await new Promise(r => canvas.toBlob(r, 'image/jpeg', 0.1));
+                                }
+                                const a = document.createElement('a');
+                                a.href = URL.createObjectURL(bestBlob);
+                                a.download = 'Resized_' + Math.round(bestBlob.size / 1024) + 'KB_' + file.name.replace(/\.[^/.]+$/, "") + '.jpg';
+                                a.click();
+                                status.innerText = 'Done! Output size: ' + (bestBlob.size / 1024).toFixed(1) + ' KB (' + targetW + '×' + targetH + ' px)';
+                            };
+                            img.src = URL.createObjectURL(file);
                         }
+
+                        if ('${initialTab}' === 'screen') switchPortalTab('screen');
+                        else if ('${initialTab}' === 'miniapps') switchPortalTab('miniapps');
                     """)
                 }
             }

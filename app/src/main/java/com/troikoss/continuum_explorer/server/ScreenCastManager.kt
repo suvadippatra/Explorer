@@ -99,9 +99,7 @@ class ScreenCastManager(
             }
 
             val resSetting = com.troikoss.continuum_explorer.managers.SettingsManager.screenCastResolution.value
-            val targetFps = com.troikoss.continuum_explorer.managers.SettingsManager.screenCastFps.value
-            val rotationDegrees = com.troikoss.continuum_explorer.managers.SettingsManager.screenCastRotation.value
-            val frameIntervalMs = (1000L / targetFps.coerceIn(5, 30)).coerceAtLeast(33L)
+            val initialFps = com.troikoss.continuum_explorer.managers.SettingsManager.screenCastFps.value.coerceIn(5, 30)
 
             var width = metrics.widthPixels.coerceAtLeast(360)
             var height = metrics.heightPixels.coerceAtLeast(640)
@@ -127,7 +125,7 @@ class ScreenCastManager(
             width = (width / 2) * 2
             height = (height / 2) * 2
 
-            Log.i(TAG, "Starting screen capture: ${width}x${height} @ ${targetFps}fps, rot=$rotationDegrees")
+            Log.i(TAG, "Starting screen capture: ${width}x${height} @ ${initialFps}fps")
 
             val reader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2)
             imageReader = reader
@@ -149,6 +147,10 @@ class ScreenCastManager(
                 while (isActive && isStreaming) {
                     val startTime = System.currentTimeMillis()
                     val activeReader = imageReader ?: break
+                    val liveFps = com.troikoss.continuum_explorer.managers.SettingsManager.screenCastFps.value.coerceIn(5, 30)
+                    val frameIntervalMs = (1000L / liveFps).coerceAtLeast(33L)
+                    val rotationDegrees = com.troikoss.continuum_explorer.managers.SettingsManager.screenCastRotation.value
+                    val jpegQuality = com.troikoss.continuum_explorer.managers.SettingsManager.screenCastQuality.value.coerceIn(30, 95)
 
                     try {
                         val image = activeReader.acquireLatestImage()
@@ -192,7 +194,7 @@ class ScreenCastManager(
                                 }
 
                                 val stream = ByteArrayOutputStream(65536)
-                                cleanBitmap.compress(Bitmap.CompressFormat.JPEG, 72, stream)
+                                cleanBitmap.compress(Bitmap.CompressFormat.JPEG, jpegQuality, stream)
                                 val jpegBytes = stream.toByteArray()
 
                                 if (cleanBitmap != sourceBmp) {

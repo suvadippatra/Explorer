@@ -131,10 +131,11 @@ fun ViewOnlyFileViewer(
         }
     }
 
-    // If in Edit Mode, delegate directly to MarkorTextEngine or NativeImageViewerEditor
+    // If in Edit Mode, delegate directly to CSV Studio, Code Studio, Markor Studio, or PhotoEditor Studio
     if (isEditing) {
+        val localEditFile = currentFile.fileRef ?: (currentFile.absolutePath.takeIf { it.startsWith("/") }?.let { File(it) })
         LaunchedEffect(currentFile.absolutePath) {
-            currentFile.fileRef?.let { f ->
+            localEditFile?.let { f ->
                 com.troikoss.continuum_explorer.data.db.SuiteRecentDatabase.recordFileActivity(
                     context = context,
                     file = f,
@@ -143,11 +144,53 @@ fun ViewOnlyFileViewer(
             }
         }
         when {
+            ext in listOf("csv", "tsv") && localEditFile != null -> {
+                var csvContent by remember(localEditFile.absolutePath) {
+                    mutableStateOf(runCatching { localEditFile.readText() }.getOrDefault(""))
+                }
+                com.troikoss.continuum_explorer.ui.editor.CsvEditorView(
+                    file = localEditFile,
+                    content = csvContent,
+                    onContentChange = { csvContent = it },
+                    onSave = {
+                        runCatching {
+                            localEditFile.writeText(csvContent)
+                            Toast.makeText(context, "Saved ${localEditFile.name}", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    onMenuClick = onMenuClick,
+                    modifier = modifier.fillMaxSize()
+                )
+                return
+            }
+            ext in listOf(
+                "kt", "kts", "java", "py", "js", "jsx", "ts", "tsx", "html", "htm", "css", "scss",
+                "json", "xml", "yaml", "yml", "toml", "ini", "conf", "sh", "bash", "c", "cpp", "h",
+                "hpp", "sql", "gradle", "properties", "go", "rs", "dart", "php", "rb", "lua"
+            ) && localEditFile != null -> {
+                var codeContent by remember(localEditFile.absolutePath) {
+                    mutableStateOf(runCatching { localEditFile.readText() }.getOrDefault(""))
+                }
+                com.troikoss.continuum_explorer.ui.editor.CodeEditorView(
+                    file = localEditFile,
+                    content = codeContent,
+                    onContentChange = { codeContent = it },
+                    onSave = {
+                        runCatching {
+                            localEditFile.writeText(codeContent)
+                            Toast.makeText(context, "Saved ${localEditFile.name}", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    onMenuClick = onMenuClick,
+                    modifier = modifier.fillMaxSize()
+                )
+                return
+            }
             isText -> {
                 MarkorTextEngine(
                     file = currentFile,
                     appState = appState,
-                    onMenuClick = { handleExitEditMode() },
+                    onMenuClick = onMenuClick,
                     modifier = modifier.fillMaxSize()
                 )
                 return
@@ -156,7 +199,7 @@ fun ViewOnlyFileViewer(
                 NativeImageViewerEditor(
                     file = currentFile,
                     appState = appState,
-                    onMenuClick = { handleExitEditMode() },
+                    onMenuClick = onMenuClick,
                     modifier = modifier.fillMaxSize()
                 )
                 return
@@ -340,6 +383,7 @@ fun ViewOnlyFileViewer(
                     PdfViewerEngine(
                         file = currentFile,
                         appState = appState,
+                        showInternalHeader = false,
                         modifier = Modifier.fillMaxSize()
                     )
                 }

@@ -37,10 +37,10 @@ fun PhotoEditorEditTopBar(
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onExitEditMode) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    Icon(Icons.Default.Menu, contentDescription = "Toggle Navigation / Exit")
                 }
                 Text(
-                    text = "Photo Editor",
+                    text = "PhotoEditor Studio",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold
                 )

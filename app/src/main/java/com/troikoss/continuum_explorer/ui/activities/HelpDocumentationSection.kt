@@ -24,10 +24,15 @@ data class HelpGuideSection(
 
 /**
  * Comprehensive In-App Help & Documentation Page + Open-Source Knowledge List.
- * Updated with every code modification including the VERT-inspired Native File Converter Mini-App,
- * Direct Editor Launch, Origin Tab Memory, APK Info & Package Installer Sheet,
- * My Suite Recent Edited/Created Database, Configurable Workspace Windowing Rules (Options 1/2/3),
- * Unified Single Sidebar, Android 8–15 Screen Sharing Fix, and Interactive Responsive Web Portal.
+ * Updated with every code modification including:
+ * - Minimalist 3-Tab File Converter (Student Exam Passport Photo 20–50 KB & Signature 10–20 KB Squoosh Resizer, PDF Compressor, VERT Single-File Dynamic Picker & Batch/Combine to PDF)
+ * - 5 Separated Studios in My Suite (File Converter, Markor Text & Markdown Studio, Code Studio, CSV & Table Studio, PhotoEditor Image Studio) with Minimalist Landing Pages & List/Grid Recent Toggle
+ * - Desktop-Class PDF Viewer (Single Unified Header, Page Jump, 2-Page Spread, Night/Sepia Modes, Search, Print & Quick Compress)
+ * - Interactive CSV Table Preview & Editor Routing
+ * - 3-Mode Music Player (Persistent Bottom Mini-Bar, Draggable Floating PiP Card, and Spotify-Style Fullscreen Player)
+ * - Redesigned FTP/HTTP Server (Unified Upload Toggle, 0-File Hosting, Android 8–15 MJPEG/WebSocket Screen Sharing with FPS & Compression Sliders, Host Device Telemetry & Remote Browser Mini-Apps)
+ * - Redesigned 'Add FTP Server' Client (Native FTP/HTTP File Browser + 1-Tap Built-in WebView Browser)
+ * - Redesigned Universal File & Folder Picker (List/Grid Toggle with Live Thumbnails, Sort & Breadcrumbs)
  */
 @Composable
 fun HelpDocumentationSection(
@@ -38,112 +43,86 @@ fun HelpDocumentationSection(
     val sections = remember {
         listOf(
             HelpGuideSection(
-                id = "vert_native_file_converter",
-                title = "1. File Converter Mini-App (VERT-sh/VERT Native Android Engine)",
-                badge = "VERT Converter",
+                id = "squoosh_vert_file_converter",
+                title = "1. Minimalist 3-Tab File Converter (Squoosh Exact-KB Resizer + VERT Engine)",
+                badge = "File Converter",
                 icon = Icons.Default.Transform,
-                summary = "100% on-device batch file converter in My Suite inspired by VERT-sh/VERT with zero cloud uploads, global & per-file format tuning, and automatic Recent Suite logging.",
+                summary = "Redesigned 3-tab minimalist File Converter combining Squoosh-style binary-search exact-KB compression for student exam forms, PDF size compression, VERT dynamic single-file conversion, and batch multi-image-to-PDF combining.",
                 bullets = listOf(
-                    "Special VERT Landing Page & Responsive Workbench: Accessible from My Suite ('File Converter') or by right-clicking/long-pressing any file in Explorer ('Convert with File Converter'). Adapts from a 1-column scrollable layout on Mobile to a 2-column split workbench on Tablet and DeX.",
-                    "Images & Graphics (PNG, JPG/JPEG, WEBP, BMP, ICO, SVG, PDF): Native Android Bitmap/Canvas, Coil SVG rasterizer, binary 32-bit BGRA BMP encoder, binary Windows .ICO container generator, and single-page PdfDocument writer with quality %, max resolution scaling, alpha-to-solid compositing, and EXIF stripping.",
-                    "Documents & Structured Data (MD, HTML, PDF, TXT, JSON, CSV, TSV, XML, YAML, DOCX, XLSX): Bidirectional conversion between JSON, CSV, TSV, YAML, XML, Markdown tables, HTML5, and paginated A4 PDF, plus PDF-to-Image (PdfRenderer), PDF-to-Text/MD/HTML (PDFBox-Android), and DOCX/XLSX extraction (Apache POI).",
-                    "Audio & Video (MP4, WEBM, MKV, MOV, MP3, WAV, M4A, AAC, FLAC, OGG): Hardware-accelerated MediaExtractor + MediaCodec + MediaMuxer pipelines for fast audio track demuxing (.m4a/.aac), 16-bit PCM RIFF WAVE (.wav) decoding with optional mono downmix, muted MP4 remuxing, and high-res video frame snapshots.",
-                    "Archives & Packages (ZIP, TAR, GZ, TAR.GZ / TGZ): Unpacks and repacks archives between ZIP (with optional AES-256 encryption via Zip4j), POSIX UStar TAR, GZ, and TAR.GZ, or bundles the entire batch queue into a single archive.",
-                    "Output Destinations & Suite Recent Tracking: Save outputs in a './Converted/' subfolder, alongside the original file, or in a custom folder. Every converted file is automatically recorded in SuiteRecentDatabase under My Suite -> Recent Edited & Created Files."
+                    "Tab 1 — Quick Presets (Student Exam Photo, Signature & PDF Size): One-tap 'Exam Photo (20–50 KB, 200×230 px)', 'Signature (10–20 KB, 140×60 px with high-contrast white paper cleanup)', custom Target KB slider (8–300 KB) using Squoosh binary-search JPEG/WEBP quantization + progressive downscaling, and PDF Size Compressor (100/150/200 DPI re-rasterization).",
+                    "Tab 2 — Single File (VERT Dynamic Format Picker): Select any file and the engine automatically detects its category (Image, Document/Data, Audio/Video, or Archive) and presents only compatible target format chips with live conversion.",
+                    "Tab 3 — Batch Convert & Combine Images into 1 PDF: Queue multiple files with a global 'Convert All To' selector, per-file format overrides, or combine multiple selected photos/scans into a single multi-page PDF document.",
+                    "Guaranteed Writable Output Folder: Automatically saves converted files to the source folder, './Converted/', or falls back to '/Documents/ContinuumSuite/Converted/' on scoped storage, with instant 'Open' and 'Share' buttons on every completed job."
                 )
             ),
             HelpGuideSection(
-                id = "file_open_edit_apk_rules",
-                title = "2. File Opening, Direct Editing & APK Package Installer Rules",
-                badge = "File Policy",
-                icon = Icons.Default.Rule,
-                summary = "Zero intermediate landing pages, smart 4-category file routing, direct three-dot Edit action, and dedicated APK Installer & Binary Info sheets.",
-                bullets = listOf(
-                    "Editable Files (Text, Markdown, Code, JSON, XML, CSV, Todo.txt, Images): Tapping the file in Explorer opens the Preview tab with an Edit button in the top bar. Selecting 'Edit' from the file's three-dot menu (or opening/creating from My Suite) launches directly into the Markor or PhotoEditor UI without any extra intermediate page.",
-                    "Origin Tab Return Memory (Zero Memory Leaks): Every preview, direct-edit, or File Converter tab remembers its exact origin tab index. Pressing Back or closing the editor/viewer cleanly disposes the temporary tab and returns directly to the originating folder or My Suite tab.",
-                    "APK Package Info & Installer Sheet: Tapping an .apk file never opens it as a ZIP folder structure. Instead, it displays the APK Info Sheet (app icon, package name, version name/code, min/target SDK, SHA-256 checksum) with a direct 'Install with Package Installer' button.",
-                    "Playable/Viewable Media vs. Non-Editable Binary Files: Video, Audio, PDF, and ZIP/TAR/7Z/RAR archives open in their dedicated media/document/archive viewers (never raw binary text). Unsupported binary files open the File Info & 'Choose Preferred App to View' sheet."
-                )
-            ),
-            HelpGuideSection(
-                id = "workspace_windowing_and_sidebar_rules",
-                title = "3. Workspace Windowing Modes, Unified Single Sidebar & Mini-App Rules",
-                badge = "Architecture",
-                icon = Icons.Default.Layers,
-                summary = "User-selectable windowing modes across DeX, Tablet, and Mobile, a single non-duplicating sidebar, and formal Mini-App architecture rules.",
-                bullets = listOf(
-                    "Configurable Workspace Windowing Modes (Settings -> Editors & Handlers): Choose between Option 1 (Default: Separate multi-window on DeX, animated in-app tabs on Tablet & Mobile), Option 2 (Animated in-app tabs across DeX, Tablet & Mobile), or Option 3 (Draggable, resizable floating panels on DeX & Tablet, tabs on Mobile).",
-                    "Unified Single Sidebar Rule: Tablet and DeX use a single collapsible left navigation pane (collapsed via the top-right ArrowBack button inside the sidebar and expanded via the top-left Menu button only when collapsed). Mobile uses a modal navigation drawer. Two sidebars never overlap.",
-                    "Formal Rules Files Location: All workspace, windowing, sidebar, and Mini-App rules are modularized in app/src/main/java/com/troikoss/continuum_explorer/rules/ (MiniAppRulesSpec.md, WorkspaceRulesConfig.kt, MiniAppRegistry.kt, and WorkspaceWindowController.kt).",
-                    "Archived Base64 Codec: The Base64 Codec tool is hidden from the active UI and preserved for future reference in app/src/main/java/com/troikoss/continuum_explorer/archive/base64/ArchivedBase64Codec.kt."
-                )
-            ),
-            HelpGuideSection(
-                id = "my_suite_and_recent_db",
-                title = "4. My Suite Creative Hub, Recent Edited/Created Database & Quick Preview",
+                id = "my_suite_five_studios",
+                title = "2. My Suite — 5 Separated Studios, Landing Pages & List/Grid Recent View",
                 badge = "My Suite",
                 icon = Icons.Default.AutoAwesomeMosaic,
-                summary = "Dedicated persistence database for created/edited/converted files in My Suite and one-tap Homepage Quick Preview.",
+                summary = "My Suite is organized into 5 distinct Studios, each with its own minimalist Landing Page, a 50.dp Triple-Line Menu heading bar, and a List/Grid switcher for Recently Edited & Created files.",
                 bullets = listOf(
-                    "Dedicated Recent Edited & Created Files Database (SuiteRecentDatabase): The Recent section inside My Suite exclusively displays files created, edited, or converted within My Suite (File Converter, Markor Text Editor, CSV Studio, PhotoEditor), rather than device-wide MediaStore downloads.",
-                    "Direct File Creation by Extension: Type any filename and extension in My Suite (e.g. notes.md, tasks.todo.txt, sheet.csv, script.kt) to create the file and launch directly into its matching editor.",
-                    "Homepage Quick Preview Toggle: Tap the Eye (Quick Preview) icon in the Explorer TopBar to toggle the split-screen Quick Preview pane on the homepage.",
-                    "Separate-Tab File Preview Action Bar: Shows File Name + Format/Size subtitle on the left, followed by Edit, Metadata View/Edit (inline rename & extension change, EXIF editor, GPS stripper, MD5/SHA-256 checksums), Delete, Share, Open External, and Fullscreen toggle."
+                    "5 Dedicated Studios: (1) File Converter, (2) Markor Text & Markdown Studio (.md, .txt, .todo.txt, .org, .adoc), (3) Code Studio (.kt, .java, .py, .js, .ts, .html, .css, .json, .xml, .yaml, .sh), (4) CSV & Table Studio (.csv, .tsv), and (5) PhotoEditor Image Studio (.png, .jpg, .webp, .bmp).",
+                    "Minimalist Landing Page for Every Studio: Opening any Studio from My Suite displays a clean landing screen with 'Create New File', 'Open Existing File to Edit' (with live thumbnails), and that Studio's recent files.",
+                    "Unified 50.dp Triple-Line Menu Heading Bar: All active editors (Markor, Code Studio, CSV Studio, PhotoEditor, File Converter) use the 50.dp top heading bar with the Triple-Line Menu Button on the left instead of a Close/X button.",
+                    "Interactive CSV Preview & Exclusive CSV Studio Routing: Tapping a .csv/.tsv file shows an interactive spreadsheet table preview with sticky headers, row numbers, and search filter; clicking Edit opens CSV & Table Studio."
                 )
             ),
             HelpGuideSection(
-                id = "ftp_website_server",
-                title = "5. FTP/HTTP File Server, Self-Hosted Website & Live Screen Stream",
-                badge = "Server Hub",
+                id = "desktop_pdf_and_spotify_audio",
+                title = "3. Desktop-Class PDF Viewer & 3-Mode Spotify-Style Music Player",
+                badge = "Media & PDF",
+                icon = Icons.Default.LibraryMusic,
+                summary = "Desktop-grade PDF reading controls with zero duplicate headers, plus a 3-mode audio player that transitions between a Bottom Mini-Bar, Draggable Floating PiP Card, and Spotify-style Fullscreen Player.",
+                bullets = listOf(
+                    "Desktop-Class PDF Viewer: Eliminates duplicate top bars and provides a single unified header plus a collapsible desktop control bar with Page Jump ('Page X / Y'), Continuous Vertical / Single Page / 2-Page Desktop Spread modes, Zoom (- / 100% / +), 90° Rotation, Day / Night Inverted / Sepia reading modes, Thumbnail strip, PDF text search, Print (PrintManager), and Quick Compress PDF.",
+                    "Mode 1 — Persistent Bottom Mini-Player Bar: Tapping any audio file (.mp3, .wav, .flac, .m4a, .aac, .ogg) starts playback in a sleek bottom bar inside Explorer so you can keep browsing files.",
+                    "Mode 2 — Draggable Floating PiP Mini-Card: Minimize the bottom bar into a draggable floating Picture-in-Picture card over your files, with 1-tap buttons to dock back to the Bottom Bar or expand to Fullscreen.",
+                    "Mode 3 — Spotify-Style Fullscreen Music Player: Features dynamic dominant-color gradient background extracted from embedded ID3 album art, large artwork, interactive seek slider, shuffle, repeat (Off/All/One), playback speed (0.75x–2.0x), and an auto-populated Folder Audio Queue."
+                )
+            ),
+            HelpGuideSection(
+                id = "ftp_http_server_and_client",
+                title = "4. FTP/HTTP Server, Live Screen Sharing, Remote Mini-Apps & FTP Client",
+                badge = "Server & FTP",
                 icon = Icons.Default.Dns,
-                summary = "Minimalist Segmented Mode Toggle, Android 8–15 MediaProjection fix, hideable live screen player, and interactive responsive Web Portal.",
+                summary = "Unified upload controls, 0-file server hosting, Android 8–15 MJPEG/WebSocket screen sharing with FPS & compression sliders, live host telemetry, remote browser Mini-Apps, and a native FTP/HTTP client.",
                 bullets = listOf(
-                    "Explorer Notification Branding: Active foreground server notifications display 'Explorer' as the title with live IP and uptime.",
-                    "Android 8–15 Live Screen Sharing Fix: Registers MediaProjection.Callback on a dedicated background HandlerThread prior to virtual display creation (required on Android 14/15) and provides both WebSocket (/screencast) and HTTP frame snapshot (/screencast-frame) streaming.",
-                    "Hideable Live Screen Player on Hosted Page: The screen-share video player is hidden by default on the hosted file portal so file browsing stays clean, and can be toggled open or closed anytime via the 'Show/Hide Live Screen' toolbar button.",
-                    "Interactive Responsive File Hosting Portal: Features clickable breadcrumbs, summary storage metrics, switchable Grid Cards and Table views, an inline Lightbox Media Preview modal for images/video/audio, and password-protected multi-file uploads."
+                    "Unified Upload Toggle & Destination Folder: Consolidates browser multipart uploads and FTP write permissions into a single 'Allow Browser & FTP Uploads' switch with a configurable Upload Destination Folder.",
+                    "Zero-File Server Hosting & Remote Browser Mini-Apps: Start the server even with 0 selected files/folders. Enable 'Allow Mini-Apps in Browser' so visitors can use Remote Markor Notes/Code/CSV Studio and the Exact-KB Photo Resizer from any web browser.",
+                    "Live Screen Sharing with FPS & Compression Controls: Optional admin-enabled live screen sharing across Android 8–15 (with FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION on Android 10+) featuring adjustable Frame Rate (5–30 FPS) and JPEG Compression Quality (30%–95%) sliders, streamed via '/screencast.mjpeg' and WebSockets.",
+                    "Host Telemetry & 3-Tab Responsive Web Portal: Displays live Host Device Name, Battery %, and Free/Total Storage at the top of the hosted webpage, organized into adaptive 'Files', 'Live Screen', and 'Mini-Apps' sub-navigation tabs.",
+                    "Redesigned 'Add FTP Server' Client: Connects to Explorer hosts and third-party FTP/HTTP servers using a real Native File Browser first (zero mock data), with a 1-tap 'Open in Built-in Web Browser' (WebView) toggle."
                 )
             ),
             HelpGuideSection(
-                id = "window_fullscreen_layout",
-                title = "6. Edge-to-Edge Window, Fullscreen Toggle & Layout Switcher",
-                badge = "UI & Window",
-                icon = Icons.Default.Fullscreen,
-                summary = "Zero-clipping edge-to-edge layouts across tablet/desktop windows with one-tap Fullscreen and instant View Mode switching.",
+                id = "universal_picker_and_dex_rules",
+                title = "5. Universal File Picker, DeX Standalone Windows & GitHub Hygiene",
+                badge = "UX & Build",
+                icon = Icons.Default.Layers,
+                summary = "List/Grid thumbnails in all in-app file pickers, standalone DeX window chrome without duplicate tab bars, and clean GitHub repository exclusions.",
                 bullets = listOf(
-                    "Edge-to-Edge Window Fix: Eliminated outer horizontal margins that clipped file names and column headers in freeform tablet and multi-window views.",
-                    "Full-Screen Mode Toggle: Tap the Fullscreen icon in the TopBar, Separate-Tab File Preview, My Suite, File Converter, FTP/HTTP Server, Markor Text Editor, or Photo Editor to hide the top Tab Bar and maximize workspace height.",
-                    "Restored Layout & Column Count Switcher: Use the quick View Mode button in the TopBar to switch between Details, List, Grid, and Gallery views, adjust the Grid Column Count slider (2–6 columns), and scale icon sizes (60%–200%).",
-                    "Sidebar Storage Capacity Display: Compact single-line formatting ensures 'XX GB free of XX GB' never wraps or breaks in narrow navigation drawers."
-                )
-            ),
-            HelpGuideSection(
-                id = "apk_ci_cd",
-                title = "7. Release APK Compression & Multi-ABI GitHub Actions CI/CD",
-                badge = "Build & CI",
-                icon = Icons.Default.BuildCircle,
-                summary = "Compressed JNI packaging, per-ABI native splitting, and error-free GitHub Actions compilation for all Android architectures.",
-                bullets = listOf(
-                    "Release APK Size Compression & R8 Fix: Compresses APK size via per-ABI native .so filtering (-PabiTarget), Deflate-compressed JNI packaging (useLegacyPackaging = true), PNG crunching, and metadata exclusions.",
-                    "Multi-Architecture GitHub Workflow (.github/workflows/android-build.yml): Builds arm64-v8a, armeabi-v7a, x86_64, x86, Universal APK, and Play Store AAB packages using JDK 21 and Gradle.",
-                    "Automated 0.0.x+1 Versioning & Optional Releases: Base version starts at 0.0.1 and automatically increments to 0.0.x+1 on each workflow run with optional GitHub Release publishing."
+                    "Universal File & Folder Picker Redesign: Both InAppFilePickerDialog and FullPageFilePicker feature List/Grid view toggles with live image/video/APK thumbnails, Sort options (Name, Date, Size), clickable Breadcrumbs, and Quick Storage chips.",
+                    "Standalone DeX Window Chrome Rule: When a Mini-App or file editor opens in a separate OS window on DeX/Desktop, the top Explorer TabBar is hidden so it looks and behaves like a standalone native desktop app.",
+                    "GitHub Repository Hygiene (.gitignore): Automatically excludes '.aistudio/', 'public/assets/aistudio/', '*.apk', '*.aab', and reference master folders from Git pushes while keeping them available in the AI Studio workspace."
                 )
             ),
             HelpGuideSection(
                 id = "open_source_knowledge_list",
-                title = "8. Open-Source Knowledge & Libraries Attribution List",
+                title = "6. Open-Source Knowledge & Libraries Attribution List",
                 badge = "Open Source",
                 icon = Icons.Default.Code,
-                summary = "Complete list of open-source projects, architectural references, and libraries powering Explorer, My Suite, and the File Converter.",
+                summary = "Complete list of open-source projects, architectural references, and libraries powering Explorer, My Suite, File Converter, PDF Viewer, Audio Player, and FTP/HTTP Server.",
                 bullets = listOf(
-                    "VERT (https://github.com/VERT-sh/VERT — AGPL-3.0 inspiration): Architectural model for the 100% local, zero-cloud File Converter landing page, category tabs, batch conversion queue, global 'Convert All To' selector, and per-file quality tuning.",
-                    "Markor (gsantner/markor — Apache-2.0 inspiration) & Markwon (io.noties.markwon:core:4.6.2 — Apache-2.0): Powering the Markdown, Todo.txt, CSV Table, Org-Mode, AsciiDoc, KaTeX math, and syntax-highlighted Text & Code Studio.",
-                    "PDFBox-Android (com.tom-roush:pdfbox-android:2.0.27.0 — Apache-2.0) & Android Native PdfRenderer / PdfDocument: Used for PDF viewing, text extraction, and bidirectional Image/Markdown/HTML/Data <-> PDF conversion.",
+                    "Squoosh (https://github.com/GoogleChromeLabs/squoosh — Apache-2.0 inspiration): Architectural model for the binary-search exact-KB image quantization, progressive resolution scaling, and passport photo (20–50 KB) / signature (10–20 KB) compression engine in SquooshImageCompressor.kt.",
+                    "VERT (https://github.com/VERT-sh/VERT — AGPL-3.0 inspiration): Architectural model for the 100% local, zero-cloud dynamic single-file and batch format converter in FileConverterScreen.kt and FileConverterDispatcher.kt.",
+                    "Markor (https://github.com/gsantner/markor — Apache-2.0 inspiration) & Markwon (io.noties.markwon:core:4.6.2 — Apache-2.0): Powering the separated Markor Text & Markdown Studio, Code Studio, and CSV & Table Studio.",
+                    "PDFBox-Android (com.tom-roush:pdfbox-android:2.0.27.0 — Apache-2.0) & Android Native PdfRenderer / PdfDocument / PrintManager: Powering the Desktop-Class PDF Viewer (2-page spread, night/sepia modes, text search, printing) and PDF Size Compressor.",
+                    "AndroidX Media3 ExoPlayer (androidx.media3:media3-exoplayer:1.2.1 — Apache-2.0) & MediaMetadataRetriever: Powering the 3-Mode Music Player (Persistent Bottom Mini-Bar, Draggable Floating PiP Card, and Spotify-style Fullscreen Player with dominant-color artwork gradients) plus hardware MediaCodec audio/video conversion.",
                     "Apache POI (org.apache.poi:poi:5.2.3 & poi-ooxml:5.2.3 — Apache-2.0): Powers local DOCX Word and XLSX Excel reading and conversion to PDF, HTML, Markdown, CSV, JSON, and TXT.",
                     "Zip4j (net.lingala.zip4j:zip4j:2.11.6 — Apache-2.0), SevenZipJBinding-4Android & POSIX UStar TAR Engine: Powers archive browsing, AES-256 encrypted ZIP creation, and ZIP <-> TAR / GZ / TAR.GZ conversion.",
-                    "Coil (io.coil-kt:coil-compose, coil-gif, coil-svg, coil-video:2.6.0 — Apache-2.0) & AndroidX ExifInterface (1.3.7): Powers asynchronous thumbnails, SVG vector rasterization, and EXIF metadata inspection/stripping.",
-                    "AndroidX Media3 ExoPlayer (1.2.1 — Apache-2.0) & Android Hardware MediaExtractor / MediaCodec / MediaMuxer: Powers video/audio playback and hardware-accelerated WAV (PCM RIFF), M4A, AAC, and MP4 conversions.",
-                    "Ktor Server CIO & WebSockets (io.ktor:2.3.9 — Apache-2.0), Apache FTPServer (1.2.0), JSch SFTP, SMBJ & Sardine WebDAV: Powers the embedded HTTP/FTP Server, Live Screen Cast, and remote network storage providers."
+                    "Coil (io.coil-kt:coil-compose, coil-gif, coil-svg, coil-video:2.6.0 — Apache-2.0) & AndroidX ExifInterface (1.3.7): Powers live file picker thumbnails, SVG vector rasterization, and EXIF metadata inspection/stripping.",
+                    "Ktor Server Netty & WebSockets (io.ktor:2.3.9 — Apache-2.0), Apache FTPServer (1.2.0) & Apache Commons Net FTPClient (3.10.0): Powers the embedded HTTP/FTP Server, MJPEG/WebSocket Live Screen Stream, Remote Browser Mini-Apps, and the Native FTP/HTTP Client."
                 )
             )
         )
@@ -162,7 +141,6 @@ fun HelpDocumentationSection(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // Header Banner
         Surface(
             shape = RoundedCornerShape(16.dp),
             color = MaterialTheme.colorScheme.primaryContainer,
@@ -184,13 +162,13 @@ fun HelpDocumentationSection(
                         Spacer(modifier = Modifier.width(10.dp))
                         Column {
                             Text(
-                                text = "Explorer Help, VERT Converter & Open-Source Guide",
+                                text = "Explorer Help, Studios & Open-Source Knowledge Guide",
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.onPrimaryContainer
                             )
                             Text(
-                                text = "Updated with VERT Native File Converter, Direct Editor Launch, APK Installer Sheet, Workspace Rules & Open-Source List",
+                                text = "Updated with Squoosh/VERT Converter, 5 My Suite Studios, Desktop PDF Viewer, 3-Mode Spotify Player, FTP/Screen Portal & Native FTP Client",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f)
                             )
@@ -203,7 +181,7 @@ fun HelpDocumentationSection(
                 OutlinedTextField(
                     value = searchFilter,
                     onValueChange = { searchFilter = it },
-                    placeholder = { Text("Search help topics (e.g. VERT, Converter, APK, Edit, Rules, DeX, Open Source)...") },
+                    placeholder = { Text("Search help topics (e.g. Photo KB, Signature, PDF, Spotify, PiP, FTP, Screen Share, Squoosh, VERT)...") },
                     leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                     trailingIcon = {
                         if (searchFilter.isNotEmpty()) {

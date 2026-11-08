@@ -1,6 +1,0 @@
-{
-  "summary": "Implementation plan for the native Android VERT-inspired File Converter Mini-App inside My Suite, supporting local-first batch conversion across Images, Documents/Data, Audio/Video, and Archives with a unified VERT-style landing page, global + per-file output tuning, and SuiteRecentDatabase tracking.",
-  "updatedAt": "2026-11-06T16:58:28.095427576Z",
-  "requestFeedback": true,
-  "userFacing": true
-}

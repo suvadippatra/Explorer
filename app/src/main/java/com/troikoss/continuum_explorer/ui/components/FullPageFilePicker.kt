@@ -30,6 +30,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.troikoss.continuum_explorer.managers.FtpBucketManager
+import com.troikoss.continuum_explorer.utils.toUniversal
 import java.io.File
 
 enum class PickerSortBy { NAME, SIZE, DATE }
@@ -79,6 +80,7 @@ fun FullPageFilePicker(
     var sortBy by remember { mutableStateOf(PickerSortBy.NAME) }
     var sortAscending by remember { mutableStateOf(true) }
     var showSortMenu by remember { mutableStateOf(false) }
+    var isGridView by remember { mutableStateOf(false) }
 
     // Intercept back button to navigate parent folder first
     BackHandler {
@@ -238,6 +240,14 @@ fun FullPageFilePicker(
                         Icon(
                             imageVector = if (isSearchActive) Icons.Default.Close else Icons.Default.Search,
                             contentDescription = "Search"
+                        )
+                    }
+
+                    // List / Grid View Toggle Button
+                    IconButton(onClick = { isGridView = !isGridView }) {
+                        Icon(
+                            imageVector = if (isGridView) Icons.Default.ViewList else Icons.Default.GridView,
+                            contentDescription = if (isGridView) "Switch to List View" else "Switch to Grid View"
                         )
                     }
 
@@ -435,115 +445,182 @@ fun FullPageFilePicker(
                     }
                 }
 
-                items(fileList, key = { it.absolutePath }) { file ->
-                    val isDir = file.isDirectory
-                    val isSelectedInBucket = bucketList.any { it.absolutePath == file.absolutePath }
-                    val isHtmlFile = file.name.endsWith(".html", ignoreCase = true) || file.name.endsWith(".htm", ignoreCase = true)
-
-                    OutlinedCard(
-                        shape = RoundedCornerShape(12.dp),
-                        colors = CardDefaults.outlinedCardColors(
-                            containerColor = if (isSelectedInBucket) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f)
-                            else MaterialTheme.colorScheme.surface
-                        ),
-                        border = androidx.compose.foundation.BorderStroke(
-                            width = if (isSelectedInBucket) 1.5.dp else 1.dp,
-                            color = if (isSelectedInBucket) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
-                        ),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                if (isDir) {
-                                    currentDir = file
-                                } else if (isHtmlMode) {
-                                    onHtmlSelected?.invoke(file)
-                                    onDismiss()
-                                } else {
-                                    if (isSelectedInBucket) FtpBucketManager.removeItem(context, file)
-                                    else FtpBucketManager.addItem(context, file)
+                if (isGridView) {
+                    val cols = if (isMobileLayout) 2 else 4
+                    val rows = fileList.chunked(cols)
+                    items(rows) { rowFiles ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            rowFiles.forEach { file ->
+                                val isDir = file.isDirectory
+                                val isSelectedInBucket = bucketList.any { it.absolutePath == file.absolutePath }
+                                val isHtmlFile = file.name.endsWith(".html", ignoreCase = true) || file.name.endsWith(".htm", ignoreCase = true)
+                                val uFile = remember(file.absolutePath) {
+                                    file.toUniversal()
+                                }
+                                OutlinedCard(
+                                    shape = RoundedCornerShape(12.dp),
+                                    colors = CardDefaults.outlinedCardColors(
+                                        containerColor = if (isSelectedInBucket) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f)
+                                        else MaterialTheme.colorScheme.surface
+                                    ),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clickable {
+                                            if (isDir) {
+                                                currentDir = file
+                                            } else if (isHtmlMode) {
+                                                onHtmlSelected?.invoke(file)
+                                                onDismiss()
+                                            } else {
+                                                if (isSelectedInBucket) FtpBucketManager.removeItem(context, file)
+                                                else FtpBucketManager.addItem(context, file)
+                                            }
+                                        }
+                                ) {
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(10.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(52.dp)
+                                                .clip(RoundedCornerShape(10.dp))
+                                                .background(MaterialTheme.colorScheme.surfaceVariant),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            com.troikoss.continuum_explorer.utils.IconHelper.FileThumbnail(
+                                                file = uFile,
+                                                iconSize = 44.dp,
+                                                modifier = Modifier.size(44.dp)
+                                            )
+                                        }
+                                        Text(
+                                            text = file.name,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            fontWeight = if (isDir) FontWeight.Bold else FontWeight.Medium,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = if (isDir) "Folder" else "${file.length() / 1024} KB",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
                                 }
                             }
-                    ) {
-                        Row(
+                            repeat(cols - rowFiles.size) {
+                                Spacer(modifier = Modifier.weight(1f))
+                            }
+                        }
+                    }
+                } else {
+                    items(fileList, key = { it.absolutePath }) { file ->
+                        val isDir = file.isDirectory
+                        val isSelectedInBucket = bucketList.any { it.absolutePath == file.absolutePath }
+                        val isHtmlFile = file.name.endsWith(".html", ignoreCase = true) || file.name.endsWith(".htm", ignoreCase = true)
+                        val uFile = remember(file.absolutePath) {
+                            file.toUniversal()
+                        }
+
+                        OutlinedCard(
+                            shape = RoundedCornerShape(12.dp),
+                            colors = CardDefaults.outlinedCardColors(
+                                containerColor = if (isSelectedInBucket) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f)
+                                else MaterialTheme.colorScheme.surface
+                            ),
+                            border = androidx.compose.foundation.BorderStroke(
+                                width = if (isSelectedInBucket) 1.5.dp else 1.dp,
+                                color = if (isSelectedInBucket) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
+                            ),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
+                                .clickable {
+                                    if (isDir) {
+                                        currentDir = file
+                                    } else if (isHtmlMode) {
+                                        onHtmlSelected?.invoke(file)
+                                        onDismiss()
+                                    } else {
+                                        if (isSelectedInBucket) FtpBucketManager.removeItem(context, file)
+                                        else FtpBucketManager.addItem(context, file)
+                                    }
+                                }
                         ) {
                             Row(
-                                modifier = Modifier.weight(1f),
-                                verticalAlignment = Alignment.CenterVertically
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                Surface(
-                                    shape = RoundedCornerShape(8.dp),
-                                    color = when {
-                                        isDir -> MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
-                                        isHtmlFile -> Color(0xFFE65100).copy(alpha = 0.12f)
-                                        else -> MaterialTheme.colorScheme.surfaceVariant
-                                    },
-                                    modifier = Modifier.size(36.dp)
+                                Row(
+                                    modifier = Modifier.weight(1f),
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Icon(
-                                            imageVector = when {
-                                                isDir -> Icons.Default.Folder
-                                                isHtmlFile -> Icons.Default.Html
-                                                else -> Icons.Default.InsertDriveFile
-                                            },
-                                            contentDescription = null,
-                                            tint = when {
-                                                isDir -> MaterialTheme.colorScheme.primary
-                                                isHtmlFile -> Color(0xFFE65100)
-                                                else -> MaterialTheme.colorScheme.onSurfaceVariant
-                                            },
-                                            modifier = Modifier.size(20.dp)
+                                    Box(
+                                        modifier = Modifier
+                                            .size(36.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(MaterialTheme.colorScheme.surfaceVariant),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        com.troikoss.continuum_explorer.utils.IconHelper.FileThumbnail(
+                                            file = uFile,
+                                            iconSize = 30.dp,
+                                            modifier = Modifier.size(30.dp)
+                                        )
+                                    }
+
+                                    Spacer(modifier = Modifier.width(10.dp))
+
+                                    Column {
+                                        Text(
+                                            text = file.name,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = if (isDir) FontWeight.SemiBold else FontWeight.Normal,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = if (isDir) "Folder" else "${file.length() / 1024} KB",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                     }
                                 }
 
-                                Spacer(modifier = Modifier.width(10.dp))
-
-                                Column {
-                                    Text(
-                                        text = file.name,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        fontWeight = if (isDir) FontWeight.SemiBold else FontWeight.Normal,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    Text(
-                                        text = if (isDir) "Folder" else "${file.length() / 1024} KB",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                            }
-
-                            if (isHtmlMode) {
-                                if (isHtmlFile) {
-                                    FilledTonalButton(
-                                        onClick = {
-                                            onHtmlSelected?.invoke(file)
-                                            onDismiss()
-                                        },
-                                        shape = RoundedCornerShape(8.dp),
-                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
-                                    ) {
-                                        Text("Select HTML", style = MaterialTheme.typography.labelSmall)
+                                if (isHtmlMode) {
+                                    if (isHtmlFile) {
+                                        FilledTonalButton(
+                                            onClick = {
+                                                onHtmlSelected?.invoke(file)
+                                                onDismiss()
+                                            },
+                                            shape = RoundedCornerShape(8.dp),
+                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+                                        ) {
+                                            Text("Select HTML", style = MaterialTheme.typography.labelSmall)
+                                        }
                                     }
-                                }
-                            } else {
-                                IconButton(onClick = {
-                                    if (isSelectedInBucket) FtpBucketManager.removeItem(context, file)
-                                    else FtpBucketManager.addItem(context, file)
-                                }) {
-                                    Icon(
-                                        imageVector = if (isSelectedInBucket) Icons.Default.CheckCircle else Icons.Default.AddCircleOutline,
-                                        contentDescription = if (isSelectedInBucket) "Selected" else "Add",
-                                        tint = if (isSelectedInBucket) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
+                                } else {
+                                    IconButton(onClick = {
+                                        if (isSelectedInBucket) FtpBucketManager.removeItem(context, file)
+                                        else FtpBucketManager.addItem(context, file)
+                                    }) {
+                                        Icon(
+                                            imageVector = if (isSelectedInBucket) Icons.Default.CheckCircle else Icons.Default.AddCircleOutline,
+                                            contentDescription = if (isSelectedInBucket) "Selected" else "Add",
+                                            tint = if (isSelectedInBucket) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
                                 }
                             }
                         }

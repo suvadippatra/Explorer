@@ -109,6 +109,7 @@ object WorkspaceWindowController {
                     Intent.FLAG_ACTIVITY_MULTIPLE_TASK or
                     Intent.FLAG_ACTIVITY_NEW_DOCUMENT
                 data = Uri.fromParts("workspace", UUID.randomUUID().toString(), null)
+                putExtra("isSingleAppWindow", true)
                 if (file != null) {
                     putExtra("openFilePath", file.absolutePath)
                     putExtra("openInEditMode", openInEditMode)
