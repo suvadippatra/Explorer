@@ -105,7 +105,7 @@ fun HelpDocumentationSection(
                 bullets = listOf(
                     "Universal File & Folder Picker Redesign: Both InAppFilePickerDialog and FullPageFilePicker feature List/Grid view toggles with live image/video/APK thumbnails, Sort options (Name, Date, Size, Type), clickable Breadcrumbs, and Quick Storage chips (Internal, Downloads, Documents, Pictures, DCIM, Music).",
                     "Standalone DeX Window Chrome Rule: When a Mini-App or file editor opens in a separate OS window on DeX/Desktop, the top Explorer TabBar is hidden so it looks and behaves like a standalone native desktop app.",
-                    "GitHub Repository Hygiene (.gitignore): Automatically excludes '.aistudio/', 'public/assets/aistudio/', '*.apk', '*.aab', and reference master folders from Git pushes while keeping them available in the AI Studio workspace."
+                    "GitHub Repository Hygiene (.gitignore & README): Automatically excludes '.aistudio/', 'public/assets/aistudio/', '*.apk', '*.aab', and reference master folders from Git pushes while keeping them available in the AI Studio workspace, alongside a clean human-written README and single-line fork attribution."
                 )
             ),
             HelpGuideSection(
@@ -115,6 +115,7 @@ fun HelpDocumentationSection(
                 icon = Icons.Default.Code,
                 summary = "Complete list of open-source projects, architectural references, and libraries powering Explorer, My Suite, File Converter, PDF Viewer, Audio Player, and FTP/HTTP Server.",
                 bullets = listOf(
+                    "Continuum Explorer (https://github.com/troikoss/Continuum-Explorer — Upstream Base Project): This application is a forked and expanded version of Continuum Explorer.",
                     "Squoosh (https://github.com/GoogleChromeLabs/squoosh — Apache-2.0 inspiration): Architectural model for the binary-search exact-KB image quantization, progressive resolution scaling, and passport photo (20–50 KB) / signature (10–20 KB) compression engine in SquooshImageCompressor.kt.",
                     "VERT (https://github.com/VERT-sh/VERT — AGPL-3.0 inspiration): Architectural model for the 100% local, zero-cloud dynamic single-file and batch format converter in FileConverterScreen.kt and FileConverterDispatcher.kt.",
                     "Markor (https://github.com/gsantner/markor — Apache-2.0 inspiration) & Markwon (io.noties.markwon:core:4.6.2 — Apache-2.0): Powering the separated Markor Text & Markdown Studio, Code Studio, and CSV & Table Studio.",

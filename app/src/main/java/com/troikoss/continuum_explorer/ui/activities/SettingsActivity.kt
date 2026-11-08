@@ -1234,7 +1234,6 @@ fun SettingsScreen(onBack: () -> Unit) {
             if (showAboutDialog) {
                 val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
 
-                // This part safely loads your app icon so it doesn't crash
                 val context = LocalContext.current
                 val appIcon = remember {
                     context.packageManager.getApplicationIcon(context.packageName)
@@ -1249,7 +1248,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                 AlertDialog(
                     onDismissRequest = { showAboutDialog = false },
                     text = {
-                        Row {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
                             Image(
                                 painter = rememberAsyncImagePainter(appIcon),
                                 contentDescription = null,
@@ -1259,15 +1258,20 @@ fun SettingsScreen(onBack: () -> Unit) {
                             )
                             Spacer(modifier = Modifier.width(16.dp))
 
-                            // App Name and Version
                             Column {
                                 Text(stringResource(R.string.app_name), style = MaterialTheme.typography.titleMedium)
                                 Text("$version", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    text = "This is a forked version of Continuum Explorer.",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    style = MaterialTheme.typography.bodySmall
+                                )
                                 Text(
                                     text = stringResource(R.string.github),
                                     color = MaterialTheme.colorScheme.primary,
                                     style = MaterialTheme.typography.bodyMedium.copy(
-                                        textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline // Adds the underline
+                                        textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline
                                     ),
                                     modifier = Modifier
                                         .clickable {
