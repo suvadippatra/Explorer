@@ -40,6 +40,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
@@ -50,6 +51,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.input.pointer.isShiftPressed
 import androidx.compose.ui.input.pointer.pointerInput
@@ -420,14 +422,25 @@ fun FileExplorer(
             .fillMaxSize()
             .pointerInput(Unit) {
                 awaitPointerEventScope {
+                    var lastShift = false
+                    var lastIsMouse = false
                     while (true) {
-                        val event = awaitPointerEvent(PointerEventPass.Initial)
-                        val shift = event.keyboardModifiers.isShiftPressed
-                        if (appState.isShiftPressed != shift) appState.isShiftPressed = shift
-                        val activeChange = event.changes.firstOrNull { it.pressed } ?: event.changes.firstOrNull()
-                        if (activeChange != null) {
-                            val isMouse = (activeChange.type == PointerType.Mouse)
-                            if (appState.isMouseInteraction != isMouse) appState.isMouseInteraction = isMouse
+                        val event = awaitPointerEvent(PointerEventPass.Main)
+                        val eventType = event.type
+                        if (eventType == PointerEventType.Press || eventType == PointerEventType.Enter || eventType == PointerEventType.Release) {
+                            val shift = event.keyboardModifiers.isShiftPressed
+                            if (lastShift != shift) {
+                                lastShift = shift
+                                appState.isShiftPressed = shift
+                            }
+                            val firstChange = event.changes.firstOrNull()
+                            if (firstChange != null) {
+                                val isMouse = (firstChange.type == PointerType.Mouse)
+                                if (lastIsMouse != isMouse) {
+                                    lastIsMouse = isMouse
+                                    appState.isMouseInteraction = isMouse
+                                }
+                            }
                         }
                     }
                 }
@@ -617,8 +630,9 @@ private fun ExplorerTopBar(
             .statusBarsPadding()
     ) {
         if (!isFullScreenTabHidden && !isSingleAppWindow) {
+            val tabNames by remember(tabs) { derivedStateOf { tabs.map { it.currentName } } }
             TabBar(
-                tabs = tabs.map { it.currentName },
+                tabs = tabNames,
                 selectedTabIndex = selectedTabIndex,
                 onTabSelected = onTabSelected,
                 onAddTab = onAddTab,

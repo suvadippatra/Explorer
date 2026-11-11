@@ -64,9 +64,9 @@ fun HelpDocumentationSection(
                 icon = Icons.Default.Palette,
                 items = listOf(
                     HelpTopicItem("Material UI Theme", "Select 'Material UI' in Settings → Appearance for crisp M3 surfaces & indigo accents."),
-                    HelpTopicItem("Custom Fonts", "Choose System Default, Plus Jakarta Sans, or JetBrains Mono in Settings → Appearance."),
+                    HelpTopicItem("Zero-Lag Custom Fonts", "Pre-cached async Typefaces for System Default, Plus Jakarta Sans & JetBrains Mono."),
                     HelpTopicItem("Compact Headings", "Single-line titles across all panels without multi-line subheading clutter."),
-                    HelpTopicItem("Adaptive Layouts", "Responsive split-pane and DeX windowing across Android 8 to Android 15.")
+                    HelpTopicItem("60/120fps Touch Pipeline", "Optimized pointer event pass and background I/O warmup across Android 8 to Android 15.")
                 )
             ),
             HelpGuideSection(
@@ -76,7 +76,7 @@ fun HelpDocumentationSection(
                 badge = "Server",
                 icon = Icons.Default.Sync,
                 items = listOf(
-                    HelpTopicItem("ServerManager", "Independent or coordinated Ktor HTTP (:8080) & Apache FTP (:2121) controls."),
+                    HelpTopicItem("ServerManager", "Crash-safe Ktor HTTP (:8080) & Apache FTP (:2121) lifecycle with Android 14/15 DATA_SYNC FGS."),
                     HelpTopicItem("SyncPlay Party", "HTTP 206 pre-buffered group video/audio playback with synchronized Play, Pause, Seek & Speed."),
                     HelpTopicItem("NTP Clock Sync", "WebSocket PING/PONG latency calibration for millisecond-aligned playback."),
                     HelpTopicItem("Room Security", "Optional SyncPlay passcode and guest playback control toggle."),

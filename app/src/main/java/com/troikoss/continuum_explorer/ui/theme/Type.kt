@@ -1,35 +1,82 @@
 package com.troikoss.continuum_explorer.ui.theme
 
+import android.content.Context
+import android.graphics.Typeface
 import androidx.compose.material3.Typography
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontLoadingStrategy
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
+import androidx.core.content.res.ResourcesCompat
 import com.troikoss.continuum_explorer.R
 import com.troikoss.continuum_explorer.managers.AppFontFamily
 
-val PlusJakartaSansFontFamily = FontFamily(
-    Font(R.font.plus_jakarta_sans, FontWeight.Normal),
-    Font(R.font.plus_jakarta_sans, FontWeight.Medium),
-    Font(R.font.plus_jakarta_sans, FontWeight.SemiBold),
-    Font(R.font.plus_jakarta_sans, FontWeight.Bold)
+/**
+ * Fallback FontFamily definitions using OptionalLocal/Async loading strategies
+ * so font resolution never blocks touch events on the main UI thread.
+ */
+private val FallbackPlusJakartaSansFontFamily = FontFamily(
+    Font(R.font.plus_jakarta_sans, FontWeight.Normal, loadingStrategy = FontLoadingStrategy.OptionalLocal),
+    Font(R.font.plus_jakarta_sans, FontWeight.Medium, loadingStrategy = FontLoadingStrategy.OptionalLocal),
+    Font(R.font.plus_jakarta_sans, FontWeight.SemiBold, loadingStrategy = FontLoadingStrategy.OptionalLocal),
+    Font(R.font.plus_jakarta_sans, FontWeight.Bold, loadingStrategy = FontLoadingStrategy.OptionalLocal)
 )
 
-val JetBrainsMonoFontFamily = FontFamily(
-    Font(R.font.jetbrains_mono, FontWeight.Normal),
-    Font(R.font.jetbrains_mono, FontWeight.Medium),
-    Font(R.font.jetbrains_mono, FontWeight.SemiBold),
-    Font(R.font.jetbrains_mono, FontWeight.Bold)
+private val FallbackJetBrainsMonoFontFamily = FontFamily(
+    Font(R.font.jetbrains_mono, FontWeight.Normal, loadingStrategy = FontLoadingStrategy.OptionalLocal),
+    Font(R.font.jetbrains_mono, FontWeight.Medium, loadingStrategy = FontLoadingStrategy.OptionalLocal),
+    Font(R.font.jetbrains_mono, FontWeight.SemiBold, loadingStrategy = FontLoadingStrategy.OptionalLocal),
+    Font(R.font.jetbrains_mono, FontWeight.Bold, loadingStrategy = FontLoadingStrategy.OptionalLocal)
 )
 
-fun buildAppTypography(selectedFont: AppFontFamily): Typography {
-    val activeFontFamily = when (selectedFont) {
-        AppFontFamily.SYSTEM_DEFAULT -> FontFamily.Default
-        AppFontFamily.PLUS_JAKARTA_SANS -> PlusJakartaSansFontFamily
-        AppFontFamily.JETBRAINS_MONO -> JetBrainsMonoFontFamily
-    }
+@Volatile
+private var cachedPlusJakartaSansFamily: FontFamily? = null
 
+@Volatile
+private var cachedJetBrainsMonoFamily: FontFamily? = null
+
+@Volatile
+private var cachedPlusJakartaTypography: Typography? = null
+
+@Volatile
+private var cachedJetBrainsMonoTypography: Typography? = null
+
+val PlusJakartaSansFontFamily: FontFamily
+    get() = cachedPlusJakartaSansFamily ?: FallbackPlusJakartaSansFontFamily
+
+val JetBrainsMonoFontFamily: FontFamily
+    get() = cachedJetBrainsMonoFamily ?: FallbackJetBrainsMonoFontFamily
+
+/**
+ * Preloads and caches the bundled variable TTF fonts off the main thread at application startup
+ * so switching fonts in Settings is instantaneous with zero main-thread disk I/O or touch lag.
+ */
+fun preloadAppFonts(context: Context) {
+    val appContext = context.applicationContext
+    try {
+        if (cachedPlusJakartaSansFamily == null) {
+            ResourcesCompat.getFont(appContext, R.font.plus_jakarta_sans)?.let { tf ->
+                val family = FontFamily(tf)
+                cachedPlusJakartaSansFamily = family
+                cachedPlusJakartaTypography = createTypographyForFamily(family)
+            }
+        }
+    } catch (_: Throwable) {}
+
+    try {
+        if (cachedJetBrainsMonoFamily == null) {
+            ResourcesCompat.getFont(appContext, R.font.jetbrains_mono)?.let { tf ->
+                val family = FontFamily(tf)
+                cachedJetBrainsMonoFamily = family
+                cachedJetBrainsMonoTypography = createTypographyForFamily(family)
+            }
+        }
+    } catch (_: Throwable) {}
+}
+
+private fun createTypographyForFamily(activeFontFamily: FontFamily): Typography {
     return Typography(
         titleLarge = TextStyle(
             fontFamily = activeFontFamily,
@@ -97,4 +144,16 @@ fun buildAppTypography(selectedFont: AppFontFamily): Typography {
     )
 }
 
-val Typography = buildAppTypography(AppFontFamily.SYSTEM_DEFAULT)
+private val SystemDefaultTypography: Typography = createTypographyForFamily(FontFamily.Default)
+private val DefaultPlusJakartaTypography: Typography by lazy { createTypographyForFamily(PlusJakartaSansFontFamily) }
+private val DefaultJetBrainsMonoTypography: Typography by lazy { createTypographyForFamily(JetBrainsMonoFontFamily) }
+
+fun buildAppTypography(selectedFont: AppFontFamily): Typography {
+    return when (selectedFont) {
+        AppFontFamily.SYSTEM_DEFAULT -> SystemDefaultTypography
+        AppFontFamily.PLUS_JAKARTA_SANS -> cachedPlusJakartaTypography ?: DefaultPlusJakartaTypography
+        AppFontFamily.JETBRAINS_MONO -> cachedJetBrainsMonoTypography ?: DefaultJetBrainsMonoTypography
+    }
+}
+
+val Typography: Typography = SystemDefaultTypography

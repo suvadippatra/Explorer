@@ -702,17 +702,17 @@ object SettingsManager {
     }
 
     fun setThemeMode(context: Context, mode: ThemeMode) {
+        if (_themeMode.value == mode) return
         _themeMode.value = mode
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         prefs.edit().putString(KEY_THEME_MODE, mode.name).apply()
-        GlobalEvents.triggerConfigUpdate()
     }
 
     fun setAppFontFamily(context: Context, fontFamily: AppFontFamily) {
+        if (_appFontFamily.value == fontFamily) return
         _appFontFamily.value = fontFamily
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         prefs.edit().putString(KEY_APP_FONT_FAMILY, fontFamily.name).apply()
-        GlobalEvents.triggerConfigUpdate()
     }
 
 

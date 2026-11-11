@@ -83,11 +83,7 @@ android {
             excludes += "/META-INF/DEPENDENCIES"
             excludes += "/META-INF/INDEX.LIST"
             excludes += "/META-INF/io.netty.versions.properties"
-            excludes += "/META-INF/*.kotlin_module"
             excludes += "/META-INF/versions/**"
-            excludes += "/kotlin/**"
-            excludes += "/*.txt"
-            excludes += "/*.properties"
         }
     }
 }

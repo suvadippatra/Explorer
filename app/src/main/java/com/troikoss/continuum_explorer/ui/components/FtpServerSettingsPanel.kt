@@ -156,10 +156,14 @@ fun FtpServerSettingsPanel(
         }
     }
 
-    // Live uptime & SyncPlay position ticker
+    // Live uptime & SyncPlay position ticker (only ticks when server or SyncPlay room is active)
     var liveSyncPosMs by remember { mutableLongStateOf(0L) }
     LaunchedEffect(unifiedState.isAnyRunning, unifiedState.hubStartedAtMillis, syncRoomState.isActive, syncRoomState.isPlaying) {
-        while (true) {
+        if (!unifiedState.isAnyRunning && !syncRoomState.isActive) {
+            uptimeFormatted = "00:00:00"
+            return@LaunchedEffect
+        }
+        while (unifiedState.isAnyRunning || syncRoomState.isActive) {
             if (unifiedState.isAnyRunning && unifiedState.hubStartedAtMillis > 0L) {
                 val elapsedSec = ((System.currentTimeMillis() - unifiedState.hubStartedAtMillis) / 1000L).coerceAtLeast(0L)
                 val hours = elapsedSec / 3600
@@ -172,7 +176,7 @@ fun FtpServerSettingsPanel(
             if (syncRoomState.isActive) {
                 liveSyncPosMs = syncRoomState.currentPositionMs()
             }
-            delay(500L)
+            delay(if (syncRoomState.isActive && syncRoomState.isPlaying) 500L else 1000L)
         }
     }
 

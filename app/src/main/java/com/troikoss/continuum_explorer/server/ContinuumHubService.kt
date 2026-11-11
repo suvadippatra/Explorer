@@ -26,6 +26,7 @@ import android.util.Log
 import android.view.WindowManager
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.snapshots.Snapshot
 import androidx.core.app.NotificationCompat
 import com.troikoss.continuum_explorer.managers.SettingsManager
 import com.troikoss.continuum_explorer.ui.activities.MainActivity
@@ -127,35 +128,39 @@ class ContinuumHubService : Service() {
                 action = action,
                 details = details
             )
-            if (logEntries.size >= 250) {
-                logEntries.removeAt(logEntries.lastIndex)
-            }
-            logEntries.add(0, entry)
+            Snapshot.withMutableSnapshot {
+                if (logEntries.size >= 250) {
+                    logEntries.removeAt(logEntries.lastIndex)
+                }
+                logEntries.add(0, entry)
 
-            val existing = clientSessions[clientIp]
-            if (existing != null) {
-                clientSessions[clientIp] = existing.copy(
-                    lastSeen = now,
-                    requestsCount = existing.requestsCount + 1,
-                    bytesTransferred = existing.bytesTransferred + bytes,
-                    protocol = if (existing.protocol.contains(protocol)) existing.protocol else "${existing.protocol}/$protocol"
-                )
-            } else {
-                clientSessions[clientIp] = ClientSessionStats(
-                    clientIp = clientIp,
-                    protocol = protocol,
-                    firstSeen = now,
-                    lastSeen = now,
-                    requestsCount = 1,
-                    bytesTransferred = bytes
-                )
+                val existing = clientSessions[clientIp]
+                if (existing != null) {
+                    clientSessions[clientIp] = existing.copy(
+                        lastSeen = now,
+                        requestsCount = existing.requestsCount + 1,
+                        bytesTransferred = existing.bytesTransferred + bytes,
+                        protocol = if (existing.protocol.contains(protocol)) existing.protocol else "${existing.protocol}/$protocol"
+                    )
+                } else {
+                    clientSessions[clientIp] = ClientSessionStats(
+                        clientIp = clientIp,
+                        protocol = protocol,
+                        firstSeen = now,
+                        lastSeen = now,
+                        requestsCount = 1,
+                        bytesTransferred = bytes
+                    )
+                }
             }
         }
 
         @Synchronized
         fun clearLogs() {
-            logEntries.clear()
-            clientSessions.clear()
+            Snapshot.withMutableSnapshot {
+                logEntries.clear()
+                clientSessions.clear()
+            }
         }
 
         internal fun syncLegacyStaticFieldsFromManager(state: UnifiedServerState) {
@@ -314,22 +319,34 @@ class ContinuumHubService : Service() {
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                 val fgType = if (includeMediaProjection) {
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
                 } else {
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
                 }
                 startForeground(NOTIFICATION_ID, notification, fgType)
-            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && includeMediaProjection) {
-                startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val fgType = if (includeMediaProjection) {
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+                } else {
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+                }
+                startForeground(NOTIFICATION_ID, notification, fgType)
             } else {
                 startForeground(NOTIFICATION_ID, notification)
             }
-        } catch (e: Exception) {
-            Log.e("ContinuumHubService", "Failed to start foreground with projection type, falling back", e)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
-            } else {
-                startForeground(NOTIFICATION_ID, notification)
+        } catch (e: Throwable) {
+            Log.e("ContinuumHubService", "Failed to start foreground with projection type, falling back to DATA_SYNC", e)
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+                } else {
+                    startForeground(NOTIFICATION_ID, notification)
+                }
+            } catch (fallbackErr: Throwable) {
+                Log.e("ContinuumHubService", "Fallback startForeground failed", fallbackErr)
+                try {
+                    startForeground(NOTIFICATION_ID, notification)
+                } catch (_: Throwable) {}
             }
         }
     }

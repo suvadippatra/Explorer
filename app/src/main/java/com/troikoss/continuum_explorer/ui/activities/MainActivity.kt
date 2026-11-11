@@ -90,12 +90,13 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            if (Environment.isExternalStorageManager()) {
-                StorageProviders.init(applicationContext)
-            }
+        val hasStorageAccess = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            Environment.isExternalStorageManager()
         } else {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED) {
+            ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+        }
+        if (hasStorageAccess) {
+            lifecycleScope.launch(Dispatchers.IO) {
                 StorageProviders.init(applicationContext)
             }
         }
@@ -124,9 +125,12 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // Initialize settings and storage providers
+        // Initialize settings and warm up storage providers off the UI thread
         SettingsManager.init(applicationContext)
-        StorageProviders.init(applicationContext)
+        lifecycleScope.launch(Dispatchers.IO) {
+            com.troikoss.continuum_explorer.ui.theme.preloadAppFonts(applicationContext)
+            StorageProviders.init(applicationContext)
+        }
 
         if (intent.action == "com.troikoss.continuum_explorer.OPEN_NEW_WINDOW") {
             val freshIntent = Intent(this, MainActivity::class.java).apply {
@@ -162,20 +166,6 @@ class MainActivity : AppCompatActivity() {
         val initialEditorToolId = intent.getStringExtra("editorToolId")
         val initialConverterFilePaths = intent.getStringArrayListExtra("converterFilePaths")?.toList().orEmpty()
         val isSingleAppWindow = intent.getBooleanExtra("isSingleAppWindow", false)
-
-        // Build ImageLoader asynchronously to prevent main thread lag on startup
-        lifecycleScope.launch(Dispatchers.IO) {
-            val videoImageLoader = ImageLoader.Builder(this@MainActivity)
-                .components {
-                    add(UniversalFileFetcher.Factory())
-                    add(VideoFrameDecoder.Factory())
-                }
-                .crossfade(true)
-                .build()
-
-            // Set this as the global loader
-            Coil.setImageLoader(videoImageLoader)
-        }
 
         setContent {
             FileExplorerTheme {

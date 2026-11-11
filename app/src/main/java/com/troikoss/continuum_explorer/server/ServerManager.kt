@@ -318,7 +318,7 @@ object ServerManager {
                 }
                 ContinuumHubService.syncLegacyStaticFieldsFromManager(_state.value)
                 ContinuumHubService.recordLog("127.0.0.1", "HTTP", "START", "Ktor HTTP/WS Server online on :$DEFAULT_HTTP_PORT")
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 Log.e(TAG, "Failed to start Ktor HTTP server", e)
                 ktorServerInstance = null
                 val errMsg = e.localizedMessage ?: "Failed to bind HTTP port $DEFAULT_HTTP_PORT"
@@ -365,7 +365,7 @@ object ServerManager {
                     existing.stop(gracePeriodMillis = 100L, timeoutMillis = 400L)
                 }
                 ContinuumHubService.recordLog("127.0.0.1", "HTTP", "STOP", "Ktor HTTP Server stopped cleanly")
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 Log.w(TAG, "Exception while stopping Ktor HTTP server: ${e.message}")
             } finally {
                 ktorServerInstance = null
@@ -443,7 +443,7 @@ object ServerManager {
                 }
                 ContinuumHubService.syncLegacyStaticFieldsFromManager(_state.value)
                 ContinuumHubService.recordLog("127.0.0.1", "FTP", "START", "Apache FTP Server online on :$ftpPort")
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 Log.e(TAG, "Failed to start Apache FTP server on port $ftpPort", e)
                 ftpServerInstance = null
                 val errMsg = e.localizedMessage ?: "Failed to bind FTP port $ftpPort"
@@ -489,7 +489,7 @@ object ServerManager {
             try {
                 existing.stop(gracePeriodMs = if (graceful) 1500L else 100L)
                 ContinuumHubService.recordLog("127.0.0.1", "FTP", "STOP", "Apache FTP Server stopped cleanly")
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 Log.w(TAG, "Exception while stopping Apache FTP server: ${e.message}")
             } finally {
                 ftpServerInstance = null
