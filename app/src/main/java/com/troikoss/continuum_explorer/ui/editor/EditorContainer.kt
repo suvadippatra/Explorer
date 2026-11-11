@@ -178,6 +178,7 @@ fun EditorContainer(
                             onContentChange = { fileContent = it },
                             onSave = { saveActiveFile() },
                             onMenuClick = onMenuClick,
+                            onBackClick = { activeFile = null },
                             modifier = Modifier.fillMaxSize()
                         )
                     }
@@ -193,6 +194,7 @@ fun EditorContainer(
                             onContentChange = { fileContent = it },
                             onSave = { saveActiveFile() },
                             onMenuClick = onMenuClick,
+                            onBackClick = { activeFile = null },
                             modifier = Modifier.fillMaxSize()
                         )
                     }
@@ -227,6 +229,7 @@ fun EditorContainer(
                             },
                             fileRef = currentFile,
                             onMenuClick = onMenuClick,
+                            onExitEditor = { activeFile = null },
                             modifier = Modifier.fillMaxSize()
                         )
                     }

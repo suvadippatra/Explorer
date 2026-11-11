@@ -1,5 +1,8 @@
 package com.troikoss.continuum_explorer.ui.editor
 
+import android.annotation.SuppressLint
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -8,6 +11,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -15,16 +19,23 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import com.troikoss.continuum_explorer.ui.editor.text.FormatRegistry
+import com.troikoss.continuum_explorer.ui.editor.text.SyntaxHighlighter
 import java.io.File
 
 /**
- * Code Editor view with line numbers, search, format status, and word/character counts.
+ * Code Studio Editor with syntax highlighting, line numbers, Material 3 Find & Replace,
+ * unsaved-changes guard, and built-in Live HTML5 Preview / Split View for .html & .htm files.
  */
+@SuppressLint("SetJavaScriptEnabled")
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CodeEditorView(
@@ -33,29 +44,98 @@ fun CodeEditorView(
     onContentChange: (String) -> Unit,
     onSave: () -> Unit,
     onMenuClick: () -> Unit = {},
+    onBackClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     var textValue by remember(file.absolutePath, content) { mutableStateOf(content) }
+    var lastSavedText by remember(file.absolutePath) { mutableStateOf(content) }
+    val isModified = textValue != lastSavedText
+    var showUnsavedDialog by remember { mutableStateOf(false) }
+
     var searchQuery by remember { mutableStateOf("") }
+    var replaceQuery by remember { mutableStateOf("") }
     var showSearch by remember { mutableStateOf(false) }
+    var fontSizeSp by remember { mutableIntStateOf(13) }
+
+    val ext = remember(file.name) { file.extension.lowercase() }
+    val isHtmlFile = remember(ext) { ext in listOf("html", "htm", "xhtml") }
+    // 0 = Code Only, 1 = Split Code + HTML Preview, 2 = Full HTML Preview
+    var htmlPreviewMode by remember(file.absolutePath) { mutableIntStateOf(0) }
 
     val lines = remember(textValue) { textValue.split("\n") }
     val lineCount = lines.size
     val charCount = textValue.length
+    val matchCount = remember(textValue, searchQuery) {
+        if (searchQuery.isBlank()) 0
+        else Regex(Regex.escape(searchQuery), RegexOption.IGNORE_CASE).findAll(textValue).count()
+    }
+
+    val formatType = remember(file.name) { FormatRegistry.detectFormat(file.name) }
+    val syntaxHighlighter = remember(formatType) { SyntaxHighlighter(formatType) }
 
     val verticalScrollState = rememberScrollState()
     val horizontalScrollState = rememberScrollState()
+
+    val handleExit = {
+        if (isModified) {
+            showUnsavedDialog = true
+        } else {
+            (onBackClick ?: onMenuClick).invoke()
+        }
+    }
+
+    BackHandler {
+        handleExit()
+    }
+
+    if (showUnsavedDialog) {
+        AlertDialog(
+            onDismissRequest = { showUnsavedDialog = false },
+            icon = { Icon(Icons.Default.Save, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+            title = { Text("Unsaved Code Changes", fontWeight = FontWeight.Bold) },
+            text = { Text("Save your changes to \"${file.name}\" before leaving Code Studio?") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onSave()
+                        lastSavedText = textValue
+                        showUnsavedDialog = false
+                        (onBackClick ?: onMenuClick).invoke()
+                    }
+                ) {
+                    Text("Save & Exit")
+                }
+            },
+            dismissButton = {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = {
+                            showUnsavedDialog = false
+                            (onBackClick ?: onMenuClick).invoke()
+                        }
+                    ) {
+                        Text("Discard")
+                    }
+                    TextButton(onClick = { showUnsavedDialog = false }) {
+                        Text("Cancel")
+                    }
+                }
+            }
+        )
+    }
 
     Column(
         modifier = modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.surface)
     ) {
-        // Unified 50.dp Toolbar with Triple-Line Menu Button on Left
+        // Unified 50.dp Toolbar with Single Clean Back Button on Left
         Surface(
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
             tonalElevation = 2.dp,
-            modifier = Modifier.fillMaxWidth().height(50.dp)
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(50.dp)
         ) {
             Row(
                 modifier = Modifier
@@ -66,127 +146,308 @@ fun CodeEditorView(
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.weight(1f)
                 ) {
-                    IconButton(onClick = onMenuClick, modifier = Modifier.size(36.dp)) {
+                    IconButton(
+                        onClick = handleExit,
+                        modifier = Modifier
+                            .size(36.dp)
+                            .testTag("code_editor_back_button")
+                    ) {
                         Icon(
-                            Icons.Default.Menu,
-                            contentDescription = "Toggle Navigation Sidebar",
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back",
                             tint = MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.size(20.dp)
                         )
                     }
                     Icon(
-                        Icons.Default.Code,
+                        if (isHtmlFile) Icons.Default.Html else Icons.Default.Code,
                         contentDescription = "Code Studio",
                         tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(18.dp)
                     )
                     Text(
-                        text = file.name,
+                        text = if (isModified) "${file.name} •" else file.name,
                         style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
                     )
                     Surface(
-                        shape = RoundedCornerShape(4.dp),
-                        color = MaterialTheme.colorScheme.secondaryContainer
+                        shape = RoundedCornerShape(6.dp),
+                        color = if (isModified) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.secondaryContainer
                     ) {
                         Text(
                             text = file.extension.uppercase().ifEmpty { "CODE" },
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                            fontWeight = FontWeight.Bold,
+                            color = if (isModified) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSecondaryContainer,
                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                         )
                     }
                 }
 
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    IconButton(onClick = { showSearch = !showSearch }, modifier = Modifier.size(32.dp)) {
-                        Icon(Icons.Default.Search, contentDescription = "Find", modifier = Modifier.size(18.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    if (isHtmlFile) {
+                        FilterChip(
+                            selected = htmlPreviewMode == 1,
+                            onClick = { htmlPreviewMode = if (htmlPreviewMode == 1) 0 else 1 },
+                            label = { Text("Split", style = MaterialTheme.typography.labelSmall) },
+                            leadingIcon = { Icon(Icons.Default.VerticalSplit, contentDescription = null, modifier = Modifier.size(14.dp)) },
+                            modifier = Modifier.height(30.dp)
+                        )
+                        FilterChip(
+                            selected = htmlPreviewMode == 2,
+                            onClick = { htmlPreviewMode = if (htmlPreviewMode == 2) 0 else 2 },
+                            label = { Text("Preview", style = MaterialTheme.typography.labelSmall) },
+                            leadingIcon = { Icon(Icons.Default.Web, contentDescription = null, modifier = Modifier.size(14.dp)) },
+                            modifier = Modifier.height(30.dp)
+                        )
                     }
-                    IconButton(onClick = { onSave() }, modifier = Modifier.size(32.dp)) {
-                        Icon(Icons.Default.Save, contentDescription = "Save", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                    IconButton(
+                        onClick = { showSearch = !showSearch },
+                        modifier = Modifier
+                            .size(34.dp)
+                            .testTag("code_editor_search_toggle")
+                    ) {
+                        Icon(
+                            Icons.Default.Search,
+                            contentDescription = "Find & Replace",
+                            tint = if (showSearch) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    IconButton(
+                        onClick = {
+                            onSave()
+                            lastSavedText = textValue
+                        },
+                        modifier = Modifier
+                            .size(34.dp)
+                            .testTag("code_editor_save_button")
+                    ) {
+                        Icon(
+                            Icons.Default.Save,
+                            contentDescription = "Save",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(19.dp)
+                        )
                     }
                 }
             }
         }
 
-        if (showSearch) {
-            OutlinedTextField(
-                value = searchQuery,
-                onValueChange = { searchQuery = it },
-                label = { Text("Search in code", style = MaterialTheme.typography.bodySmall) },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(16.dp)) },
-                trailingIcon = {
-                    IconButton(onClick = { showSearch = false }) {
-                        Icon(Icons.Default.Close, contentDescription = "Close", modifier = Modifier.size(16.dp))
+        // Material 3 Find & Replace Panel
+        AnimatedVisibility(visible = showSearch) {
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceContainer,
+                tonalElevation = 2.dp,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        OutlinedTextField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            placeholder = { Text("Find in code...", style = MaterialTheme.typography.bodySmall) },
+                            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                            trailingIcon = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    if (searchQuery.isNotEmpty()) {
+                                        Text(
+                                            text = "$matchCount matches",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.padding(end = 4.dp)
+                                        )
+                                        IconButton(onClick = { searchQuery = "" }, modifier = Modifier.size(24.dp)) {
+                                            Icon(Icons.Default.Clear, contentDescription = "Clear", modifier = Modifier.size(14.dp))
+                                        }
+                                    }
+                                }
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                            singleLine = true,
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("code_search_input")
+                        )
+                        IconButton(onClick = { showSearch = false }, modifier = Modifier.size(32.dp)) {
+                            Icon(Icons.Default.Close, contentDescription = "Close Search", modifier = Modifier.size(18.dp))
+                        }
+                    }
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        OutlinedTextField(
+                            value = replaceQuery,
+                            onValueChange = { replaceQuery = it },
+                            placeholder = { Text("Replace with...", style = MaterialTheme.typography.bodySmall) },
+                            leadingIcon = { Icon(Icons.Default.FindReplace, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                            shape = RoundedCornerShape(12.dp),
+                            singleLine = true,
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("code_replace_input")
+                        )
+                        FilledTonalButton(
+                            onClick = {
+                                if (searchQuery.isNotEmpty()) {
+                                    val updated = textValue.replaceFirst(searchQuery, replaceQuery, ignoreCase = true)
+                                    textValue = updated
+                                    onContentChange(updated)
+                                }
+                            },
+                            enabled = searchQuery.isNotEmpty() && matchCount > 0,
+                            shape = RoundedCornerShape(10.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                            modifier = Modifier.height(36.dp)
+                        ) {
+                            Text("Replace", style = MaterialTheme.typography.labelSmall)
+                        }
+                        Button(
+                            onClick = {
+                                if (searchQuery.isNotEmpty()) {
+                                    val updated = textValue.replace(searchQuery, replaceQuery, ignoreCase = true)
+                                    textValue = updated
+                                    onContentChange(updated)
+                                }
+                            },
+                            enabled = searchQuery.isNotEmpty() && matchCount > 0,
+                            shape = RoundedCornerShape(10.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                            modifier = Modifier.height(36.dp)
+                        ) {
+                            Text("All", style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                }
+            }
+        }
+
+        @Composable
+        fun CodePane(modifier: Modifier = Modifier) {
+            Box(
+                modifier = modifier
+                    .background(Color(0xFF1E1E1E))
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(verticalScrollState)
+                ) {
+                    // Line Number Column
+                    Column(
+                        modifier = Modifier
+                            .background(Color(0xFF252526))
+                            .padding(horizontal = 10.dp, vertical = 10.dp),
+                        horizontalAlignment = Alignment.End
+                    ) {
+                        for (i in 1..lineCount.coerceAtLeast(1)) {
+                            Text(
+                                text = "$i",
+                                style = TextStyle(
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = fontSizeSp.sp,
+                                    lineHeight = (fontSizeSp + 5).sp,
+                                    color = Color(0xFF858585)
+                                )
+                            )
+                        }
+                    }
+
+                    // Code Input Field with Live Syntax Highlighting
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .horizontalScroll(horizontalScrollState)
+                            .padding(10.dp)
+                    ) {
+                        BasicTextField(
+                            value = textValue,
+                            onValueChange = {
+                                textValue = it
+                                onContentChange(it)
+                            },
+                            visualTransformation = syntaxHighlighter,
+                            textStyle = TextStyle(
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = fontSizeSp.sp,
+                                color = Color(0xFFD4D4D4),
+                                lineHeight = (fontSizeSp + 5).sp
+                            ),
+                            cursorBrush = SolidColor(Color(0xFF00E676)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("code_editor_text_field")
+                        )
+                    }
+                }
+            }
+        }
+
+        @Composable
+        fun HtmlWebPane(modifier: Modifier = Modifier) {
+            val baseUrl = remember(file) {
+                file.parentFile?.let { "file://${it.absolutePath}/" } ?: "file:///android_asset/"
+            }
+            AndroidView(
+                modifier = modifier.background(Color.White),
+                factory = { ctx ->
+                    android.webkit.WebView(ctx).apply {
+                        settings.javaScriptEnabled = true
+                        settings.domStorageEnabled = true
+                        settings.allowFileAccess = true
+                        webViewClient = android.webkit.WebViewClient()
+                        loadDataWithBaseURL(baseUrl, textValue, "text/html", "UTF-8", null)
                     }
                 },
-                singleLine = true,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                update = { wv ->
+                    wv.loadDataWithBaseURL(baseUrl, textValue, "text/html", "UTF-8", null)
+                }
             )
         }
 
-        // Main Editor Area with Line Numbers
+        // Main Workspace Area
         Box(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
-                .background(Color(0xFF1E1E1E))
         ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(verticalScrollState)
-            ) {
-                // Line Number Column
-                Column(
-                    modifier = Modifier
-                        .background(Color(0xFF252526))
-                        .padding(horizontal = 8.dp, vertical = 8.dp),
-                    horizontalAlignment = Alignment.End
-                ) {
-                    for (i in 1..lineCount.coerceAtLeast(1)) {
-                        Text(
-                            text = "$i",
-                            style = TextStyle(
-                                fontFamily = FontFamily.Monospace,
-                                fontSize = 12.sp,
-                                color = Color(0xFF858585)
-                            )
-                        )
+            when {
+                isHtmlFile && htmlPreviewMode == 2 -> {
+                    HtmlWebPane(Modifier.fillMaxSize())
+                }
+                isHtmlFile && htmlPreviewMode == 1 -> {
+                    Row(modifier = Modifier.fillMaxSize()) {
+                        CodePane(Modifier.weight(1f).fillMaxHeight())
+                        VerticalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outlineVariant)
+                        HtmlWebPane(Modifier.weight(1f).fillMaxHeight())
                     }
                 }
-
-                // Code Input Field
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .horizontalScroll(horizontalScrollState)
-                        .padding(8.dp)
-                ) {
-                    BasicTextField(
-                        value = textValue,
-                        onValueChange = {
-                            textValue = it
-                            onContentChange(it)
-                        },
-                        textStyle = TextStyle(
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 12.sp,
-                            color = Color(0xFFD4D4D4),
-                            lineHeight = 16.sp
-                        ),
-                        cursorBrush = SolidColor(Color(0xFF00E676)),
-                        modifier = Modifier.fillMaxWidth()
-                    )
+                else -> {
+                    CodePane(Modifier.fillMaxSize())
                 }
             }
         }
 
-        // Status Footer Bar
+        // Status Footer Bar with Font Zoom Controls
         Surface(
             color = MaterialTheme.colorScheme.surfaceContainer,
             tonalElevation = 1.dp
@@ -199,15 +460,33 @@ fun CodeEditorView(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "Lines: $lineCount | Chars: $charCount",
+                    text = "Lines: $lineCount • Chars: $charCount" + if (isModified) " • Modified" else " • Saved",
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = if (isModified) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                Text(
-                    text = "UTF-8",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    IconButton(
+                        onClick = { if (fontSizeSp > 10) fontSizeSp-- },
+                        modifier = Modifier.size(22.dp)
+                    ) {
+                        Icon(Icons.Default.Remove, contentDescription = "Smaller Font", modifier = Modifier.size(14.dp))
+                    }
+                    Text(
+                        text = "${fontSizeSp}sp • UTF-8",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    IconButton(
+                        onClick = { if (fontSizeSp < 24) fontSizeSp++ },
+                        modifier = Modifier.size(22.dp)
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = "Larger Font", modifier = Modifier.size(14.dp))
+                    }
+                }
             }
         }
     }

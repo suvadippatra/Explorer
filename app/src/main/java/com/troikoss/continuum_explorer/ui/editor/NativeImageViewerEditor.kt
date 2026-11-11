@@ -16,6 +16,9 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -74,6 +77,7 @@ fun NativeImageViewerEditor(
     file: UniversalFile,
     appState: FileExplorerState,
     onMenuClick: () -> Unit,
+    onExitEditor: (() -> Unit)? = null,
     startInEditMode: Boolean = true,
     modifier: Modifier = Modifier
 ) {
@@ -378,7 +382,7 @@ fun NativeImageViewerEditor(
                     imageWidth = imageWidth,
                     imageHeight = imageHeight,
                     fileSizeFormatted = fileSizeFormatted,
-                    onMenuClick = onMenuClick,
+                    onMenuClick = { (onExitEditor ?: onMenuClick).invoke() },
                     onEnterEditMode = { isEditMode = true },
                     onShowExifDialog = { showExifDialog = true },
                     onShare = { shareImage() },
@@ -399,7 +403,7 @@ fun NativeImageViewerEditor(
                 targetSaveFile = fileRef,
                 onExit = {
                     if (startInEditMode) {
-                        onMenuClick()
+                        (onExitEditor ?: onMenuClick).invoke()
                     } else {
                         isEditMode = false
                     }
@@ -414,7 +418,7 @@ fun NativeImageViewerEditor(
                     appState.refresh()
                     GlobalEvents.triggerRefresh()
                     if (startInEditMode) {
-                        onMenuClick()
+                        (onExitEditor ?: onMenuClick).invoke()
                     } else {
                         isEditMode = false
                     }
@@ -452,13 +456,23 @@ fun NativeImageViewerEditor(
     if (showAddTextDialog) {
         AlertDialog(
             onDismissRequest = { showAddTextDialog = false },
-            title = { Text("Add Text Overlay") },
+            title = { Text("Add Text Overlay", fontWeight = FontWeight.Bold) },
             text = {
                 OutlinedTextField(
                     value = newOverlayText,
                     onValueChange = { newOverlayText = it },
-                    label = { Text("Text") },
+                    label = { Text("Overlay Text") },
+                    placeholder = { Text("Type caption or watermark...") },
+                    leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
+                    trailingIcon = {
+                        if (newOverlayText.isNotEmpty()) {
+                            IconButton(onClick = { newOverlayText = "" }) {
+                                Icon(Icons.Default.Close, contentDescription = "Clear")
+                            }
+                        }
+                    },
                     singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.fillMaxWidth()
                 )
             },

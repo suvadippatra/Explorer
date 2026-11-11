@@ -330,8 +330,16 @@ object DocumentDataConversionEngine {
         val lines = md.lines()
         val body = StringBuilder()
         var inCodeBlock = false
+        var inTable = false
+        var tableHeaderDone = false
+
         for (line in lines) {
             if (line.trim().startsWith("```")) {
+                if (inTable) {
+                    body.append("</tbody></table>\n")
+                    inTable = false
+                    tableHeaderDone = false
+                }
                 if (!inCodeBlock) {
                     body.append("<pre><code>")
                     inCodeBlock = true
@@ -346,10 +354,37 @@ object DocumentDataConversionEngine {
                 continue
             }
             val trimmed = line.trim()
+
+            // Markdown pipe table support
+            if (trimmed.startsWith("|") && trimmed.endsWith("|") && trimmed.count { it == '|' } >= 2) {
+                val cells = trimmed.removePrefix("|").removeSuffix("|").split("|").map { it.trim() }
+                val isSeparator = cells.all { it.matches(Regex("^:?-{2,}:?$")) }
+                if (!inTable) {
+                    body.append("<table><thead><tr>")
+                    cells.forEach { c -> body.append("<th>").append(formatInlineMarkdown(c)).append("</th>") }
+                    body.append("</tr></thead><tbody>\n")
+                    inTable = true
+                    tableHeaderDone = true
+                } else if (!isSeparator) {
+                    body.append("<tr>")
+                    cells.forEach { c -> body.append("<td>").append(formatInlineMarkdown(c)).append("</td>") }
+                    body.append("</tr>\n")
+                }
+                continue
+            } else if (inTable) {
+                body.append("</tbody></table>\n")
+                inTable = false
+                tableHeaderDone = false
+            }
+
             when {
+                trimmed.startsWith("###### ") -> body.append("<h6>").append(formatInlineMarkdown(trimmed.removePrefix("###### "))).append("</h6>\n")
+                trimmed.startsWith("##### ") -> body.append("<h5>").append(formatInlineMarkdown(trimmed.removePrefix("##### "))).append("</h5>\n")
+                trimmed.startsWith("#### ") -> body.append("<h4>").append(formatInlineMarkdown(trimmed.removePrefix("#### "))).append("</h4>\n")
                 trimmed.startsWith("### ") -> body.append("<h3>").append(formatInlineMarkdown(trimmed.removePrefix("### "))).append("</h3>\n")
                 trimmed.startsWith("## ") -> body.append("<h2>").append(formatInlineMarkdown(trimmed.removePrefix("## "))).append("</h2>\n")
                 trimmed.startsWith("# ") -> body.append("<h1>").append(formatInlineMarkdown(trimmed.removePrefix("# "))).append("</h1>\n")
+                trimmed == "---" || trimmed == "***" -> body.append("<hr/>\n")
                 trimmed.startsWith("- ") || trimmed.startsWith("* ") ->
                     body.append("<li>").append(formatInlineMarkdown(trimmed.drop(2))).append("</li>\n")
                 trimmed.startsWith("> ") ->
@@ -358,6 +393,7 @@ object DocumentDataConversionEngine {
                 else -> body.append("<p>").append(formatInlineMarkdown(line)).append("</p>\n")
             }
         }
+        if (inTable) body.append("</tbody></table>\n")
         if (inCodeBlock) body.append("</code></pre>\n")
 
         return """
@@ -368,15 +404,16 @@ object DocumentDataConversionEngine {
               <meta name="viewport" content="width=device-width, initial-scale=1.0" />
               <title>${escapeHtml(title)}</title>
               <style>
-                body { font-family: system-ui, -apple-system, sans-serif; line-height: 1.6; max-width: 820px; margin: 2rem auto; padding: 0 1.2rem; color: #1e293b; background: #ffffff; }
-                h1, h2, h3 { color: #0f172a; border-bottom: 1px solid #e2e8f0; padding-bottom: 0.3rem; }
+                body { font-family: system-ui, -apple-system, sans-serif; line-height: 1.65; max-width: 860px; margin: 2rem auto; padding: 0 1.25rem; color: #1e293b; background: #ffffff; }
+                h1, h2, h3, h4, h5, h6 { color: #0f172a; border-bottom: 1px solid #e2e8f0; padding-bottom: 0.3rem; }
                 pre { background: #0f172a; color: #f8fafc; padding: 1rem; border-radius: 8px; overflow-x: auto; }
                 code { font-family: monospace; background: #f1f5f9; padding: 0.15rem 0.35rem; border-radius: 4px; }
                 pre code { background: transparent; padding: 0; }
                 blockquote { border-left: 4px solid #6366f1; margin: 0; padding-left: 1rem; color: #475569; }
                 table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
                 th, td { border: 1px solid #cbd5e1; padding: 0.5rem 0.75rem; text-align: left; }
-                th { background: #f8fafc; }
+                th { background: #f8fafc; font-weight: 600; }
+                hr { border: 0; border-top: 1px solid #e2e8f0; margin: 1.5rem 0; }
               </style>
             </head>
             <body>
@@ -390,6 +427,7 @@ object DocumentDataConversionEngine {
         var s = escapeHtml(text)
         s = s.replace(Regex("\\*\\*(.+?)\\*\\*"), "<strong>$1</strong>")
         s = s.replace(Regex("\\*(.+?)\\*"), "<em>$1</em>")
+        s = s.replace(Regex("~~(.+?)~~"), "<del>$1</del>")
         s = s.replace(Regex("`(.+?)`"), "<code>$1</code>")
         s = s.replace(Regex("\\[(.+?)]\\((.+?)\\)"), "<a href=\"$2\">$1</a>")
         return s
@@ -400,19 +438,30 @@ object DocumentDataConversionEngine {
             .replace(Regex("^#{1,6}\\s+", RegexOption.MULTILINE), "")
             .replace(Regex("\\*\\*(.+?)\\*\\*"), "$1")
             .replace(Regex("\\*(.+?)\\*"), "$1")
+            .replace(Regex("~~(.+?)~~"), "$1")
             .replace(Regex("`(.+?)`"), "$1")
             .replace(Regex("\\[(.+?)]\\((.+?)\\)"), "$1 ($2)")
     }
 
     private fun htmlToMarkdown(html: String): String {
         return html
+            .replace(Regex("(?i)<style[^>]*>[\\s\\S]*?</style>"), "")
+            .replace(Regex("(?i)<script[^>]*>[\\s\\S]*?</script>"), "")
             .replace(Regex("(?i)<h1[^>]*>(.*?)</h1>"), "# $1\n\n")
             .replace(Regex("(?i)<h2[^>]*>(.*?)</h2>"), "## $1\n\n")
             .replace(Regex("(?i)<h3[^>]*>(.*?)</h3>"), "### $1\n\n")
+            .replace(Regex("(?i)<h4[^>]*>(.*?)</h4>"), "#### $1\n\n")
+            .replace(Regex("(?i)<h5[^>]*>(.*?)</h5>"), "##### $1\n\n")
+            .replace(Regex("(?i)<h6[^>]*>(.*?)</h6>"), "###### $1\n\n")
+            .replace(Regex("(?i)<a[^>]*href=[\"']([^\"']+)[\"'][^>]*>(.*?)</a>"), "[$2]($1)")
+            .replace(Regex("(?i)<pre[^>]*><code[^>]*>([\\s\\S]*?)</code></pre>"), "\n```\n$1\n```\n")
+            .replace(Regex("(?i)<code[^>]*>(.*?)</code>"), "`$1`")
             .replace(Regex("(?i)<strong[^>]*>(.*?)</strong>"), "**$1**")
             .replace(Regex("(?i)<b[^>]*>(.*?)</b>"), "**$1**")
             .replace(Regex("(?i)<em[^>]*>(.*?)</em>"), "*$1*")
             .replace(Regex("(?i)<i[^>]*>(.*?)</i>"), "*$1*")
+            .replace(Regex("(?i)<blockquote[^>]*>(.*?)</blockquote>"), "> $1\n\n")
+            .replace(Regex("(?i)<hr\\s*/?>"), "\n---\n")
             .replace(Regex("(?i)<li[^>]*>(.*?)</li>"), "- $1\n")
             .replace(Regex("(?i)<br\\s*/?>"), "\n")
             .replace(Regex("(?i)</p>"), "\n\n")
@@ -430,7 +479,7 @@ object DocumentDataConversionEngine {
             .replace(Regex("(?i)<style[^>]*>[\\s\\S]*?</style>"), "")
             .replace(Regex("(?i)<script[^>]*>[\\s\\S]*?</script>"), "")
             .replace(Regex("(?i)<br\\s*/?>"), "\n")
-            .replace(Regex("(?i)</(p|div|h1|h2|h3|h4|li|tr)>"), "\n")
+            .replace(Regex("(?i)</(p|div|h1|h2|h3|h4|h5|h6|li|tr)>"), "\n")
             .replace(Regex("<[^>]+>"), "")
             .replace("&nbsp;", " ")
             .replace("&amp;", "&")

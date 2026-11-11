@@ -57,6 +57,7 @@ import androidx.compose.material.icons.filled.Usb
 import androidx.compose.material.icons.filled.Router
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.TextButton
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -300,8 +301,8 @@ fun NavigationPane(
                 modifier = Modifier.size(36.dp)
             ) {
                 Icon(
-                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = "Hide Sidebar",
+                    imageVector = Icons.Default.ChevronLeft,
+                    contentDescription = "Collapse Sidebar",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }

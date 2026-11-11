@@ -162,9 +162,225 @@ fun ImageFullPageView(file: UniversalFile) {
 }
 
 /**
- * Full-page Read-Only Document & Code Viewer with Markor WebView Rendering
- * for Markdown/Org/AsciiDoc/CSV, Interactive Task View for Todo.txt,
- * and Syntax-Highlighted Code View with a quick "Edit in Markor" button.
+ * Interactive HTML / XHTML Web Previewer with Rendered WebView, Split View, and Source View,
+ * plus Desktop Viewport toggle, Dark/Light canvas toggle, and Reload action.
+ */
+@android.annotation.SuppressLint("SetJavaScriptEnabled")
+@Composable
+fun HtmlFullPagePreview(
+    rawHtml: String,
+    baseFile: java.io.File? = null,
+    fileName: String = "index.html",
+    onEditInCodeStudio: (() -> Unit)? = null,
+    modifier: Modifier = Modifier
+) {
+    var viewMode by remember { mutableIntStateOf(0) } // 0 = Rendered Web, 1 = Split View, 2 = Source Code
+    var desktopMode by remember { mutableStateOf(false) }
+    var darkWebCanvas by remember { mutableStateOf(false) }
+    var reloadKey by remember { mutableIntStateOf(0) }
+    val baseUrl = remember(baseFile) {
+        baseFile?.parentFile?.let { "file://${it.absolutePath}/" } ?: "file:///android_asset/"
+    }
+
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.surface)
+    ) {
+        // HTML Preview Control Bar
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            tonalElevation = 1.dp,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Html,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(
+                            text = "HTML5 PREVIEW",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    }
+                }
+
+                FilterChip(
+                    selected = viewMode == 0,
+                    onClick = { viewMode = 0 },
+                    label = { Text("Rendered Web", style = MaterialTheme.typography.labelSmall) },
+                    leadingIcon = { Icon(Icons.Default.Web, contentDescription = null, modifier = Modifier.size(14.dp)) }
+                )
+                FilterChip(
+                    selected = viewMode == 1,
+                    onClick = { viewMode = 1 },
+                    label = { Text("Split View", style = MaterialTheme.typography.labelSmall) },
+                    leadingIcon = { Icon(Icons.Default.VerticalSplit, contentDescription = null, modifier = Modifier.size(14.dp)) }
+                )
+                FilterChip(
+                    selected = viewMode == 2,
+                    onClick = { viewMode = 2 },
+                    label = { Text("Source Code", style = MaterialTheme.typography.labelSmall) },
+                    leadingIcon = { Icon(Icons.Default.Code, contentDescription = null, modifier = Modifier.size(14.dp)) }
+                )
+
+                FilterChip(
+                    selected = desktopMode,
+                    onClick = {
+                        desktopMode = !desktopMode
+                        reloadKey++
+                    },
+                    label = { Text(if (desktopMode) "Desktop 1280px" else "Mobile Fit", style = MaterialTheme.typography.labelSmall) },
+                    leadingIcon = {
+                        Icon(
+                            if (desktopMode) Icons.Default.DesktopWindows else Icons.Default.Smartphone,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
+                )
+
+                IconButton(
+                    onClick = {
+                        darkWebCanvas = !darkWebCanvas
+                        reloadKey++
+                    },
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        if (darkWebCanvas) Icons.Default.LightMode else Icons.Default.DarkMode,
+                        contentDescription = "Toggle Web Theme",
+                        modifier = Modifier.size(17.dp)
+                    )
+                }
+
+                IconButton(
+                    onClick = { reloadKey++ },
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(Icons.Default.Refresh, contentDescription = "Reload HTML", modifier = Modifier.size(17.dp))
+                }
+
+                if (onEditInCodeStudio != null) {
+                    FilledTonalButton(
+                        onClick = onEditInCodeStudio,
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                        modifier = Modifier.height(32.dp)
+                    ) {
+                        Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Edit in Code Studio", style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+            }
+        }
+
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+        val effectiveHtml = remember(rawHtml, darkWebCanvas) {
+            if (!darkWebCanvas) rawHtml
+            else {
+                val darkStyle = "<style>html,body{background:#121212 !important;color:#e2e8f0 !important;}a{color:#60a5fa !important;}</style>"
+                if (rawHtml.contains("</head>", ignoreCase = true)) {
+                    rawHtml.replaceFirst(Regex("(?i)</head>"), "$darkStyle</head>")
+                } else {
+                    "$darkStyle$rawHtml"
+                }
+            }
+        }
+
+        @Composable
+        fun RenderHtmlWebView(modifier: Modifier = Modifier) {
+            key(reloadKey, desktopMode, darkWebCanvas) {
+                androidx.compose.ui.viewinterop.AndroidView(
+                    modifier = modifier.fillMaxSize(),
+                    factory = { ctx ->
+                        android.webkit.WebView(ctx).apply {
+                            settings.javaScriptEnabled = true
+                            settings.domStorageEnabled = true
+                            settings.allowFileAccess = true
+                            settings.allowContentAccess = true
+                            settings.builtInZoomControls = true
+                            settings.displayZoomControls = false
+                            settings.useWideViewPort = desktopMode
+                            settings.loadWithOverviewMode = desktopMode
+                            webViewClient = android.webkit.WebViewClient()
+                            loadDataWithBaseURL(baseUrl, effectiveHtml, "text/html", "UTF-8", null)
+                        }
+                    },
+                    update = { webView ->
+                        webView.settings.useWideViewPort = desktopMode
+                        webView.settings.loadWithOverviewMode = desktopMode
+                        webView.loadDataWithBaseURL(baseUrl, effectiveHtml, "text/html", "UTF-8", null)
+                    }
+                )
+            }
+        }
+
+        @Composable
+        fun RenderSourceCodePane(modifier: Modifier = Modifier) {
+            val highlighted = remember(rawHtml, fileName) {
+                SyntaxHighlighter.highlightText(rawHtml, FormatRegistry.detectFormat(fileName))
+            }
+            SelectionContainer {
+                Column(
+                    modifier = modifier
+                        .fillMaxSize()
+                        .background(Color(0xFF1E1E1E))
+                        .verticalScroll(rememberScrollState())
+                        .padding(16.dp)
+                ) {
+                    Text(
+                        text = highlighted,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 13.sp,
+                        lineHeight = 20.sp,
+                        color = Color(0xFFD4D4D4)
+                    )
+                }
+            }
+        }
+
+        Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+            when (viewMode) {
+                0 -> RenderHtmlWebView(Modifier.fillMaxSize())
+                1 -> {
+                    Row(modifier = Modifier.fillMaxSize()) {
+                        RenderSourceCodePane(Modifier.weight(1f).fillMaxHeight())
+                        VerticalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outlineVariant)
+                        RenderHtmlWebView(Modifier.weight(1f).fillMaxHeight())
+                    }
+                }
+                else -> RenderSourceCodePane(Modifier.fillMaxSize())
+            }
+        }
+    }
+}
+
+/**
+ * Full-page Read-Only Document, HTML & Code Viewer with Markor WebView Rendering
+ * for Markdown/Org/AsciiDoc/CSV, Interactive HTML5 WebView Preview for .html/.htm/.xhtml,
+ * Interactive Task View for Todo.txt, and Syntax-Highlighted Code View.
  */
 @Composable
 fun TextFullPageView(
@@ -173,9 +389,12 @@ fun TextFullPageView(
 ) {
     var textContent by remember(file) { mutableStateOf<String?>(null) }
     var isLoading by remember(file) { mutableStateOf(true) }
+    val ext = remember(file.name) { file.name.substringAfterLast('.', "").lowercase() }
+    val isHtmlFile = remember(ext) { ext in listOf("html", "htm", "xhtml") }
     val formatType = remember(file.name) { FormatRegistry.detectFormat(file.name) }
-    val supportsRichPreview = remember(formatType) {
-        formatType == TextFormatType.MARKDOWN ||
+    val supportsRichPreview = remember(formatType, isHtmlFile) {
+        isHtmlFile ||
+            formatType == TextFormatType.MARKDOWN ||
             formatType == TextFormatType.ORG ||
             formatType == TextFormatType.ASCIIDOC ||
             formatType == TextFormatType.CSV ||
@@ -197,6 +416,22 @@ fun TextFullPageView(
             }
         }
         isLoading = false
+    }
+
+    if (!isLoading && isHtmlFile) {
+        HtmlFullPagePreview(
+            rawHtml = textContent ?: "",
+            baseFile = file.fileRef,
+            fileName = file.name,
+            onEditInCodeStudio = if (appState != null) {
+                {
+                    appState.viewingFile = file
+                    appState.openInEditMode = true
+                }
+            } else null,
+            modifier = Modifier.fillMaxSize()
+        )
+        return
     }
 
     Column(
@@ -245,10 +480,9 @@ fun TextFullPageView(
                 }
 
                 if (appState != null) {
-                    val ext = file.name.substringAfterLast('.', "").lowercase()
                     val studioButtonLabel = when {
                         formatType == TextFormatType.CSV || ext in listOf("csv", "tsv") -> "Edit in CSV Studio"
-                        ext in listOf("kt", "java", "py", "js", "ts", "html", "css", "json", "xml", "yaml", "yml", "sh", "sql", "c", "cpp") -> "Edit in Code Studio"
+                        ext in listOf("kt", "java", "py", "js", "ts", "html", "htm", "xhtml", "css", "json", "xml", "yaml", "yml", "sh", "sql", "c", "cpp") -> "Edit in Code Studio"
                         else -> "Edit in Markor"
                     }
                     FilledTonalButton(

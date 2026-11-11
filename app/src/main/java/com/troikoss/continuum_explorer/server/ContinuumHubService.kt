@@ -1,58 +1,85 @@
 package com.troikoss.continuum_explorer.server
 
-import android.app.*
+import android.app.Activity
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.graphics.Bitmap
+import android.graphics.Matrix
+import android.graphics.PixelFormat
+import android.hardware.display.DisplayManager
+import android.hardware.display.VirtualDisplay
+import android.media.ImageReader
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
-import android.os.Binder
 import android.os.Build
-import android.os.Environment
+import android.os.Handler
+import android.os.HandlerThread
 import android.os.IBinder
+import android.util.DisplayMetrics
 import android.util.Log
+import android.view.WindowManager
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.core.app.NotificationCompat
-import com.troikoss.continuum_explorer.R
-import com.troikoss.continuum_explorer.managers.FtpBucketManager
-import com.troikoss.continuum_explorer.managers.FtpHostedMode
 import com.troikoss.continuum_explorer.managers.SettingsManager
 import com.troikoss.continuum_explorer.ui.activities.MainActivity
-import kotlinx.coroutines.*
-import java.io.File
-import java.net.Inet4Address
-import java.net.NetworkInterface
+import java.io.ByteArrayOutputStream
+
+data class ServerLogEntry(
+    val id: Long,
+    val timestamp: Long,
+    val clientIp: String,
+    val protocol: String, // "HTTP", "FTP", "WS", or "SYNC"
+    val action: String,
+    val details: String
+)
+
+data class ClientSessionStats(
+    val clientIp: String,
+    val protocol: String,
+    val firstSeen: Long,
+    var lastSeen: Long,
+    var requestsCount: Int,
+    var bytesTransferred: Long
+)
 
 /**
- * ContinuumHubService
- *
- * Standalone Android foreground Service that manages:
- * 1. Ktor embedded server (Netty) on port 8080 with WebSockets, Self-Hosted Website static engine, and Responsive Web Portal.
- * 2. Apache FTP Server daemon on configurable port (default 2121).
- * 3. MediaProjection screen casting pumped through `/screencast` WebSocket route.
- * 4. Hot-reload support (`ACTION_RELOAD`) when switching between FTP File Sharing and Self-Hosted Website modes.
+ * Android Foreground Service responsible for keeping the process alive under Android 8–15
+ * background-execution policies while [ServerManager] orchestrates Ktor HTTP and Apache FTP
+ * lifecycles and optional live MJPEG Screen Mirroring.
  */
 class ContinuumHubService : Service() {
 
+    private var mediaProjection: MediaProjection? = null
+    private var virtualDisplay: VirtualDisplay? = null
+    private var imageReader: ImageReader? = null
+    private var captureThread: HandlerThread? = null
+    private var captureHandler: Handler? = null
+    private var lastFrameTimestamp = 0L
+
     companion object {
-        private const val TAG = "ContinuumHubService"
-        const val CHANNEL_ID = "continuum_hub_channel"
-        const val NOTIFICATION_ID = 4040
+        const val CHANNEL_ID = "ContinuumHubChannel"
+        const val NOTIFICATION_ID = 8081
 
-        const val ACTION_START = "com.troikoss.continuum_explorer.server.ACTION_START"
-        const val ACTION_STOP = "com.troikoss.continuum_explorer.server.ACTION_STOP"
-        const val ACTION_RELOAD = "com.troikoss.continuum_explorer.server.ACTION_RELOAD"
-        const val ACTION_START_SCREENCAST = "com.troikoss.continuum_explorer.server.ACTION_START_SCREENCAST"
-        const val ACTION_STOP_SCREENCAST = "com.troikoss.continuum_explorer.server.ACTION_STOP_SCREENCAST"
+        const val ACTION_START = "com.troikoss.continuum_explorer.action.START_HUB"
+        const val ACTION_STOP = "com.troikoss.continuum_explorer.action.STOP_HUB"
+        const val ACTION_RELOAD = "com.troikoss.continuum_explorer.action.RELOAD_HUB"
+        const val ACTION_ENSURE_FOREGROUND = "com.troikoss.continuum_explorer.action.ENSURE_FOREGROUND"
+        const val ACTION_STOP_IF_IDLE = "com.troikoss.continuum_explorer.action.STOP_IF_IDLE"
+        const val ACTION_START_SCREENCAST = "com.troikoss.continuum_explorer.action.START_SCREENCAST"
+        const val ACTION_STOP_SCREENCAST = "com.troikoss.continuum_explorer.action.STOP_SCREENCAST"
 
-        const val EXTRA_PROJECTION_RESULT_CODE = "extra_projection_result_code"
-        const val EXTRA_PROJECTION_DATA = "extra_projection_data"
+        const val EXTRA_RESULT_CODE = "extra_result_code"
+        const val EXTRA_RESULT_DATA = "extra_result_data"
 
         @Volatile
         var isRunning: Boolean = false
-            private set
-
-        @Volatile
-        var startTimeMillis: Long = 0L
             private set
 
         @Volatile
@@ -68,93 +95,123 @@ class ContinuumHubService : Service() {
             private set
 
         @Volatile
-        var bytesTransferredTotal: Long = 0L
+        var startTimeMillis: Long = 0L
+            private set
 
         @Volatile
-        var currentDownloadSpeedKbps: Float = 0f
+        var latestScreencastJpeg: ByteArray? = null
+            private set
 
         @Volatile
-        var currentUploadSpeedKbps: Float = 0f
+        private var activeServiceInstance: ContinuumHubService? = null
 
-        @Volatile
-        var connectedClientsCount: Int = 1
+        // Live client tracking & server logs
+        val logEntries = mutableStateListOf<ServerLogEntry>()
+        val clientSessions = mutableStateMapOf<String, ClientSessionStats>()
+        private var logIdCounter = 1L
 
-        val speedHistory = java.util.concurrent.CopyOnWriteArrayList<Float>()
-
-        val logEntries = java.util.concurrent.CopyOnWriteArrayList<ServerLogEntry>()
-        val clientSessions = java.util.concurrent.ConcurrentHashMap<String, ClientSession>()
-
-        fun addLog(clientIp: String, protocol: String, action: String, details: String = "", bytes: Long = 0L) {
-            val entry = ServerLogEntry(clientIp = clientIp, protocol = protocol, action = action, details = details)
+        @Synchronized
+        fun recordLog(
+            clientIp: String,
+            protocol: String,
+            action: String,
+            details: String,
+            bytes: Long = 0L
+        ) {
+            val now = System.currentTimeMillis()
+            val entry = ServerLogEntry(
+                id = logIdCounter++,
+                timestamp = now,
+                clientIp = clientIp,
+                protocol = protocol,
+                action = action,
+                details = details
+            )
+            if (logEntries.size >= 250) {
+                logEntries.removeAt(logEntries.lastIndex)
+            }
             logEntries.add(0, entry)
-            while (logEntries.size > 200) {
-                logEntries.removeAt(logEntries.size - 1)
-            }
 
-            val session = clientSessions.computeIfAbsent(clientIp) {
-                ClientSession(clientIp = clientIp, protocol = protocol)
+            val existing = clientSessions[clientIp]
+            if (existing != null) {
+                clientSessions[clientIp] = existing.copy(
+                    lastSeen = now,
+                    requestsCount = existing.requestsCount + 1,
+                    bytesTransferred = existing.bytesTransferred + bytes,
+                    protocol = if (existing.protocol.contains(protocol)) existing.protocol else "${existing.protocol}/$protocol"
+                )
+            } else {
+                clientSessions[clientIp] = ClientSessionStats(
+                    clientIp = clientIp,
+                    protocol = protocol,
+                    firstSeen = now,
+                    lastSeen = now,
+                    requestsCount = 1,
+                    bytesTransferred = bytes
+                )
             }
-            session.lastActive = System.currentTimeMillis()
-            session.requestsCount++
-            if (bytes > 0L) {
-                session.bytesTransferred += bytes
-                recordTransfer(bytes)
-            }
-            connectedClientsCount = clientSessions.size.coerceAtLeast(1)
         }
 
+        @Synchronized
         fun clearLogs() {
             logEntries.clear()
             clientSessions.clear()
         }
 
-        fun recordTransfer(bytes: Long, isUpload: Boolean = false) {
-            if (bytes <= 0) return
-            bytesTransferredTotal += bytes
-            val kb = bytes / 1024f
-            if (isUpload) {
-                currentUploadSpeedKbps = (currentUploadSpeedKbps * 0.7f) + (kb * 0.3f)
-            } else {
-                currentDownloadSpeedKbps = (currentDownloadSpeedKbps * 0.7f) + (kb * 0.3f)
+        internal fun syncLegacyStaticFieldsFromManager(state: UnifiedServerState) {
+            isRunning = state.isAnyRunning
+            serverIpAddress = state.ipAddress
+            activeFtpPort = state.ftp.port
+            startTimeMillis = state.hubStartedAtMillis
+        }
+
+        internal fun refreshNotificationIfActive() {
+            activeServiceInstance?.refreshForegroundNotification()
+        }
+
+        fun ensureForegroundServiceRunning(context: Context) {
+            try {
+                val intent = Intent(context, ContinuumHubService::class.java).apply {
+                    action = ACTION_ENSURE_FOREGROUND
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(intent)
+                } else {
+                    context.startService(intent)
+                }
+            } catch (e: Exception) {
+                Log.w("ContinuumHubService", "Could not start foreground service: ${e.message}")
             }
-            val currentRate = currentDownloadSpeedKbps + currentUploadSpeedKbps
-            speedHistory.add(currentRate)
-            while (speedHistory.size > 30) {
-                speedHistory.removeAt(0)
-            }
+        }
+
+        fun stopForegroundServiceWhenIdle(context: Context) {
+            try {
+                val intent = Intent(context, ContinuumHubService::class.java).apply {
+                    action = ACTION_STOP_IF_IDLE
+                }
+                context.startService(intent)
+            } catch (_: Exception) {}
         }
 
         fun startService(context: Context) {
-            val intent = Intent(context, ContinuumHubService::class.java).apply {
-                action = ACTION_START
-            }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
-            }
-        }
-
-        fun reloadIfRunning(context: Context) {
-            if (!isRunning) return
-            val intent = Intent(context, ContinuumHubService::class.java).apply {
-                action = ACTION_RELOAD
-            }
-            context.startService(intent)
+            ServerManager.startCoordinated(context, startHttp = true, startFtp = true)
         }
 
         fun stopService(context: Context) {
-            val intent = Intent(context, ContinuumHubService::class.java).apply {
-                action = ACTION_STOP
+            ServerManager.stopCoordinated(context, graceful = true, stopForegroundServiceIfIdle = true)
+        }
+
+        fun reloadIfRunning(context: Context) {
+            if (ServerManager.state.value.isAnyRunning || isRunning) {
+                ServerManager.restartCoordinated(context)
             }
-            context.startService(intent)
         }
 
         fun startScreenCast(context: Context, resultCode: Int, data: Intent) {
             val intent = Intent(context, ContinuumHubService::class.java).apply {
                 action = ACTION_START_SCREENCAST
-                putExtra(EXTRA_PROJECTION_RESULT_CODE, resultCode)
-                putExtra(EXTRA_PROJECTION_DATA, data)
+                putExtra(EXTRA_RESULT_CODE, resultCode)
+                putExtra(EXTRA_RESULT_DATA, data)
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
@@ -164,360 +221,299 @@ class ContinuumHubService : Service() {
         }
 
         fun stopScreenCast(context: Context) {
+            if (!isScreenCasting) return
             val intent = Intent(context, ContinuumHubService::class.java).apply {
                 action = ACTION_STOP_SCREENCAST
             }
             context.startService(intent)
         }
+
+        fun getLocalIpAddress(): String = ServerManager.resolveLocalIpAddress()
     }
-
-    private val binder = LocalBinder()
-    private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
-
-    private var ktorServer: KtorEmbeddedServer? = null
-    private var ftpServer: ApacheFtpServerDaemon? = null
-    private var screenCastManager: ScreenCastManager? = null
-    private var mediaProjection: MediaProjection? = null
-
-    inner class LocalBinder : Binder() {
-        fun getService(): ContinuumHubService = this@ContinuumHubService
-    }
-
-    override fun onBind(intent: Intent?): IBinder = binder
 
     override fun onCreate() {
         super.onCreate()
-        Log.i(TAG, "ContinuumHubService onCreate")
+        activeServiceInstance = this
         createNotificationChannel()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val action = intent?.action ?: ACTION_START
+        when (intent?.action) {
+            ACTION_ENSURE_FOREGROUND -> {
+                promoteToForeground(includeMediaProjection = isScreenCasting)
+            }
 
-        when (action) {
+            ACTION_STOP_IF_IDLE -> {
+                if (!ServerManager.state.value.isAnyRunning && !isScreenCasting) {
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    stopSelf()
+                }
+            }
+
             ACTION_STOP -> {
-                shutdownServers()
+                stopScreenCastInternal()
+                ServerManager.stopCoordinated(applicationContext, graceful = true, stopForegroundServiceIfIdle = false)
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
                 return START_NOT_STICKY
             }
 
-            ACTION_START -> {
-                startForegroundWithNotification()
-                initializeServers(forceRestart = false)
-            }
-
-            ACTION_RELOAD -> {
-                if (isRunning) {
-                    initializeServers(forceRestart = true)
+            ACTION_STOP_SCREENCAST -> {
+                stopScreenCastInternal()
+                if (ServerManager.state.value.isAnyRunning) {
+                    promoteToForeground(includeMediaProjection = false)
+                } else {
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    stopSelf()
                 }
+                return START_STICKY
             }
 
             ACTION_START_SCREENCAST -> {
-                val resultCode = intent?.getIntExtra(EXTRA_PROJECTION_RESULT_CODE, Activity.RESULT_CANCELED) ?: Activity.RESULT_CANCELED
-                val data = intent?.getParcelableExtra<Intent>(EXTRA_PROJECTION_DATA)
-                if (resultCode == Activity.RESULT_OK && data != null) {
-                    startForegroundWithNotification(isProjection = true)
-                    initializeServers(forceRestart = false)
-                    setupMediaProjection(resultCode, data)
+                val resCode = intent.getIntExtra(EXTRA_RESULT_CODE, Activity.RESULT_CANCELED)
+                val resData: Intent? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    intent.getParcelableExtra(EXTRA_RESULT_DATA, Intent::class.java)
+                } else {
+                    @Suppress("DEPRECATION")
+                    intent.getParcelableExtra(EXTRA_RESULT_DATA)
                 }
+                if (resCode == Activity.RESULT_OK && resData != null) {
+                    promoteToForeground(includeMediaProjection = true)
+                    if (!ServerManager.state.value.isHttpRunning) {
+                        ServerManager.startCoordinated(applicationContext, startHttp = true, startFtp = true)
+                    }
+                    startScreenCastInternal(resCode, resData)
+                }
+                return START_STICKY
             }
 
-            ACTION_STOP_SCREENCAST -> {
-                stopMediaProjection()
-                updateNotification()
+            ACTION_RELOAD -> {
+                promoteToForeground(includeMediaProjection = isScreenCasting)
+                ServerManager.restartCoordinated(applicationContext)
+                return START_STICKY
+            }
+
+            ACTION_START, null -> {
+                promoteToForeground(includeMediaProjection = isScreenCasting)
+                ServerManager.startCoordinated(applicationContext, startHttp = true, startFtp = true)
             }
         }
 
         return START_STICKY
     }
 
+    internal fun refreshForegroundNotification() {
+        try {
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            nm.notify(NOTIFICATION_ID, buildNotification())
+        } catch (_: Exception) {}
+    }
+
+    private fun promoteToForeground(includeMediaProjection: Boolean) {
+        val notification = buildNotification()
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                val fgType = if (includeMediaProjection) {
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+                } else {
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                }
+                startForeground(NOTIFICATION_ID, notification, fgType)
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && includeMediaProjection) {
+                startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+        } catch (e: Exception) {
+            Log.e("ContinuumHubService", "Failed to start foreground with projection type, falling back", e)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+        }
+    }
+
+    private fun startScreenCastInternal(resultCode: Int, resultData: Intent) {
+        stopScreenCastInternal()
+        try {
+            val mpManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+            val projection = mpManager.getMediaProjection(resultCode, resultData) ?: return
+            mediaProjection = projection
+
+            projection.registerCallback(object : MediaProjection.Callback() {
+                override fun onStop() {
+                    stopScreenCastInternal()
+                }
+            }, Handler(mainLooper))
+
+            val wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+            val metrics = DisplayMetrics()
+            @Suppress("DEPRECATION")
+            wm.defaultDisplay.getRealMetrics(metrics)
+
+            val resSetting = SettingsManager.screenCastResolution.value
+            val scale = when (resSetting) {
+                "720p" -> (720f / minOf(metrics.widthPixels, metrics.heightPixels)).coerceAtMost(1f)
+                "1080p" -> (1080f / minOf(metrics.widthPixels, metrics.heightPixels)).coerceAtMost(1f)
+                else -> 1f
+            }
+            val width = ((metrics.widthPixels * scale).toInt() / 2 * 2).coerceAtLeast(360)
+            val height = ((metrics.heightPixels * scale).toInt() / 2 * 2).coerceAtLeast(640)
+            val density = metrics.densityDpi
+
+            val thread = HandlerThread("ContinuumScreencastThread")
+            thread.start()
+            val handler = Handler(thread.looper)
+            captureThread = thread
+            captureHandler = handler
+
+            val reader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2)
+            imageReader = reader
+
+            reader.setOnImageAvailableListener({ ir ->
+                val image = try { ir.acquireLatestImage() } catch (_: Exception) { null } ?: return@setOnImageAvailableListener
+                try {
+                    val fps = SettingsManager.screenCastFps.value.coerceIn(5, 60)
+                    val minIntervalMs = 1000L / fps
+                    val now = System.currentTimeMillis()
+                    if (now - lastFrameTimestamp < minIntervalMs) {
+                        return@setOnImageAvailableListener
+                    }
+                    lastFrameTimestamp = now
+
+                    val planes = image.planes
+                    val buffer = planes[0].buffer
+                    val pixelStride = planes[0].pixelStride
+                    val rowStride = planes[0].rowStride
+                    val rowPadding = rowStride - pixelStride * width
+
+                    var bitmap = Bitmap.createBitmap(
+                        width + rowPadding / pixelStride,
+                        height,
+                        Bitmap.Config.ARGB_8888
+                    )
+                    bitmap.copyPixelsFromBuffer(buffer)
+
+                    if (rowPadding > 0) {
+                        val cropped = Bitmap.createBitmap(bitmap, 0, 0, width, height)
+                        bitmap.recycle()
+                        bitmap = cropped
+                    }
+
+                    val rot = SettingsManager.screenCastRotation.value
+                    if (rot != 0) {
+                        val matrix = Matrix().apply { postRotate(rot.toFloat()) }
+                        val rotated = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+                        bitmap.recycle()
+                        bitmap = rotated
+                    }
+
+                    val jpegQuality = SettingsManager.screenCastQuality.value.coerceIn(30, 95)
+                    val baos = ByteArrayOutputStream()
+                    bitmap.compress(Bitmap.CompressFormat.JPEG, jpegQuality, baos)
+                    bitmap.recycle()
+                    latestScreencastJpeg = baos.toByteArray()
+                } catch (e: Exception) {
+                    Log.w("ContinuumHubService", "Frame encode error", e)
+                } finally {
+                    try { image.close() } catch (_: Exception) {}
+                }
+            }, handler)
+
+            virtualDisplay = projection.createVirtualDisplay(
+                "ContinuumHubScreenCast",
+                width,
+                height,
+                density,
+                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                reader.surface,
+                null,
+                handler
+            )
+
+            isScreenCasting = true
+            ServerManager.updateScreenCastStatus(true)
+            recordLog("127.0.0.1", "HTTP", "SCREENCAST_START", "${width}x${height} @ ${SettingsManager.screenCastFps.value}fps")
+        } catch (e: Exception) {
+            Log.e("ContinuumHubService", "Failed to start ScreenCast", e)
+            stopScreenCastInternal()
+        }
+    }
+
+    private fun stopScreenCastInternal() {
+        isScreenCasting = false
+        ServerManager.updateScreenCastStatus(false)
+        latestScreencastJpeg = null
+        try { virtualDisplay?.release() } catch (_: Exception) {}
+        virtualDisplay = null
+        try { imageReader?.close() } catch (_: Exception) {}
+        imageReader = null
+        try { mediaProjection?.stop() } catch (_: Exception) {}
+        mediaProjection = null
+        try { captureThread?.quitSafely() } catch (_: Exception) {}
+        captureThread = null
+        captureHandler = null
+    }
+
+    override fun onDestroy() {
+        if (activeServiceInstance === this) {
+            activeServiceInstance = null
+        }
+        stopScreenCastInternal()
+        ServerManager.stopCoordinated(applicationContext, graceful = true, stopForegroundServiceIfIdle = false)
+        super.onDestroy()
+    }
+
+    override fun onBind(intent: Intent?): IBinder? = null
+
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "Explorer",
+                "Continuum Hub Server",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Runs local HTTP portal, self-hosted website server, FTP daemon, and live screen casting"
-                setShowBadge(false)
+                description = "Runs the local HTTP Web Portal, SyncPlay & FTP Server"
             }
             val manager = getSystemService(NotificationManager::class.java)
             manager?.createNotificationChannel(channel)
         }
     }
 
-    private fun getFormattedUptime(): String {
-        if (!isRunning || startTimeMillis <= 0L) return "00:00:00"
-        val elapsedSec = ((System.currentTimeMillis() - startTimeMillis) / 1000L).coerceAtLeast(0L)
-        val hours = elapsedSec / 3600
-        val mins = (elapsedSec % 3600) / 60
-        val secs = elapsedSec % 60
-        return String.format("%02d:%02d:%02d", hours, mins, secs)
-    }
-
-    private fun buildNotification(isProjection: Boolean): Notification {
-        val launchIntent = Intent(this, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-        }
-        val pendingIntent = PendingIntent.getActivity(
+    private fun buildNotification(): Notification {
+        val openAppIntent = Intent(this, MainActivity::class.java)
+        val pendingOpen = PendingIntent.getActivity(
             this,
             0,
-            launchIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0)
+            openAppIntent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
         val stopIntent = Intent(this, ContinuumHubService::class.java).apply {
             action = ACTION_STOP
         }
-        val stopPendingIntent = PendingIntent.getService(
+        val pendingStop = PendingIntent.getService(
             this,
             1,
             stopIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0)
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        val statusText = "IP: $serverIpAddress • Run time: ${getFormattedUptime()}"
+        val st = ServerManager.state.value
+        val activeProtocols = buildList {
+            if (st.isHttpRunning) add("HTTP :${st.http.port}")
+            if (st.isFtpRunning) add("FTP :${st.ftp.port}")
+            if (isScreenCasting) add("Screencast")
+        }.joinToString(" • ").ifEmpty { "Ready" }
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Explorer")
-            .setContentText(statusText)
-            .setSmallIcon(R.drawable.ic_network_server)
-            .setContentIntent(pendingIntent)
+            .setContentTitle("Continuum Server Active (${st.ipAddress})")
+            .setContentText(activeProtocols)
+            .setSmallIcon(android.R.drawable.stat_sys_upload_done)
+            .setContentIntent(pendingOpen)
             .setOngoing(true)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop Server", stopPendingIntent)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop All", pendingStop)
             .build()
     }
-
-    private fun startForegroundWithNotification(isProjection: Boolean = false) {
-        val notification = buildNotification(isProjection)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            var serviceType = ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
-            if (isProjection || isScreenCasting) {
-                serviceType = serviceType or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
-            }
-            try {
-                startForeground(NOTIFICATION_ID, notification, serviceType)
-            } catch (e: Exception) {
-                Log.w(TAG, "Error starting foreground with specified type, falling back", e)
-                startForeground(NOTIFICATION_ID, notification)
-            }
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
-        }
-    }
-
-    private fun updateNotification() {
-        val notification = buildNotification(isScreenCasting)
-        val manager = getSystemService(NotificationManager::class.java)
-        manager?.notify(NOTIFICATION_ID, notification)
-    }
-
-    private fun resolveTargetRootAndEntryHtml(
-        hostedMode: FtpHostedMode,
-        customPath: String
-    ): Pair<File, File?> {
-        val defaultStorage = Environment.getExternalStorageDirectory()
-        return when (hostedMode) {
-            FtpHostedMode.CUSTOM_FOLDER -> {
-                val target = if (customPath.isNotBlank()) File(customPath) else null
-                if (target != null && target.exists()) {
-                    if (target.isFile) {
-                        val parentDir = target.parentFile ?: defaultStorage
-                        Pair(parentDir, target)
-                    } else {
-                        val indexFile = File(target, "index.html").takeIf { it.exists() && it.isFile }
-                            ?: File(target, "index.htm").takeIf { it.exists() && it.isFile }
-                            ?: target.listFiles()?.firstOrNull {
-                                it.isFile && (it.name.endsWith(".html", ignoreCase = true) || it.name.endsWith(".htm", ignoreCase = true))
-                            }
-                        Pair(target, indexFile)
-                    }
-                } else {
-                    Pair(defaultStorage, null)
-                }
-            }
-            FtpHostedMode.BATCH_FILES -> {
-                FtpBucketManager.initialize(applicationContext)
-                Pair(FtpBucketManager.prepareBucketDirectory(applicationContext), null)
-            }
-            FtpHostedMode.FULL_STORAGE -> {
-                Pair(defaultStorage, null)
-            }
-        }
-    }
-
-    private fun initializeServers(forceRestart: Boolean = false) {
-        if (isRunning && !forceRestart) return
-        val wasAlreadyRunning = isRunning
-        isRunning = true
-        if (!wasAlreadyRunning || startTimeMillis == 0L) {
-            startTimeMillis = System.currentTimeMillis()
-        }
-        serverIpAddress = resolveLocalIpAddress()
-
-        val port = SettingsManager.ftpPort.value
-        val isAnon = SettingsManager.isFtpAnonymousAllowed.value
-        val user = SettingsManager.ftpUsername.value
-        val pass = SettingsManager.ftpPassword.value
-        val allowWrite = SettingsManager.ftpWritePermission.value
-        val hostedMode = SettingsManager.ftpHostedMode.value
-        val customPath = SettingsManager.ftpHostedPath.value
-
-        activeFtpPort = port
-
-        serviceScope.launch {
-            if (forceRestart) {
-                try { ktorServer?.stop() } catch (_: Exception) {}
-                try { ftpServer?.stop() } catch (_: Exception) {}
-                ktorServer = null
-                ftpServer = null
-            }
-
-            val (targetRootDir, entryHtmlFile) = resolveTargetRootAndEntryHtml(hostedMode, customPath)
-
-            // Start Ktor HTTP, Self-Hosted Website & WebSockets Server
-            ktorServer = KtorEmbeddedServer(
-                context = applicationContext,
-                port = 8080,
-                rootDirectory = targetRootDir,
-                hostedMode = hostedMode,
-                entryHtmlFile = entryHtmlFile,
-                getScreenCastManager = { screenCastManager }
-            ).apply {
-                start()
-            }
-
-            // Start Apache FTP Server daemon
-            ftpServer = ApacheFtpServerDaemon(
-                context = applicationContext,
-                port = port,
-                isAnonymousAllowed = isAnon,
-                username = user,
-                password = pass,
-                allowWritePermission = allowWrite,
-                rootDirectory = targetRootDir
-            ).apply {
-                start()
-            }
-
-            withContext(Dispatchers.Main) {
-                updateNotification()
-            }
-
-            if (!wasAlreadyRunning) {
-                while (isActive && isRunning) {
-                    delay(1000L)
-                    withContext(Dispatchers.Main) {
-                        if (isRunning) {
-                            updateNotification()
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    private fun setupMediaProjection(resultCode: Int, data: Intent) {
-        try {
-            stopMediaProjection()
-            val projectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-            mediaProjection = projectionManager.getMediaProjection(resultCode, data)
-
-            val projection = mediaProjection ?: return
-            screenCastManager = ScreenCastManager(applicationContext, projection).apply {
-                startCapture()
-            }
-            isScreenCasting = true
-            updateNotification()
-            Log.i(TAG, "MediaProjection screencast initialized successfully")
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to start MediaProjection screencast", e)
-        }
-    }
-
-    private fun stopMediaProjection() {
-        isScreenCasting = false
-        try {
-            screenCastManager?.stopCapture()
-            screenCastManager = null
-            mediaProjection?.stop()
-            mediaProjection = null
-            Log.i(TAG, "MediaProjection screencast stopped")
-        } catch (e: Exception) {
-            Log.e(TAG, "Error stopping MediaProjection", e)
-        }
-    }
-
-    private fun shutdownServers() {
-        isRunning = false
-        startTimeMillis = 0L
-        stopMediaProjection()
-
-        val oldKtor = ktorServer
-        val oldFtp = ftpServer
-        ktorServer = null
-        ftpServer = null
-
-        // Stop heavy server sockets asynchronously on IO to eliminate UI lag
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                oldKtor?.stop()
-            } catch (e: Exception) {
-                Log.e(TAG, "Error stopping ktor", e)
-            }
-            try {
-                oldFtp?.stop()
-            } catch (e: Exception) {
-                Log.e(TAG, "Error stopping ftp", e)
-            }
-        }
-
-        serviceScope.cancel()
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
-        Log.i(TAG, "ContinuumHubService onDestroy")
-        shutdownServers()
-    }
-
-    private fun resolveLocalIpAddress(): String {
-        try {
-            val interfaces = NetworkInterface.getNetworkInterfaces()
-            while (interfaces.hasMoreElements()) {
-                val iface = interfaces.nextElement()
-                if (iface.isLoopback || !iface.isUp) continue
-                val addresses = iface.inetAddresses
-                while (addresses.hasMoreElements()) {
-                    val addr = addresses.nextElement()
-                    if (!addr.isLoopbackAddress && addr is Inet4Address) {
-                        return addr.hostAddress ?: "127.0.0.1"
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error resolving IP", e)
-        }
-        return "127.0.0.1"
-    }
 }
-
-data class ServerLogEntry(
-    val id: String = java.util.UUID.randomUUID().toString(),
-    val timestamp: Long = System.currentTimeMillis(),
-    val clientIp: String,
-    val protocol: String,
-    val action: String,
-    val details: String = ""
-)
-
-data class ClientSession(
-    val clientIp: String,
-    val protocol: String,
-    val connectedAt: Long = System.currentTimeMillis(),
-    var lastActive: Long = System.currentTimeMillis(),
-    var requestsCount: Int = 1,
-    var bytesTransferred: Long = 0L
-)

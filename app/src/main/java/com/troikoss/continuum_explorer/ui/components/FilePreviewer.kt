@@ -579,6 +579,75 @@ fun FilePreviewer(
                         }
                     }
 
+                    extension in listOf("html", "htm", "xhtml") && textSnippet != null -> {
+                        val fullHtml = remember(file) {
+                            runCatching { file.fileRef?.readText() }.getOrNull() ?: textSnippet!!
+                        }
+                        val baseUrl = remember(file) {
+                            file.fileRef?.parentFile?.let { "file://${it.absolutePath}/" } ?: "file:///android_asset/"
+                        }
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(6.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(8.dp))
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                                    .padding(horizontal = 10.dp, vertical = 4.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "HTML5 Web Preview",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    TextButton(
+                                        onClick = {
+                                            appState?.viewingFile = file
+                                            appState?.openInEditMode = false
+                                        },
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                                        modifier = Modifier.height(24.dp)
+                                    ) {
+                                        Text("Full Preview", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                    TextButton(
+                                        onClick = {
+                                            appState?.viewingFile = file
+                                            appState?.openInEditMode = true
+                                        },
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                                        modifier = Modifier.height(24.dp)
+                                    ) {
+                                        Text("Edit HTML", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                            androidx.compose.ui.viewinterop.AndroidView(
+                                modifier = Modifier.fillMaxSize(),
+                                factory = { ctx ->
+                                    android.webkit.WebView(ctx).apply {
+                                        settings.javaScriptEnabled = true
+                                        settings.domStorageEnabled = true
+                                        settings.allowFileAccess = true
+                                        webViewClient = android.webkit.WebViewClient()
+                                        loadDataWithBaseURL(baseUrl, fullHtml, "text/html", "UTF-8", null)
+                                    }
+                                },
+                                update = { wv ->
+                                    wv.loadDataWithBaseURL(baseUrl, fullHtml, "text/html", "UTF-8", null)
+                                }
+                            )
+                        }
+                    }
+
                     extension in listOf("csv", "tsv") && textSnippet != null -> {
                         Column(
                             modifier = Modifier

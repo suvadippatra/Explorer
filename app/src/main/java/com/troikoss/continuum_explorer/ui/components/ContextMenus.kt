@@ -34,6 +34,7 @@ import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Splitscreen
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarOutline
+import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.Tab
 import androidx.compose.material.icons.filled.TextFormat
 import androidx.compose.material.icons.filled.Transform
@@ -158,6 +159,36 @@ fun ItemContextMenu(
                 }
 
                 val itemFileRef = item.fileRef
+                if (itemFileRef != null && com.troikoss.continuum_explorer.server.SyncPlayManager.isSupportedMedia(itemFileRef)) {
+                    DropdownMenuItem(
+                        text = { Text("SyncPlay Party (Group Watch/Listen)") },
+                        onClick = {
+                            onDismiss()
+                            com.troikoss.continuum_explorer.server.SyncPlayManager.loadMediaFile(
+                                context = context,
+                                file = itemFileRef,
+                                autoStartServer = true
+                            )
+                            appState.navigateTo(
+                                null,
+                                null,
+                                libraryItem = LibraryItem.FtpServer
+                            )
+                            android.widget.Toast.makeText(
+                                context,
+                                "SyncPlay Party started for ${itemFileRef.name}",
+                                android.widget.Toast.LENGTH_SHORT
+                            ).show()
+                        },
+                        leadingIcon = {
+                            Icon(
+                                androidx.compose.material.icons.Icons.Default.Sync,
+                                null,
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    )
+                }
                 if (itemFileRef != null && com.troikoss.continuum_explorer.ui.converter.ConversionFormatMatrix.isSupportedFile(itemFileRef)) {
                     DropdownMenuItem(
                         text = { Text("Convert with File Converter") },

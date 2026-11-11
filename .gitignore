@@ -1,6 +1,10 @@
 *.iml
 .gradle
 /local.properties
+local.properties
+.env
+.env.local
+.env.*.local
 /.idea/caches
 /.idea/libraries
 /.idea/modules.xml
@@ -9,22 +13,36 @@
 /.idea/assetWizardSettings.xml
 .DS_Store
 /build
+app/build
 /captures
 .externalNativeBuild
 .cxx
-local.properties
 .build-outputs/
 .kotlin/
-markor-master/
-Continuum-Explorer-master/
-PhotoEditor-master/
 .aistudio/
 /.aistudio/
 public/assets/aistudio/
 assets/aistudio/
+
+# Keystores and private signing credentials
+*.keystore
+*.keystore.base64
+*.jks
+*.p12
+*.key
+*.pem
+my-upload-key.jks
+debug.keystore
+debug.keystore.base64
+
+# Compiled binaries and packages
 *.apk
 *.aab
 *.ap_
 *.dex
 Paste *.txt
 
+# Upstream reference source bundles (case-insensitive)
+*[Cc]ontinuum-[Ee]xplorer*
+*[Mm]arkor*
+*[Pp]hoto[Ee]ditor*

@@ -254,20 +254,12 @@ fun FileConverterScreen(
                     .padding(horizontal = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(onClick = onMenuClick, modifier = Modifier.size(36.dp)) {
-                    Icon(
-                        imageVector = Icons.Default.Menu,
-                        contentDescription = "Toggle Navigation Sidebar",
-                        tint = MaterialTheme.colorScheme.onSurface
-                    )
-                }
-
                 IconButton(onClick = onBack, modifier = Modifier.size(36.dp)) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = "Back",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(19.dp)
+                        tint = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.size(20.dp)
                     )
                 }
 
@@ -560,14 +552,34 @@ fun FileConverterScreen(
                                             OutlinedTextField(
                                                 value = customWidthInput,
                                                 onValueChange = { customWidthInput = it.filter { c -> c.isDigit() } },
-                                                label = { Text("Width (px, blank = auto)") },
+                                                label = { Text("Width (px, auto)") },
+                                                placeholder = { Text("e.g. 600") },
+                                                leadingIcon = { Icon(Icons.Default.AspectRatio, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                                                trailingIcon = {
+                                                    if (customWidthInput.isNotEmpty()) {
+                                                        IconButton(onClick = { customWidthInput = "" }) {
+                                                            Icon(Icons.Default.Clear, contentDescription = "Clear Width", modifier = Modifier.size(16.dp))
+                                                        }
+                                                    }
+                                                },
+                                                shape = RoundedCornerShape(12.dp),
                                                 singleLine = true,
                                                 modifier = Modifier.weight(1f)
                                             )
                                             OutlinedTextField(
                                                 value = customHeightInput,
                                                 onValueChange = { customHeightInput = it.filter { c -> c.isDigit() } },
-                                                label = { Text("Height (px, blank = auto)") },
+                                                label = { Text("Height (px, auto)") },
+                                                placeholder = { Text("e.g. 600") },
+                                                leadingIcon = { Icon(Icons.Default.AspectRatio, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                                                trailingIcon = {
+                                                    if (customHeightInput.isNotEmpty()) {
+                                                        IconButton(onClick = { customHeightInput = "" }) {
+                                                            Icon(Icons.Default.Clear, contentDescription = "Clear Height", modifier = Modifier.size(16.dp))
+                                                        }
+                                                    }
+                                                },
+                                                shape = RoundedCornerShape(12.dp),
                                                 singleLine = true,
                                                 modifier = Modifier.weight(1f)
                                             )

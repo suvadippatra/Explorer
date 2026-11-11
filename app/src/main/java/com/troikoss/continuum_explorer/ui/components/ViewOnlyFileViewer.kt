@@ -95,7 +95,7 @@ fun ViewOnlyFileViewer(
     val isArchive = ext in listOf("zip", "jar", "tar", "gz", "tgz", "7z", "rar")
     val isText = ext in listOf(
         "txt", "md", "markdown", "json", "xml", "csv", "tsv", "log",
-        "kt", "java", "py", "js", "ts", "html", "htm", "css", "c", "cpp", "h",
+        "kt", "java", "py", "js", "ts", "html", "htm", "xhtml", "css", "c", "cpp", "h",
         "sh", "yaml", "yml", "ini", "conf", "properties", "gradle", "sql",
         "org", "adoc", "asciidoc", "wiki", "toml"
     ) || currentFile.name.lowercase().let { it == "todo.txt" || it == "done.txt" || it == "readme" || it == "license" }
@@ -159,12 +159,13 @@ fun ViewOnlyFileViewer(
                         }
                     },
                     onMenuClick = onMenuClick,
+                    onBackClick = handleExitEditMode,
                     modifier = modifier.fillMaxSize()
                 )
                 return
             }
             ext in listOf(
-                "kt", "kts", "java", "py", "js", "jsx", "ts", "tsx", "html", "htm", "css", "scss",
+                "kt", "kts", "java", "py", "js", "jsx", "ts", "tsx", "html", "htm", "xhtml", "css", "scss",
                 "json", "xml", "yaml", "yml", "toml", "ini", "conf", "sh", "bash", "c", "cpp", "h",
                 "hpp", "sql", "gradle", "properties", "go", "rs", "dart", "php", "rb", "lua"
             ) && localEditFile != null -> {
@@ -182,6 +183,7 @@ fun ViewOnlyFileViewer(
                         }
                     },
                     onMenuClick = onMenuClick,
+                    onBackClick = handleExitEditMode,
                     modifier = modifier.fillMaxSize()
                 )
                 return
@@ -191,6 +193,7 @@ fun ViewOnlyFileViewer(
                     file = currentFile,
                     appState = appState,
                     onMenuClick = onMenuClick,
+                    onExitEditor = handleExitEditMode,
                     modifier = modifier.fillMaxSize()
                 )
                 return
@@ -200,6 +203,7 @@ fun ViewOnlyFileViewer(
                     file = currentFile,
                     appState = appState,
                     onMenuClick = onMenuClick,
+                    onExitEditor = handleExitEditMode,
                     modifier = modifier.fillMaxSize()
                 )
                 return
@@ -599,6 +603,15 @@ private fun FileMetadataEditorDialog(
                     value = renameInput,
                     onValueChange = { renameInput = it },
                     label = { Text("Name & Extension") },
+                    leadingIcon = { Icon(Icons.Default.DriveFileRenameOutline, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                    trailingIcon = {
+                        if (renameInput.isNotEmpty()) {
+                            IconButton(onClick = { renameInput = "" }) {
+                                Icon(Icons.Default.Clear, contentDescription = "Clear", modifier = Modifier.size(16.dp))
+                            }
+                        }
+                    },
+                    shape = RoundedCornerShape(12.dp),
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -653,6 +666,8 @@ private fun FileMetadataEditorDialog(
                         value = exifArtist,
                         onValueChange = { exifArtist = it },
                         label = { Text("Artist / Author") },
+                        leadingIcon = { Icon(Icons.Default.Person, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                        shape = RoundedCornerShape(12.dp),
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -660,6 +675,8 @@ private fun FileMetadataEditorDialog(
                         value = exifCopyright,
                         onValueChange = { exifCopyright = it },
                         label = { Text("Copyright") },
+                        leadingIcon = { Icon(Icons.Default.Copyright, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                        shape = RoundedCornerShape(12.dp),
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -667,6 +684,8 @@ private fun FileMetadataEditorDialog(
                         value = exifDescription,
                         onValueChange = { exifDescription = it },
                         label = { Text("Description / Caption") },
+                        leadingIcon = { Icon(Icons.Default.Notes, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                        shape = RoundedCornerShape(12.dp),
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -675,6 +694,7 @@ private fun FileMetadataEditorDialog(
                             value = exifMake,
                             onValueChange = { exifMake = it },
                             label = { Text("Camera Make") },
+                            shape = RoundedCornerShape(12.dp),
                             singleLine = true,
                             modifier = Modifier.weight(1f)
                         )
@@ -682,6 +702,7 @@ private fun FileMetadataEditorDialog(
                             value = exifModel,
                             onValueChange = { exifModel = it },
                             label = { Text("Camera Model") },
+                            shape = RoundedCornerShape(12.dp),
                             singleLine = true,
                             modifier = Modifier.weight(1f)
                         )

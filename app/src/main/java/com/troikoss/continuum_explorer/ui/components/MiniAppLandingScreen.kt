@@ -237,6 +237,27 @@ fun MiniAppLandingScreen(
                         value = newFileName,
                         onValueChange = { newFileName = it },
                         label = { Text("File Name & Extension") },
+                        placeholder = { Text("e.g. notes.md, index.html") },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = descriptor.icon,
+                                contentDescription = null,
+                                tint = descriptor.accentColor,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        },
+                        trailingIcon = {
+                            if (newFileName.isNotEmpty()) {
+                                IconButton(onClick = { newFileName = "" }) {
+                                    Icon(Icons.Default.Close, contentDescription = "Clear", modifier = Modifier.size(16.dp))
+                                }
+                            }
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = descriptor.accentColor,
+                            focusedLabelColor = descriptor.accentColor
+                        ),
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -345,7 +366,7 @@ fun MiniAppLandingScreen(
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.surface)
     ) {
-        // Unified 50.dp Flush Top Heading Bar with Triple-Line Menu Button on Left
+        // Unified 50.dp Flush Top Heading Bar with Single Clean Back Navigation Button
         Surface(
             color = MaterialTheme.colorScheme.surfaceContainer,
             tonalElevation = 1.dp,
@@ -360,25 +381,14 @@ fun MiniAppLandingScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(
-                    onClick = onMenuClick,
-                    modifier = Modifier.size(36.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Menu,
-                        contentDescription = "Toggle Navigation Sidebar",
-                        tint = MaterialTheme.colorScheme.onSurface
-                    )
-                }
-
-                IconButton(
                     onClick = onBackToSuite,
                     modifier = Modifier.size(36.dp)
                 ) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = "Back to My Suite",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(19.dp)
+                        tint = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.size(20.dp)
                     )
                 }
 

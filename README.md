@@ -4,9 +4,17 @@ Most Android file managers are built strictly for tapping on a phone screen. The
 
 **Explorer** is built to bridge that gap. It feels completely natural with one thumb on a phone, and scales into a true multi-tab, desktop-class workspace when you have a larger screen, mouse, and keyboard. Beyond managing files, it packs a built-in workspace suite (**My Suite**) so you can resize exam photos to exact kilobyte limits, compress PDFs, edit Markdown or code, inspect spreadsheets, listen to music, and share files or your live screen over Wi-Fi—all locally on your device, with zero ads or cloud uploads.
 
-## About
+## About & Licenses
 
-This is a forked version of [Continuum Explorer](https://github.com/troikoss/Continuum-Explorer).
+**Explorer** is a desktop-grade Android file manager and offline workspace suite. It is licensed under the **GNU General Public License v3.0 (GPLv3)**.
+
+This software is forked and developed from open-source foundations:
+- **Base File Explorer Engine:** Forked from [Continuum Explorer](https://github.com/troikoss/Continuum-Explorer) by Troikoss (licensed under **GPLv3**).
+- **Text, Markdown & Document Editors:** Adapted and inspired by [Markor](https://github.com/gsantner/markor) by Gregor Santner (licensed under **Apache License 2.0**).
+- **Image Editing & Annotation Canvas:** Adapted and inspired by [PhotoEditor](https://github.com/burhanrashid52/PhotoEditor) by Burhanuddin Rashid (licensed under **MIT License**).
+- **Exact-KB Squoosh Resizer & Dynamic VERT Converter:** Architectural concepts modeled after [Squoosh](https://github.com/GoogleChromeLabs/squoosh) (Apache-2.0) and [VERT](https://github.com/VERT-sh/VERT) (AGPL-3.0).
+
+All original copyright notices, third-party licenses, and attributions are preserved in full compliance with GNU GPLv3 Section 5 and Apache 2.0 Section 4. See the `/LICENSE` file for the complete GPLv3 text.
 
 ## What You Can Do With It
 

@@ -3,6 +3,7 @@ package com.troikoss.continuum_explorer.ui.editor.text
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.*
@@ -36,12 +37,12 @@ fun TextEditorTopBar(
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         tonalElevation = 2.dp,
-        modifier = modifier.fillMaxWidth().height(44.dp)
+        modifier = modifier.fillMaxWidth().height(50.dp)
     ) {
         Row(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 6.dp),
+                .padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
@@ -50,11 +51,10 @@ fun TextEditorTopBar(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 modifier = Modifier.weight(1f, fill = false)
             ) {
-                // Left Triple-Line Menu button per unified Mini-App Editor Heading rule
                 IconButton(onClick = onMenuClick, modifier = Modifier.size(36.dp)) {
                     Icon(
-                        Icons.Default.Menu,
-                        contentDescription = "Toggle Navigation Sidebar / File Tree",
+                        Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back",
                         tint = MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.size(20.dp)
                     )

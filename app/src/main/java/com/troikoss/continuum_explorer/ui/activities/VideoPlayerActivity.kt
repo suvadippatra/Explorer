@@ -2,101 +2,66 @@ package com.troikoss.continuum_explorer.ui.activities
 
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.content.Context
 import android.graphics.Bitmap
+import android.media.AudioManager
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Bundle
+import android.view.TextureView
+import android.view.ViewGroup
+import android.widget.FrameLayout
 import androidx.activity.compose.setContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AspectRatio
-import androidx.compose.material.icons.filled.Audiotrack
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.FastForward
-import androidx.compose.material.icons.filled.Forward10
-import androidx.compose.material.icons.filled.Fullscreen
-import androidx.compose.material.icons.filled.PauseCircle
-import androidx.compose.material.icons.filled.PlayCircle
-import androidx.compose.material.icons.filled.Repeat
-import androidx.compose.material.icons.filled.Replay10
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.SkipNext
-import androidx.compose.material.icons.filled.SkipPrevious
-import androidx.compose.material.icons.filled.Subtitles
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.VolumeDown
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.Scaffold
-import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.Image
-import androidx.compose.foundation.border
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material3.Text
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableStateMapOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.setValue
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.layout.layout
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.key.Key
-import androidx.compose.ui.input.key.KeyEventType
-import androidx.compose.ui.input.key.isCtrlPressed
-import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.onKeyEvent
-import androidx.compose.ui.input.key.type
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.input.key.*
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.input.pointer.isPrimaryPressed
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -104,24 +69,28 @@ import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
+import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
+import androidx.media3.common.VideoSize
+import androidx.media3.common.text.CueGroup
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
-import androidx.media3.ui.PlayerView
+import androidx.media3.ui.SubtitleView
 import com.troikoss.continuum_explorer.R
+import com.troikoss.continuum_explorer.ui.preview.Video3dMode
+import com.troikoss.continuum_explorer.ui.preview.stereoscopic3dEffect
 import com.troikoss.continuum_explorer.ui.theme.FileExplorerTheme
 import com.troikoss.continuum_explorer.utils.getSiblingFiles
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Locale
-
-
-// ── Data classes ──────────────────────────────────────────────────────────────
+import kotlin.math.abs
+import kotlin.math.roundToInt
 
 /** Represents a selectable audio or subtitle track shown in the menu. */
 data class TrackOption(
@@ -141,8 +110,12 @@ enum class ResizeMode(val labelRes: Int, val value: Int) {
     FIXED_HEIGHT(R.string.media_fixed_h, AspectRatioFrameLayout.RESIZE_MODE_FIXED_HEIGHT),
 }
 
-
-// ── Activity ──────────────────────────────────────────────────────────────────
+private enum class ActivitySwipeType {
+    NONE,
+    BRIGHTNESS,
+    VOLUME,
+    SEEK
+}
 
 class VideoPlayerActivity : FullscreenActivity() {
 
@@ -162,9 +135,6 @@ class VideoPlayerActivity : FullscreenActivity() {
     }
 }
 
-
-// ── Main Composable ───────────────────────────────────────────────────────────
-
 @androidx.annotation.OptIn(UnstableApi::class)
 @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
 @Composable
@@ -176,42 +146,59 @@ fun VideoPlayerScreen(
     val resources = LocalResources.current
     val activity = (LocalView.current.context as? Activity)
     val focusRequester = remember { FocusRequester() }
+    val audioManager = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
 
     val exoPlayer = remember { ExoPlayer.Builder(context).build() }
 
     // ── Playback state ──────────────────────────────────────────────────────
     var isPlaying by remember { mutableStateOf(false) }
-    var hasNext  by remember { mutableStateOf(false) }
-    var hasPrev  by remember { mutableStateOf(false) }
-    var currentPosition by remember { mutableStateOf(0L) }
-    var totalDuration   by remember { mutableStateOf(0L) }
+    var hasNext by remember { mutableStateOf(false) }
+    var hasPrev by remember { mutableStateOf(false) }
+    var currentPosition by remember { mutableLongStateOf(0L) }
+    var totalDuration by remember { mutableLongStateOf(0L) }
+    var videoAspectRatio by remember { mutableFloatStateOf(16f / 9f) }
+    var currentCues by remember { mutableStateOf<CueGroup?>(null) }
+
+    // ── 3D Mode & Parallax ──────────────────────────────────────────────────
+    var mode3d by remember { mutableStateOf(Video3dMode.OFF) }
+    var depth3dDp by remember { mutableFloatStateOf(6f) }
+
+    // ── Swipe Gesture HUD State ─────────────────────────────────────────────
+    var activeSwipe by remember { mutableStateOf(ActivitySwipeType.NONE) }
+    var brightnessLevel by remember {
+        val b = activity?.window?.attributes?.screenBrightness ?: -1f
+        mutableFloatStateOf(if (b in 0.05f..1f) b else 0.75f)
+    }
+    var seekPreviewPos by remember { mutableLongStateOf(0L) }
+    var seekDeltaMs by remember { mutableLongStateOf(0L) }
 
     // ── UI visibility ───────────────────────────────────────────────────────
-    var isUiVisible      by remember { mutableStateOf(true) }
-    var hideTimerTrigger by remember { mutableStateOf(0) }
+    var isUiVisible by remember { mutableStateOf(true) }
+    var hideTimerTrigger by remember { mutableIntStateOf(0) }
     var isHoveringControls by remember { mutableStateOf(false) }
 
     // ── Skip / play / pause indicators ─────────────────────────────────────
-    var showSkipBackIndicator    by remember { mutableStateOf(false) }
+    var showSkipBackIndicator by remember { mutableStateOf(false) }
     var showSkipForwardIndicator by remember { mutableStateOf(false) }
-    var showPauseIndicator  by remember { mutableStateOf(false) }
-    var showPlayIndicator   by remember { mutableStateOf(false) }
+    var showPauseIndicator by remember { mutableStateOf(false) }
+    var showPlayIndicator by remember { mutableStateOf(false) }
 
     // ── Options menu ────────────────────────────────────────────────────────
     var optionsMenuExpanded by remember { mutableStateOf(false) }
-    var optionsScreen       by remember { mutableStateOf("MAIN") }
+    var optionsScreen by remember { mutableStateOf("MAIN") }
 
     // ── Volume ──────────────────────────────────────────────────────────────
-    var volume by remember { mutableFloatStateOf(1f) }
+    var volume by remember {
+        val maxVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
+        val curVol = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+        mutableFloatStateOf((curVol.toFloat() / maxVol.toFloat()).coerceIn(0f, 1f))
+    }
 
     // ── Playback speed ──────────────────────────────────────────────────────
     var playbackSpeed by remember { mutableFloatStateOf(1f) }
 
     // ── Aspect ratio ────────────────────────────────────────────────────────
     var resizeMode by remember { mutableStateOf(ResizeMode.FIT) }
-
-    // Capture PlayerView so we can change resizeMode imperatively
-    var playerViewRef by remember { mutableStateOf<PlayerView?>(null) }
 
     // ── Loop ────────────────────────────────────────────────────────────────
     var loopEnabled by remember { mutableStateOf(false) }
@@ -223,43 +210,37 @@ fun VideoPlayerScreen(
     var currentVideoUri by remember { mutableStateOf(initialVideoUri) }
 
     // ── Tracks ──────────────────────────────────────────────────────────────
-    var audioTracks    by remember { mutableStateOf<List<TrackOption>>(emptyList()) }
+    var audioTracks by remember { mutableStateOf<List<TrackOption>>(emptyList()) }
     var subtitleTracks by remember { mutableStateOf<List<TrackOption>>(emptyList()) }
 
-    // Helper: rebuild track lists from current Tracks object
     fun buildTrackLists(tracks: Tracks) {
-        val selectedAudioGroup    = exoPlayer.trackSelectionParameters
-        val selectedTextGroup     = exoPlayer.trackSelectionParameters
-
         audioTracks = tracks.groups
             .filter { it.type == C.TRACK_TYPE_AUDIO && it.isSupported }
             .mapIndexed { gi, group ->
-                val fmt   = group.getTrackFormat(0)
-                val lang  = fmt.language?.let { Locale(it).displayLanguage } ?: ""
+                val fmt = group.getTrackFormat(0)
+                val lang = fmt.language?.let { Locale(it).displayLanguage } ?: ""
                 val label = when {
-                    fmt.label    != null -> fmt.label!!
-                    lang.isNotEmpty()    -> lang
-                    else                 -> resources.getString(R.string.media_audio_track, gi + 1)
+                    fmt.label != null -> fmt.label!!
+                    lang.isNotEmpty() -> lang
+                    else -> resources.getString(R.string.media_audio_track, gi + 1)
                 }
-                // A track group is selected when the player actually rendered it
                 TrackOption(label, gi, 0, group.isSelected)
             }
 
         subtitleTracks = tracks.groups
             .filter { it.type == C.TRACK_TYPE_TEXT && it.isSupported }
             .mapIndexed { gi, group ->
-                val fmt   = group.getTrackFormat(0)
-                val lang  = fmt.language?.let { Locale(it).displayLanguage } ?: ""
+                val fmt = group.getTrackFormat(0)
+                val lang = fmt.language?.let { Locale(it).displayLanguage } ?: ""
                 val label = when {
-                    fmt.label    != null -> fmt.label!!
-                    lang.isNotEmpty()    -> lang
-                    else                 -> resources.getString(R.string.media_subtitle_track, gi + 1)
+                    fmt.label != null -> fmt.label!!
+                    lang.isNotEmpty() -> lang
+                    else -> resources.getString(R.string.media_subtitle_track, gi + 1)
                 }
                 TrackOption(label, gi, 0, group.isSelected)
             }
     }
 
-    // ── Player listeners ────────────────────────────────────────────────────
     DisposableEffect(exoPlayer) {
         val listener = object : Player.Listener {
             override fun onIsPlayingChanged(playing: Boolean) { isPlaying = playing }
@@ -271,32 +252,31 @@ fun VideoPlayerScreen(
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 currentVideoUri = mediaItem?.localConfiguration?.uri?.toString()
             }
+            override fun onVideoSizeChanged(videoSize: VideoSize) {
+                if (videoSize.width > 0 && videoSize.height > 0) {
+                    videoAspectRatio = (videoSize.width * videoSize.pixelWidthHeightRatio) / videoSize.height.toFloat()
+                }
+            }
+            override fun onCues(cueGroup: CueGroup) {
+                currentCues = cueGroup
+            }
         }
         exoPlayer.addListener(listener)
         onDispose { exoPlayer.removeListener(listener) }
     }
 
-    // ── Apply loop setting ──────────────────────────────────────────────────
     LaunchedEffect(loopEnabled) {
         exoPlayer.repeatMode = if (loopEnabled) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
     }
 
-    // ── Apply volume ────────────────────────────────────────────────────────
     LaunchedEffect(volume) {
         exoPlayer.volume = volume
     }
 
-    // ── Apply playback speed ────────────────────────────────────────────────
     LaunchedEffect(playbackSpeed) {
         exoPlayer.setPlaybackParameters(PlaybackParameters(playbackSpeed))
     }
 
-    // ── Apply resize mode ───────────────────────────────────────────────────
-    LaunchedEffect(resizeMode) {
-        playerViewRef?.resizeMode = resizeMode.value
-    }
-
-    // ── Load sibling videos ─────────────────────────────────────────────────
     LaunchedEffect(initialVideoUri) {
         if (initialVideoUri != null) {
             val videoExtensions = setOf("mp4", "mkv", "webm", "avi", "mov")
@@ -314,46 +294,39 @@ fun VideoPlayerScreen(
         }
     }
 
-    // ── Position polling ────────────────────────────────────────────────────
     LaunchedEffect(isPlaying) {
         if (isPlaying) {
             while (true) {
                 currentPosition = exoPlayer.currentPosition
-                totalDuration   = exoPlayer.duration.coerceAtLeast(0L)
-                delay(500)
+                totalDuration = exoPlayer.duration.coerceAtLeast(0L)
+                delay(250)
             }
         }
     }
 
-    // ── Auto-hide UI ────────────────────────────────────────────────────────
     LaunchedEffect(isUiVisible, hideTimerTrigger, isPlaying, isHoveringControls, optionsMenuExpanded) {
         if (isUiVisible && isPlaying && !isHoveringControls && !optionsMenuExpanded) {
-            delay(3000)
+            delay(3500)
             isUiVisible = false
         }
     }
 
-    // ── Reset options screen when menu closes ───────────────────────────────
     LaunchedEffect(optionsMenuExpanded) {
         if (!optionsMenuExpanded) optionsScreen = "MAIN"
     }
 
-    // ── Indicator timers ────────────────────────────────────────────────────
-    LaunchedEffect(showSkipBackIndicator)    { if (showSkipBackIndicator)    { delay(600); showSkipBackIndicator    = false } }
+    LaunchedEffect(showSkipBackIndicator) { if (showSkipBackIndicator) { delay(600); showSkipBackIndicator = false } }
     LaunchedEffect(showSkipForwardIndicator) { if (showSkipForwardIndicator) { delay(600); showSkipForwardIndicator = false } }
-    LaunchedEffect(showPauseIndicator)       { if (showPauseIndicator)       { delay(600); showPauseIndicator       = false } }
-    LaunchedEffect(showPlayIndicator)        { if (showPlayIndicator)        { delay(600); showPlayIndicator        = false } }
+    LaunchedEffect(showPauseIndicator) { if (showPauseIndicator) { delay(600); showPauseIndicator = false } }
+    LaunchedEffect(showPlayIndicator) { if (showPlayIndicator) { delay(600); showPlayIndicator = false } }
 
-    // ── Thumbnail generation ────────────────────────────────────────────────
-    // Re-runs whenever the active media item changes (next/prev skip).
     LaunchedEffect(currentVideoUri) {
         thumbnailCache.clear()
         thumbnailAspectRatio = 16f / 9f
         val uri = currentVideoUri ?: return@LaunchedEffect
-        // Wait for ExoPlayer to report a valid duration (works paused or playing).
         while (exoPlayer.duration <= 0L) { delay(200) }
         val duration = exoPlayer.duration
-        val count = 50
+        val count = 36
         val interval = duration / count
         val retriever = MediaMetadataRetriever()
         try {
@@ -362,7 +335,6 @@ fun VideoPlayerScreen(
                 val w = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 160
                 val h = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 90
                 val rotation = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
-                // Swap dimensions for portrait-rotated videos
                 if (rotation == 90 || rotation == 270) Pair(h, w) else Pair(w, h)
             }
             val aspect = thumbW.toFloat() / thumbH.toFloat().coerceAtLeast(1f)
@@ -386,14 +358,13 @@ fun VideoPlayerScreen(
         } catch (e: Exception) {
             if (e is CancellationException) throw e
         } finally {
-            withContext(Dispatchers.IO) { retriever.release() }
+            withContext(Dispatchers.IO) { runCatching { retriever.release() } }
         }
     }
 
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
     DisposableEffect(Unit) { onDispose { exoPlayer.release() } }
 
-    // ── UI ──────────────────────────────────────────────────────────────────
     Scaffold { innerPadding ->
         Box(
             modifier = Modifier
@@ -403,51 +374,262 @@ fun VideoPlayerScreen(
                 .focusRequester(focusRequester)
                 .focusable()
                 .videoKeyboardControls(
-                    exoPlayer             = exoPlayer,
-                    volume                = volume,
-                    onVolumeChange        = { volume = it },
-                    onToggleFullscreen    = onToggleFullscreen,
-                    onShowSkipBackIndicator    = { showSkipBackIndicator    = true },
+                    exoPlayer = exoPlayer,
+                    volume = volume,
+                    onVolumeChange = { volume = it },
+                    onToggleFullscreen = onToggleFullscreen,
+                    onShowSkipBackIndicator = { showSkipBackIndicator = true },
                     onShowSkipForwardIndicator = { showSkipForwardIndicator = true },
-                    onShowPauseIndicator  = { showPauseIndicator  = true },
-                    onShowPlayIndicator   = { showPlayIndicator   = true },
+                    onShowPauseIndicator = { showPauseIndicator = true },
+                    onShowPlayIndicator = { showPlayIndicator = true },
                     onShowUi = { isUiVisible = true; hideTimerTrigger++ },
                     activity = activity
                 )
         ) {
-
-            // ── Video surface ───────────────────────────────────────────────
+            // ── Video Surface with Real-Time 3D Stereoscopic Effect & Swipe Gestures ──
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .videoGestures(
-                        isUiVisible           = isUiVisible,
-                        isPlaying             = isPlaying,
-                        exoPlayer             = exoPlayer,
-                        onUiVisibilityChange  = { isUiVisible = it },
-                        onHideTimerTrigger    = { hideTimerTrigger++ },
-                        onToggleFullscreen    = onToggleFullscreen,
-                        onShowPauseIndicator  = { showPauseIndicator  = true },
-                        onShowPlayIndicator   = { showPlayIndicator   = true },
-                        onShowSkipBackIndicator    = { showSkipBackIndicator    = true },
+                        isUiVisible = isUiVisible,
+                        isPlaying = isPlaying,
+                        exoPlayer = exoPlayer,
+                        onUiVisibilityChange = { isUiVisible = it },
+                        onHideTimerTrigger = { hideTimerTrigger++ },
+                        onToggleFullscreen = onToggleFullscreen,
+                        onShowPauseIndicator = { showPauseIndicator = true },
+                        onShowPlayIndicator = { showPlayIndicator = true },
+                        onShowSkipBackIndicator = { showSkipBackIndicator = true },
                         onShowSkipForwardIndicator = { showSkipForwardIndicator = true },
                         onShowUi = { isUiVisible = true; hideTimerTrigger++ }
                     )
+                    .pointerInput(totalDuration) {
+                        var startX = 0f
+                        var totalDx = 0f
+                        var totalDy = 0f
+                        var initialPosMs = 0L
+
+                        detectDragGestures(
+                            onDragStart = { startOffset ->
+                                startX = startOffset.x
+                                totalDx = 0f
+                                totalDy = 0f
+                                initialPosMs = exoPlayer.currentPosition.coerceAtLeast(0L)
+                                seekPreviewPos = initialPosMs
+                                seekDeltaMs = 0L
+                                activeSwipe = ActivitySwipeType.NONE
+                            },
+                            onDrag = { change, dragAmount ->
+                                change.consume()
+                                totalDx += dragAmount.x
+                                totalDy += dragAmount.y
+
+                                if (activeSwipe == ActivitySwipeType.NONE) {
+                                    if (abs(totalDx) > 18f || abs(totalDy) > 18f) {
+                                        activeSwipe = if (abs(totalDx) > abs(totalDy) * 1.25f) {
+                                            ActivitySwipeType.SEEK
+                                        } else if (startX < size.width * 0.45f) {
+                                            ActivitySwipeType.BRIGHTNESS
+                                        } else {
+                                            ActivitySwipeType.VOLUME
+                                        }
+                                    }
+                                }
+
+                                when (activeSwipe) {
+                                    ActivitySwipeType.BRIGHTNESS -> {
+                                        val delta = -dragAmount.y / size.height.coerceAtLeast(1)
+                                        brightnessLevel = (brightnessLevel + delta * 1.35f).coerceIn(0.05f, 1.0f)
+                                        activity?.window?.let { win ->
+                                            val lp = win.attributes
+                                            lp.screenBrightness = brightnessLevel
+                                            win.attributes = lp
+                                        }
+                                    }
+                                    ActivitySwipeType.VOLUME -> {
+                                        val delta = -dragAmount.y / size.height.coerceAtLeast(1)
+                                        volume = (volume + delta * 1.35f).coerceIn(0f, 1f)
+                                        val maxVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
+                                        val targetStreamVol = (volume * maxVol).roundToInt().coerceIn(0, maxVol)
+                                        runCatching {
+                                            audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, targetStreamVol, 0)
+                                        }
+                                    }
+                                    ActivitySwipeType.SEEK -> {
+                                        val maxDur = exoPlayer.duration.coerceAtLeast(60_000L)
+                                        val seekSpan = maxDur.coerceAtMost(180_000L)
+                                        val deltaMs = ((totalDx / size.width.coerceAtLeast(1)) * seekSpan).toLong()
+                                        seekDeltaMs = deltaMs
+                                        seekPreviewPos = (initialPosMs + deltaMs).coerceIn(0L, exoPlayer.duration.coerceAtLeast(1L))
+                                    }
+                                    ActivitySwipeType.NONE -> {}
+                                }
+                            },
+                            onDragEnd = {
+                                if (activeSwipe == ActivitySwipeType.SEEK) {
+                                    exoPlayer.seekTo(seekPreviewPos)
+                                    currentPosition = seekPreviewPos
+                                }
+                                activeSwipe = ActivitySwipeType.NONE
+                            },
+                            onDragCancel = {
+                                activeSwipe = ActivitySwipeType.NONE
+                            }
+                        )
+                    }
+                    .stereoscopic3dEffect(mode = mode3d, parallaxDp = depth3dDp),
+                contentAlignment = Alignment.Center
             ) {
                 AndroidView(
                     factory = { ctx ->
-                        PlayerView(ctx).also { pv ->
-                            pv.player        = exoPlayer
-                            pv.useController = false
-                            pv.resizeMode    = resizeMode.value
-                            playerViewRef    = pv
+                        AspectRatioFrameLayout(ctx).apply {
+                            layoutParams = FrameLayout.LayoutParams(
+                                ViewGroup.LayoutParams.MATCH_PARENT,
+                                ViewGroup.LayoutParams.MATCH_PARENT
+                            )
+                            this.resizeMode = resizeMode.value
+                            setAspectRatio(videoAspectRatio)
+
+                            val textureView = TextureView(ctx).apply {
+                                layoutParams = FrameLayout.LayoutParams(
+                                    ViewGroup.LayoutParams.MATCH_PARENT,
+                                    ViewGroup.LayoutParams.MATCH_PARENT
+                                )
+                                keepScreenOn = true
+                            }
+                            addView(textureView)
+                            exoPlayer.setVideoTextureView(textureView)
+
+                            val subtitleView = SubtitleView(ctx).apply {
+                                tag = "SUBTITLE_VIEW"
+                                layoutParams = FrameLayout.LayoutParams(
+                                    ViewGroup.LayoutParams.MATCH_PARENT,
+                                    ViewGroup.LayoutParams.MATCH_PARENT
+                                )
+                                setUserDefaultStyle()
+                                setUserDefaultTextSize()
+                            }
+                            addView(subtitleView)
                         }
                     },
-                    update = { pv ->
-                        pv.resizeMode = resizeMode.value
+                    update = { container ->
+                        container.resizeMode = resizeMode.value
+                        container.setAspectRatio(videoAspectRatio.coerceAtLeast(0.2f))
+                        val subView = container.findViewWithTag<SubtitleView>("SUBTITLE_VIEW")
+                        subView?.setCues(currentCues?.cues ?: emptyList())
                     },
                     modifier = Modifier.fillMaxSize()
                 )
+            }
+
+            // Software dimmer when brightness < 35%
+            if (brightnessLevel < 0.35f) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = (0.35f - brightnessLevel) * 1.4f))
+                )
+            }
+
+            // ── Swipe Gesture Live HUD ──────────────────────────────────────
+            AnimatedVisibility(
+                visible = activeSwipe != ActivitySwipeType.NONE,
+                enter = fadeIn(),
+                exit = fadeOut(),
+                modifier = Modifier.align(Alignment.Center)
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(18.dp),
+                    color = Color(0xD9121216),
+                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.16f)),
+                    tonalElevation = 8.dp
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .padding(horizontal = 22.dp, vertical = 14.dp)
+                            .widthIn(min = 160.dp, max = 240.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        when (activeSwipe) {
+                            ActivitySwipeType.BRIGHTNESS -> {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(Icons.Default.BrightnessHigh, null, tint = Color(0xFFFACC15))
+                                    Text(
+                                        text = "Brightness ${(brightnessLevel * 100).roundToInt()}%",
+                                        color = Color.White,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 14.sp
+                                    )
+                                }
+                                Spacer(Modifier.height(8.dp))
+                                LinearProgressIndicator(
+                                    progress = { brightnessLevel },
+                                    color = Color(0xFFFACC15),
+                                    trackColor = Color.White.copy(alpha = 0.2f),
+                                    modifier = Modifier.fillMaxWidth().height(5.dp).clip(RoundedCornerShape(3.dp))
+                                )
+                            }
+                            ActivitySwipeType.VOLUME -> {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(
+                                        if (volume <= 0.01f) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp,
+                                        null,
+                                        tint = Color(0xFF38BDF8)
+                                    )
+                                    Text(
+                                        text = "Volume ${(volume * 100).roundToInt()}%",
+                                        color = Color.White,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 14.sp
+                                    )
+                                }
+                                Spacer(Modifier.height(8.dp))
+                                LinearProgressIndicator(
+                                    progress = { volume },
+                                    color = Color(0xFF38BDF8),
+                                    trackColor = Color.White.copy(alpha = 0.2f),
+                                    modifier = Modifier.fillMaxWidth().height(5.dp).clip(RoundedCornerShape(3.dp))
+                                )
+                            }
+                            ActivitySwipeType.SEEK -> {
+                                val sign = if (seekDeltaMs >= 0) "+" else "-"
+                                val absSec = abs(seekDeltaMs) / 1000L
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(
+                                        if (seekDeltaMs >= 0) Icons.Default.FastForward else Icons.Default.FastRewind,
+                                        null,
+                                        tint = Color(0xFF1DB954)
+                                    )
+                                    Text(
+                                        text = "${formatTime(seekPreviewPos)} ($sign${absSec}s)",
+                                        color = Color.White,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 14.sp
+                                    )
+                                }
+                                Spacer(Modifier.height(8.dp))
+                                LinearProgressIndicator(
+                                    progress = {
+                                        if (totalDuration > 0L) (seekPreviewPos.toFloat() / totalDuration.toFloat()).coerceIn(0f, 1f) else 0f
+                                    },
+                                    color = Color(0xFF1DB954),
+                                    trackColor = Color.White.copy(alpha = 0.2f),
+                                    modifier = Modifier.fillMaxWidth().height(5.dp).clip(RoundedCornerShape(3.dp))
+                                )
+                            }
+                            ActivitySwipeType.NONE -> {}
+                        }
+                    }
+                }
             }
 
             // ── Indicators ──────────────────────────────────────────────────
@@ -474,11 +656,80 @@ fun VideoPlayerScreen(
                 }
             }
 
+            // ── Top Bar (Back Button + Title + 3D Mode Pill) ────────────────
+            AnimatedVisibility(
+                visible = isUiVisible,
+                enter = fadeIn(),
+                exit = fadeOut(),
+                modifier = Modifier.align(Alignment.TopCenter)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(Color.Black.copy(alpha = 0.80f), Color.Transparent)
+                            )
+                        )
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                        IconButton(onClick = { activity?.finish() }) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
+                        }
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = currentVideoUri?.let { Uri.parse(it).lastPathSegment } ?: "Video Player",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+
+                    // Quick 3D Mode Cycle Button
+                    Surface(
+                        color = if (mode3d != Video3dMode.OFF) Color(0xFFEF4444).copy(alpha = 0.28f) else Color.White.copy(alpha = 0.14f),
+                        border = BorderStroke(
+                            1.dp,
+                            if (mode3d != Video3dMode.OFF) Color(0xFF22C55E) else Color.White.copy(alpha = 0.25f)
+                        ),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.clickable {
+                            val modes = Video3dMode.entries
+                            mode3d = modes[(modes.indexOf(mode3d) + 1) % modes.size]
+                        }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.MovieFilter,
+                                contentDescription = "3D Mode",
+                                tint = if (mode3d != Video3dMode.OFF) Color(0xFF4ADE80) else Color.White,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = mode3d.label,
+                                color = Color.White,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+            }
+
             // ── Bottom controls ─────────────────────────────────────────────
             AnimatedVisibility(
-                visible  = isUiVisible,
-                enter    = fadeIn(),
-                exit     = fadeOut(),
+                visible = isUiVisible,
+                enter = fadeIn(),
+                exit = fadeOut(),
                 modifier = Modifier.align(Alignment.BottomCenter)
             ) {
                 Column(
@@ -492,7 +743,7 @@ fun VideoPlayerScreen(
                                     if (event.changes.any { it.type == PointerType.Mouse }) {
                                         isHoveringControls = when (event.type) {
                                             PointerEventType.Enter -> true
-                                            PointerEventType.Exit  -> false
+                                            PointerEventType.Exit -> false
                                             else -> isHoveringControls
                                         }
                                     }
@@ -501,9 +752,6 @@ fun VideoPlayerScreen(
                         }
                         .pointerInput(Unit) { detectTapGestures(onTap = { hideTimerTrigger++ }) }
                 ) {
-                    // Preview card — zero layout height so it floats above the bar without
-                    // pushing the Column upward. The layout modifier reports h=0 to the parent
-                    // while placing the content at y=-contentHeight (above its anchor).
                     if (seekbarHoverFraction != null && totalDuration > 0L) {
                         BoxWithConstraints(
                             modifier = Modifier
@@ -518,7 +766,6 @@ fun VideoPlayerScreen(
                             val bitmap = thumbnailCache.keys
                                 .minByOrNull { k -> if (k >= hoverMs) k - hoverMs else hoverMs - k }
                                 ?.let { thumbnailCache[it] }
-                            // Fit within a 240×135 box, never narrower than 80dp
                             val previewW = (135.dp * thumbnailAspectRatio).coerceIn(80.dp, 240.dp)
                             val previewImageH = previewW / thumbnailAspectRatio
                             val padDp = 8.dp
@@ -614,48 +861,46 @@ fun VideoPlayerScreen(
                     }
 
                     // Controls row
-                    Row(modifier = Modifier.padding(8.dp)) {
-
-                        // Play / Pause
+                    Row(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         IconButton(
                             onClick = {
                                 if (isPlaying) { exoPlayer.pause(); showPauseIndicator = true }
-                                else           { exoPlayer.play();  showPlayIndicator  = true }
+                                else { exoPlayer.play(); showPlayIndicator = true }
                             },
                             modifier = Modifier.nonFocusable()
                         ) {
                             Icon(
-                                imageVector     = if (isPlaying) Icons.Default.PauseCircle else Icons.Default.PlayCircle,
+                                imageVector = if (isPlaying) Icons.Default.PauseCircle else Icons.Default.PlayCircle,
                                 contentDescription = stringResource(if (isPlaying) R.string.media_paused else R.string.media_playing),
-                                tint   = Color.White,
-                                modifier = Modifier.size(64.dp)
+                                tint = Color.White,
+                                modifier = Modifier.size(48.dp)
                             )
                         }
 
-                        // Previous
                         IconButton(onClick = { if (hasPrev) exoPlayer.seekToPreviousMediaItem() }) {
                             Icon(Icons.Default.SkipPrevious, stringResource(R.string.previous),
                                 tint = if (hasPrev) Color.White else Color.Gray,
-                                modifier = Modifier.size(48.dp))
+                                modifier = Modifier.size(36.dp))
                         }
 
-                        // Next
                         IconButton(onClick = { if (hasNext) exoPlayer.seekToNextMediaItem() }) {
                             Icon(Icons.Default.SkipNext, stringResource(R.string.next),
                                 tint = if (hasNext) Color.White else Color.Gray,
-                                modifier = Modifier.size(48.dp))
+                                modifier = Modifier.size(36.dp))
                         }
 
-                        // Volume icon — tap to mute/unmute
                         IconButton(
                             onClick = { volume = if (volume > 0f) 0f else 1f },
                             modifier = Modifier.nonFocusable()
                         ) {
                             Icon(
                                 imageVector = when {
-                                    volume == 0f  -> Icons.AutoMirrored.Filled.VolumeOff
+                                    volume == 0f -> Icons.AutoMirrored.Filled.VolumeOff
                                     volume < 0.5f -> Icons.AutoMirrored.Filled.VolumeDown
-                                    else          -> Icons.AutoMirrored.Filled.VolumeUp
+                                    else -> Icons.AutoMirrored.Filled.VolumeUp
                                 },
                                 contentDescription = stringResource(R.string.media_volume),
                                 tint = Color.White,
@@ -663,68 +908,22 @@ fun VideoPlayerScreen(
                             )
                         }
 
-                        // Volume slider
-                        Box(
-                            modifier = Modifier
-                                .width(80.dp)
-                                .height(24.dp)
-                                .align(Alignment.CenterVertically)
-                                .nonFocusable()
-                                .pointerInput(Unit) {
-                                    detectTapGestures { offset ->
-                                        volume = (offset.x / size.width).coerceIn(0f, 1f)
-                                    }
-                                }
-                                .pointerInput(Unit) {
-                                    detectHorizontalDragGestures { change, _ ->
-                                        change.consume()
-                                        volume = (change.position.x / size.width).coerceIn(0f, 1f)
-                                    }
-                                }
-                        ) {
-                            Canvas(modifier = Modifier.fillMaxSize()) {
-                                val trackH = 3.dp.toPx()
-                                val cy = size.height / 2f
-                                val activeX = (volume * size.width).coerceIn(0f, size.width)
-                                val thumbR = 4.dp.toPx()
-                                drawLine(Color.White.copy(alpha = 0.3f), Offset(0f, cy), Offset(size.width, cy), trackH, cap = StrokeCap.Round)
-                                if (activeX > 0f) drawLine(Color.White, Offset(0f, cy), Offset(activeX, cy), trackH, cap = StrokeCap.Round)
-                                drawCircle(Color.White, thumbR, Offset(activeX, cy))
-                            }
-                        }
+                        Spacer(Modifier.width(8.dp))
 
-                        Spacer(Modifier.width(16.dp))
-
-                        // Loop indicator
-                        if (loopEnabled) {
-                            Icon(Icons.Default.Repeat, stringResource(R.string.media_loop),
-                                tint     = Color.Red,
-                                modifier = Modifier
-                                    .size(20.dp)
-                                    .align(Alignment.CenterVertically)
-                            )
-                        }
-
-                        Spacer(Modifier.width(16.dp))
-
-                        // Timestamp
                         Text(
-                            text  = "${formatTime(currentPosition)} / ${formatTime(totalDuration)}",
+                            text = "${formatTime(currentPosition)} / ${formatTime(totalDuration)}",
                             color = Color.White,
-                            modifier = Modifier
-                                .align(Alignment.CenterVertically)
+                            fontSize = 12.sp
                         )
 
                         Spacer(Modifier.weight(1f))
 
-                        // Speed badge (shown when not 1×)
                         if (playbackSpeed != 1f) {
                             Text(
-                                text  = "${playbackSpeed}×",
-                                color = Color.Red,
-                                modifier = Modifier
-                                    .align(Alignment.CenterVertically)
-                                    .padding(end = 8.dp)
+                                text = "${playbackSpeed}×",
+                                color = Color(0xFF4ADE80),
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(end = 8.dp)
                             )
                         }
 
@@ -732,20 +931,31 @@ fun VideoPlayerScreen(
                         Box {
                             IconButton(onClick = { optionsMenuExpanded = true }) {
                                 Icon(Icons.Default.Settings, stringResource(R.string.options),
-                                    tint = Color.White, modifier = Modifier.size(36.dp))
+                                    tint = Color.White, modifier = Modifier.size(32.dp))
                             }
 
                             DropdownMenu(
-                                expanded        = optionsMenuExpanded,
+                                expanded = optionsMenuExpanded,
                                 onDismissRequest = { optionsMenuExpanded = false }
                             ) {
                                 when (optionsScreen) {
-
-                                    // ── MAIN screen ───────────────────────
                                     "MAIN" -> {
+                                        // 3D Stereoscopic Mode
+                                        DropdownMenuItem(
+                                            leadingIcon = { Icon(Icons.Default.MovieFilter, null) },
+                                            text = { Text("3D Video Mode") },
+                                            trailingIcon = {
+                                                Row {
+                                                    Text(mode3d.label, color = Color.Gray)
+                                                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null)
+                                                }
+                                            },
+                                            onClick = { optionsScreen = "3D" }
+                                        )
+
                                         // Speed
                                         DropdownMenuItem(
-                                            leadingIcon  = { Icon(Icons.Default.FastForward, null) },
+                                            leadingIcon = { Icon(Icons.Default.FastForward, null) },
                                             text = { Text(stringResource(R.string.menu_speed)) },
                                             trailingIcon = {
                                                 Row {
@@ -758,27 +968,25 @@ fun VideoPlayerScreen(
 
                                         // Audio track
                                         DropdownMenuItem(
-                                            leadingIcon  = { Icon(Icons.Default.Audiotrack, null) },
+                                            leadingIcon = { Icon(Icons.Default.Audiotrack, null) },
                                             text = { Text(stringResource(R.string.menu_audio_track)) },
                                             trailingIcon = {
                                                 Row {
-                                                    if (audioTracks.isNotEmpty()) {
-                                                        Text(
-                                                            audioTracks.firstOrNull { it.isSelected }?.label
-                                                                ?: audioTracks.first().label,
-                                                            color = Color.Gray
-                                                        )
-                                                    }
+                                                    Text(
+                                                        audioTracks.firstOrNull { it.isSelected }?.label
+                                                            ?: audioTracks.firstOrNull()?.label
+                                                            ?: "Default",
+                                                        color = Color.Gray
+                                                    )
                                                     Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null)
                                                 }
                                             },
-                                            onClick = { optionsScreen = "AUDIO" },
-                                            enabled = audioTracks.size > 1
+                                            onClick = { optionsScreen = "AUDIO" }
                                         )
 
                                         // Subtitles
                                         DropdownMenuItem(
-                                            leadingIcon  = { Icon(Icons.Default.Subtitles, null) },
+                                            leadingIcon = { Icon(Icons.Default.Subtitles, null) },
                                             text = { Text(stringResource(R.string.menu_subtitles)) },
                                             trailingIcon = {
                                                 Row {
@@ -787,13 +995,12 @@ fun VideoPlayerScreen(
                                                     Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null)
                                                 }
                                             },
-                                            onClick = { optionsScreen = "SUBTITLES" },
-                                            enabled = subtitleTracks.isNotEmpty()
+                                            onClick = { optionsScreen = "SUBTITLES" }
                                         )
 
                                         // Aspect ratio
                                         DropdownMenuItem(
-                                            leadingIcon  = { Icon(Icons.Default.AspectRatio, null) },
+                                            leadingIcon = { Icon(Icons.Default.AspectRatio, null) },
                                             text = { Text(stringResource(R.string.menu_aspect_ratio)) },
                                             trailingIcon = {
                                                 Row {
@@ -808,8 +1015,10 @@ fun VideoPlayerScreen(
 
                                         // Loop toggle
                                         DropdownMenuItem(
-                                            leadingIcon  = { Icon(Icons.Default.Repeat, null,
-                                                tint = if (loopEnabled) Color.Red else Color.Gray) },
+                                            leadingIcon = {
+                                                Icon(Icons.Default.Repeat, null,
+                                                    tint = if (loopEnabled) Color.Red else Color.Gray)
+                                            },
                                             text = { Text(if (loopEnabled) stringResource(R.string.media_loop_on) else stringResource(R.string.media_loop_off)) },
                                             trailingIcon = {
                                                 if (loopEnabled) Icon(Icons.Default.Check, null)
@@ -821,9 +1030,28 @@ fun VideoPlayerScreen(
                                         )
                                     }
 
-                                    // ── SPEED screen ──────────────────────
+                                    "3D" -> {
+                                        DropdownMenuItem(
+                                            leadingIcon = { Icon(Icons.AutoMirrored.Filled.ArrowBack, null) },
+                                            text = { Text(stringResource(R.string.back)) },
+                                            onClick = { optionsScreen = "MAIN" }
+                                        )
+                                        HorizontalDivider()
+                                        Video3dMode.entries.forEach { m ->
+                                            DropdownMenuItem(
+                                                text = { Text(m.label) },
+                                                trailingIcon = {
+                                                    if (mode3d == m) Icon(Icons.Default.Check, null)
+                                                },
+                                                onClick = {
+                                                    mode3d = m
+                                                    optionsMenuExpanded = false
+                                                }
+                                            )
+                                        }
+                                    }
+
                                     "SPEED" -> {
-                                        // Back
                                         DropdownMenuItem(
                                             leadingIcon = { Icon(Icons.AutoMirrored.Filled.ArrowBack, null) },
                                             text = { Text(stringResource(R.string.back)) },
@@ -841,14 +1069,13 @@ fun VideoPlayerScreen(
                                                     if (playbackSpeed == speed) Icon(Icons.Default.Check, null)
                                                 },
                                                 onClick = {
-                                                    playbackSpeed       = speed
+                                                    playbackSpeed = speed
                                                     optionsMenuExpanded = false
                                                 }
                                             )
                                         }
                                     }
 
-                                    // ── AUDIO screen ──────────────────────
                                     "AUDIO" -> {
                                         DropdownMenuItem(
                                             leadingIcon = { Icon(Icons.AutoMirrored.Filled.ArrowBack, null) },
@@ -859,7 +1086,7 @@ fun VideoPlayerScreen(
 
                                         if (audioTracks.isEmpty()) {
                                             DropdownMenuItem(
-                                                text    = { Text(stringResource(R.string.media_no_audio_tracks)) },
+                                                text = { Text(stringResource(R.string.media_no_audio_tracks)) },
                                                 enabled = false,
                                                 onClick = {}
                                             )
@@ -871,13 +1098,12 @@ fun VideoPlayerScreen(
                                                         if (track.isSelected) Icon(Icons.Default.Check, null)
                                                     },
                                                     onClick = {
-                                                        // Select this audio track group exclusively
                                                         val groups = exoPlayer.currentTracks.groups
                                                         val audioGroups = groups.filter {
                                                             it.type == C.TRACK_TYPE_AUDIO && it.isSupported
                                                         }
                                                         if (i < audioGroups.size) {
-                                                            val override = androidx.media3.common.TrackSelectionOverride(
+                                                            val override = TrackSelectionOverride(
                                                                 audioGroups[i].mediaTrackGroup, 0
                                                             )
                                                             exoPlayer.trackSelectionParameters =
@@ -893,7 +1119,6 @@ fun VideoPlayerScreen(
                                         }
                                     }
 
-                                    // ── SUBTITLES screen ──────────────────
                                     "SUBTITLES" -> {
                                         DropdownMenuItem(
                                             leadingIcon = { Icon(Icons.AutoMirrored.Filled.ArrowBack, null) },
@@ -902,7 +1127,6 @@ fun VideoPlayerScreen(
                                         )
                                         HorizontalDivider()
 
-                                        // "Off" option — disable all text tracks
                                         val subtitlesOff = subtitleTracks.none { it.isSelected }
                                         DropdownMenuItem(
                                             text = { Text(stringResource(R.string.off)) },
@@ -917,6 +1141,7 @@ fun VideoPlayerScreen(
                                                         .setPreferredTextLanguage(null)
                                                         .clearOverridesOfType(C.TRACK_TYPE_TEXT)
                                                         .build()
+                                                currentCues = null
                                                 optionsMenuExpanded = false
                                             }
                                         )
@@ -933,7 +1158,7 @@ fun VideoPlayerScreen(
                                                         it.type == C.TRACK_TYPE_TEXT && it.isSupported
                                                     }
                                                     if (i < textGroups.size) {
-                                                        val override = androidx.media3.common.TrackSelectionOverride(
+                                                        val override = TrackSelectionOverride(
                                                             textGroups[i].mediaTrackGroup, 0
                                                         )
                                                         exoPlayer.trackSelectionParameters =
@@ -948,7 +1173,6 @@ fun VideoPlayerScreen(
                                         }
                                     }
 
-                                    // ── ASPECT screen ─────────────────────
                                     "ASPECT" -> {
                                         DropdownMenuItem(
                                             leadingIcon = { Icon(Icons.AutoMirrored.Filled.ArrowBack, null) },
@@ -964,7 +1188,7 @@ fun VideoPlayerScreen(
                                                     if (resizeMode == mode) Icon(Icons.Default.Check, null)
                                                 },
                                                 onClick = {
-                                                    resizeMode          = mode
+                                                    resizeMode = mode
                                                     optionsMenuExpanded = false
                                                 }
                                             )
@@ -974,10 +1198,9 @@ fun VideoPlayerScreen(
                             }
                         }
 
-                        // Fullscreen button
                         IconButton(onClick = { onToggleFullscreen() }) {
                             Icon(Icons.Default.Fullscreen, stringResource(R.string.menu_fullscreen),
-                                tint = Color.White, modifier = Modifier.size(64.dp))
+                                tint = Color.White, modifier = Modifier.size(36.dp))
                         }
                     }
                 }
@@ -986,13 +1209,10 @@ fun VideoPlayerScreen(
     }
 }
 
-
-// ── Utilities ─────────────────────────────────────────────────────────────────
-
 @SuppressLint("DefaultLocale")
 fun formatTime(ms: Long): String {
     val totalSeconds = ms / 1000
-    val hours   = totalSeconds / 3600
+    val hours = totalSeconds / 3600
     val minutes = (totalSeconds % 3600) / 60
     val seconds = totalSeconds % 60
     return if (hours > 0) {
@@ -1001,9 +1221,6 @@ fun formatTime(ms: Long): String {
         String.format("%02d:%02d", minutes, seconds)
     }
 }
-
-
-// ── Gesture modifiers (unchanged) ─────────────────────────────────────────────
 
 fun Modifier.videoGestures(
     isUiVisible: Boolean,
@@ -1020,31 +1237,30 @@ fun Modifier.videoGestures(
 ): Modifier = composed {
     val scope = rememberCoroutineScope()
 
-    var lastClickTime by remember { mutableStateOf(0L) }
+    var lastClickTime by remember { mutableLongStateOf(0L) }
     var pendingClickJob by remember { mutableStateOf<Job?>(null) }
-    var lastTapTime by remember { mutableStateOf(0L) }
-    var lastTapX by remember { mutableStateOf(0f) }
+    var lastTapTime by remember { mutableLongStateOf(0L) }
+    var lastTapX by remember { mutableFloatStateOf(0f) }
 
-    val currentIsUiVisible         by rememberUpdatedState(isUiVisible)
-    val currentIsPlaying           by rememberUpdatedState(isPlaying)
+    val currentIsUiVisible by rememberUpdatedState(isUiVisible)
+    val currentIsPlaying by rememberUpdatedState(isPlaying)
     val currentOnUiVisibilityChange by rememberUpdatedState(onUiVisibilityChange)
-    val currentOnHideTimerTrigger  by rememberUpdatedState(onHideTimerTrigger)
-    val currentOnToggleFullscreen  by rememberUpdatedState(onToggleFullscreen)
+    val currentOnHideTimerTrigger by rememberUpdatedState(onHideTimerTrigger)
+    val currentOnToggleFullscreen by rememberUpdatedState(onToggleFullscreen)
 
     this
         .pointerInput(Unit) {
             awaitPointerEventScope {
                 while (true) {
-                    val event       = awaitPointerEvent()
+                    val event = awaitPointerEvent()
                     val firstChange = event.changes.firstOrNull() ?: continue
-                    val isTouch     = event.changes.any { it.type == PointerType.Touch }
-                    val isStylus    = event.changes.any { it.type == PointerType.Stylus }
+                    val isTouch = event.changes.any { it.type == PointerType.Touch }
+                    val isStylus = event.changes.any { it.type == PointerType.Stylus }
 
                     if ((isTouch || isStylus) && event.type == PointerEventType.Press) {
-                        firstChange.consume()
                         val currentTime = System.currentTimeMillis()
-                        val tapX        = firstChange.position.x
-                        val width       = size.width.toFloat()
+                        val tapX = firstChange.position.x
+                        val width = size.width.toFloat()
 
                         if (currentTime - lastTapTime < 300) {
                             pendingClickJob?.cancel()
@@ -1065,7 +1281,7 @@ fun Modifier.videoGestures(
                                 else -> {
                                     onShowUi()
                                     if (currentIsPlaying) { exoPlayer.pause(); onShowPauseIndicator() }
-                                    else                  { exoPlayer.play();  onShowPlayIndicator()  }
+                                    else { exoPlayer.play(); onShowPlayIndicator() }
                                 }
                             }
                         } else {
@@ -1077,7 +1293,7 @@ fun Modifier.videoGestures(
                             }
                         }
                         lastTapTime = currentTime
-                        lastTapX    = tapX
+                        lastTapX = tapX
                     }
                 }
             }
@@ -1085,10 +1301,10 @@ fun Modifier.videoGestures(
         .pointerInput(Unit) {
             awaitPointerEventScope {
                 while (true) {
-                    val event       = awaitPointerEvent()
+                    val event = awaitPointerEvent()
                     val firstChange = event.changes.firstOrNull() ?: continue
-                    val isMouse     = event.changes.any { it.type == PointerType.Mouse }
-                    val isPrimary   = event.buttons.isPrimaryPressed
+                    val isMouse = event.changes.any { it.type == PointerType.Mouse }
+                    val isPrimary = event.buttons.isPrimaryPressed
 
                     if (firstChange.type == PointerType.Mouse && event.type == PointerEventType.Move) {
                         currentOnUiVisibilityChange(true)
@@ -1108,7 +1324,7 @@ fun Modifier.videoGestures(
                                 currentOnUiVisibilityChange(true)
                                 currentOnHideTimerTrigger()
                                 if (currentIsPlaying) { exoPlayer.pause(); onShowPauseIndicator() }
-                                else                  { exoPlayer.play();  onShowPlayIndicator()  }
+                                else { exoPlayer.play(); onShowPlayIndicator() }
                             }
                         }
                         lastClickTime = currentTime
@@ -1136,7 +1352,7 @@ fun Modifier.videoKeyboardControls(
         Key.Spacebar, Key.MediaPlay, Key.MediaPause, Key.MediaPlayPause -> {
             onShowUi()
             if (exoPlayer.isPlaying) { exoPlayer.pause(); onShowPauseIndicator() }
-            else                     { exoPlayer.play();  onShowPlayIndicator()  }
+            else { exoPlayer.play(); onShowPlayIndicator() }
             true
         }
         Key.DirectionRight, Key.MediaFastForward -> {
@@ -1165,7 +1381,7 @@ fun Modifier.videoKeyboardControls(
                 true
             } else false
         }
-        else  -> false
+        else -> false
     }
 }
 

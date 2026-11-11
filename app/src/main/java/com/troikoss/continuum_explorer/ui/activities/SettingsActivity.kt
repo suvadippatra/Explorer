@@ -148,13 +148,13 @@ fun SettingsScreen(onBack: () -> Unit) {
 
     val masterCategories = remember(context) {
         listOf(
-            SettingsMasterCategory(0, "General & Localization", "Folder defaults, language locale & navigation preferences", Icons.Default.Tune),
-            SettingsMasterCategory(1, context.getString(R.string.settings_appearance), "Theme mode, colorful toolbars, command bar & details pane", Icons.Default.Palette),
-            SettingsMasterCategory(2, "Editors & Handlers", "Default file viewer apps, Markor editor & desktop hover previews", Icons.Default.Apps),
-            SettingsMasterCategory(3, "Storage & File Ops", "Deletion behavior, drag gestures, archives & batch renaming", Icons.Default.Folder),
-            SettingsMasterCategory(4, "Network & FTP Hub", "FTP/HTTP server hub & network sharing options", Icons.Default.Router),
-            SettingsMasterCategory(5, "Diagnostics & System", "Live memory diagnostics, keyboard shortcuts, app info & resets", Icons.Default.Info),
-            SettingsMasterCategory(6, "Help & Documentation", "Complete Argon Audit user guide, Markor editor & previewer docs", Icons.Default.HelpOutline)
+            SettingsMasterCategory(0, "General & Localization", "Folder defaults, language & navigation", Icons.Default.Tune),
+            SettingsMasterCategory(1, context.getString(R.string.settings_appearance), "Themes, toolbars, command bar & details", Icons.Default.Palette),
+            SettingsMasterCategory(2, "Editors & Handlers", "Window modes, default viewers & previews", Icons.Default.Apps),
+            SettingsMasterCategory(3, "Storage & File Ops", "Deletion, drag gestures, archives & batch rename", Icons.Default.Folder),
+            SettingsMasterCategory(4, "Network & FTP Hub", "Wi-Fi file server, screen share & remote apps", Icons.Default.Router),
+            SettingsMasterCategory(5, "Diagnostics & System", "RAM usage, shortcuts, app info & resets", Icons.Default.Info),
+            SettingsMasterCategory(6, "Help & Reference", "Feature guides, studios & open-source credits", Icons.Default.HelpOutline)
         )
     }
 
@@ -466,26 +466,6 @@ fun SettingsScreen(onBack: () -> Unit) {
                                             }
                                         }
                                     }
-                                }
-
-                                HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-
-                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    Text(
-                                        text = "Workspace & Mini-App Rules System Location",
-                                        style = MaterialTheme.typography.labelMedium,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.primary
-                                    )
-                                    Text(
-                                        text = "• app/src/main/java/com/troikoss/continuum_explorer/rules/MiniAppRulesSpec.md\n" +
-                                            "• app/src/main/java/com/troikoss/continuum_explorer/rules/WorkspaceRulesConfig.kt\n" +
-                                            "• app/src/main/java/com/troikoss/continuum_explorer/rules/MiniAppRegistry.kt\n" +
-                                            "• app/src/main/java/com/troikoss/continuum_explorer/rules/WorkspaceWindowController.kt\n" +
-                                            "• Archived Base64 Codec: app/src/main/java/com/troikoss/continuum_explorer/archive/base64/ArchivedBase64Codec.kt",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
                                 }
                             }
 
@@ -871,12 +851,16 @@ fun SettingsScreen(onBack: () -> Unit) {
                                         Text(
                                             text = cat.title,
                                             style = MaterialTheme.typography.titleMedium,
-                                            fontWeight = FontWeight.Bold
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 1,
+                                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                                         )
                                         Text(
                                             text = cat.subtitle,
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                                         )
                                     }
                                     Icon(
@@ -1259,26 +1243,50 @@ fun SettingsScreen(onBack: () -> Unit) {
                             Spacer(modifier = Modifier.width(16.dp))
 
                             Column {
-                                Text(stringResource(R.string.app_name), style = MaterialTheme.typography.titleMedium)
-                                Text("$version", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                                Text(stringResource(R.string.app_name), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                Text("v$version • GPLv3", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                                 Spacer(modifier = Modifier.height(6.dp))
                                 Text(
-                                    text = "This is a forked version of Continuum Explorer.",
+                                    text = "Desktop-class file manager & offline suite. Forked from Continuum Explorer with integrated studios adapted from Markor and PhotoEditor.",
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     style = MaterialTheme.typography.bodySmall
                                 )
-                                Text(
-                                    text = stringResource(R.string.github),
-                                    color = MaterialTheme.colorScheme.primary,
-                                    style = MaterialTheme.typography.bodyMedium.copy(
-                                        textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline
-                                    ),
-                                    modifier = Modifier
-                                        .clickable {
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "Continuum (GPLv3)",
+                                        color = MaterialTheme.colorScheme.primary,
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline
+                                        ),
+                                        modifier = Modifier.clickable {
                                             uriHandler.openUri("https://github.com/troikoss/Continuum-Explorer")
                                         }
-                                        .padding(top = 4.dp)
-                                )
+                                    )
+                                    Text(
+                                        text = "Markor (Apache)",
+                                        color = MaterialTheme.colorScheme.primary,
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline
+                                        ),
+                                        modifier = Modifier.clickable {
+                                            uriHandler.openUri("https://github.com/gsantner/markor")
+                                        }
+                                    )
+                                    Text(
+                                        text = "PhotoEditor (MIT)",
+                                        color = MaterialTheme.colorScheme.primary,
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline
+                                        ),
+                                        modifier = Modifier.clickable {
+                                            uriHandler.openUri("https://github.com/burhanrashid52/PhotoEditor")
+                                        }
+                                    )
+                                }
                             }
                         }
                     },

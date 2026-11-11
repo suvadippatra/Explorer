@@ -41,20 +41,21 @@ import com.troikoss.continuum_explorer.managers.FtpBucketManager
 import com.troikoss.continuum_explorer.managers.FtpHostedMode
 import com.troikoss.continuum_explorer.managers.SettingsManager
 import com.troikoss.continuum_explorer.server.ContinuumHubService
+import com.troikoss.continuum_explorer.server.ProtocolLifecycleState
+import com.troikoss.continuum_explorer.server.ServerManager
+import com.troikoss.continuum_explorer.server.SyncPlayManager
+import com.troikoss.continuum_explorer.server.SyncPlayRoomState
+import com.troikoss.continuum_explorer.server.UnifiedServerState
 import com.troikoss.continuum_explorer.utils.FileExplorerState
 import com.troikoss.continuum_explorer.utils.QrCodeView
 import kotlinx.coroutines.delay
 import java.io.File
+import java.util.Locale
 import kotlin.math.roundToInt
 
 /**
- * Minimalist, Material 3 FTP/HTTP File Sharing, Remote Mini-Apps & Self-Hosted Website Server Panel.
- * Features:
- * - Preserves the 50.dp flush Top Heading Bar with Triple-Line Menu Button, Live Status Dot, Activity Logs, QR Code, and Fullscreen toggle.
- * - Unifies duplicate upload toggles into a single "Allow Browser & FTP Uploads" control with configurable Upload Destination Folder.
- * - Supports starting the server with 0 selected files/folders (e.g., for Screen Sharing or Remote Browser Mini-Apps only).
- * - Admin toggle for "Allow Mini-Apps in Browser" (Markor Studio, Code Studio, CSV Studio, File Converter, Photo Resizer).
- * - Optional "Enable Live Screen Sharing" admin toggle with FPS (5–30) and JPEG Compression Quality (30%–95%) sliders.
+ * Unified Material 3 FTP/HTTP File Sharing, Remote DeX Mini-Apps Studio, SyncPlay Party &
+ * Self-Hosted Website Server Panel powered by [ServerManager] and [SyncPlayManager].
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -68,8 +69,13 @@ fun FtpServerSettingsPanel(
     val scrollState = rememberScrollState()
     val isFullScreen by SettingsManager.isFullScreenTabBarHidden
 
+    // Reactive Unified Server State & SyncPlay State
+    val unifiedState by ServerManager.state.collectAsState()
+    val syncRoomState by SyncPlayManager.roomState.collectAsState()
+
     LaunchedEffect(Unit) {
         FtpBucketManager.initialize(context)
+        ServerManager.refreshIpAddress()
     }
 
     // Preferences state
@@ -119,11 +125,10 @@ fun FtpServerSettingsPanel(
     var screenRotation by remember(savedRotation) { mutableIntStateOf(savedRotation) }
     var screenAudio by remember(savedAudio) { mutableStateOf(savedAudio) }
 
-    // Live state
-    var isServerRunning by remember { mutableStateOf(ContinuumHubService.isRunning) }
-    var isScreenCasting by remember { mutableStateOf(ContinuumHubService.isScreenCasting) }
-    var serverIp by remember { mutableStateOf(ContinuumHubService.serverIpAddress) }
-    var activePort by remember { mutableStateOf(ContinuumHubService.activeFtpPort) }
+    val isServerRunning = unifiedState.isAnyRunning
+    val isScreenCasting = unifiedState.isScreenCasting
+    val serverIp = unifiedState.ipAddress
+    val activePort = unifiedState.ftp.port
     var uptimeFormatted by remember { mutableStateOf("00:00:00") }
 
     // Modals & Pickers
@@ -131,6 +136,7 @@ fun FtpServerSettingsPanel(
     var showLogsDialog by remember { mutableStateOf(false) }
     var showFullPageFilePicker by remember { mutableStateOf(false) }
     var showUploadFolderPicker by remember { mutableStateOf(false) }
+    var showSyncPlayMediaPicker by remember { mutableStateOf(false) }
 
     // Screen Cast Launcher
     val mediaProjectionManager = remember(context) {
@@ -150,24 +156,23 @@ fun FtpServerSettingsPanel(
         }
     }
 
-    // Live update loop
-    LaunchedEffect(Unit) {
+    // Live uptime & SyncPlay position ticker
+    var liveSyncPosMs by remember { mutableLongStateOf(0L) }
+    LaunchedEffect(unifiedState.isAnyRunning, unifiedState.hubStartedAtMillis, syncRoomState.isActive, syncRoomState.isPlaying) {
         while (true) {
-            isServerRunning = ContinuumHubService.isRunning
-            isScreenCasting = ContinuumHubService.isScreenCasting
-            serverIp = ContinuumHubService.serverIpAddress
-            activePort = ContinuumHubService.activeFtpPort
-
-            if (isServerRunning && ContinuumHubService.startTimeMillis > 0L) {
-                val elapsedSec = ((System.currentTimeMillis() - ContinuumHubService.startTimeMillis) / 1000L).coerceAtLeast(0L)
+            if (unifiedState.isAnyRunning && unifiedState.hubStartedAtMillis > 0L) {
+                val elapsedSec = ((System.currentTimeMillis() - unifiedState.hubStartedAtMillis) / 1000L).coerceAtLeast(0L)
                 val hours = elapsedSec / 3600
                 val mins = (elapsedSec % 3600) / 60
                 val secs = elapsedSec % 60
-                uptimeFormatted = String.format("%02d:%02d:%02d", hours, mins, secs)
+                uptimeFormatted = String.format(Locale.US, "%02d:%02d:%02d", hours, mins, secs)
             } else {
                 uptimeFormatted = "00:00:00"
             }
-            delay(1000L)
+            if (syncRoomState.isActive) {
+                liveSyncPosMs = syncRoomState.currentPositionMs()
+            }
+            delay(500L)
         }
     }
 
@@ -178,7 +183,8 @@ fun FtpServerSettingsPanel(
             "ftp://$serverIp:$activePort"
         }
     }
-    val httpWebUrl = remember(serverIp) { "http://$serverIp:8080" }
+    val httpWebUrl = remember(serverIp, unifiedState.http.port) { "http://$serverIp:${unifiedState.http.port}" }
+    val syncPlayWebUrl = remember(httpWebUrl) { "$httpWebUrl/?tab=syncplay" }
     val isWebsiteMode = hostedMode == FtpHostedMode.CUSTOM_FOLDER
 
     fun saveAllSettings(reloadIfActive: Boolean = true) {
@@ -191,8 +197,8 @@ fun FtpServerSettingsPanel(
         SettingsManager.setFtpUploadFolderPath(context, uploadFolderPath)
         SettingsManager.setFtpAllowMiniApps(context, allowRemoteMiniApps)
         SettingsManager.setFtpHostedMode(context, hostedMode, customFolderPath)
-        if (reloadIfActive && isServerRunning) {
-            ContinuumHubService.reloadIfRunning(context)
+        if (reloadIfActive && unifiedState.isAnyRunning) {
+            ServerManager.restartCoordinated(context)
         }
     }
 
@@ -211,6 +217,28 @@ fun FtpServerSettingsPanel(
         )
     }
 
+    // SyncPlay Media File Picker Dialog
+    if (showSyncPlayMediaPicker) {
+        InAppFilePickerDialog(
+            title = "Select Video or Audio File for SyncPlay",
+            selectFolders = false,
+            allowedExtensions = setOf("mp4", "mkv", "webm", "mov", "avi", "m4v", "mp3", "wav", "flac", "m4a", "ogg", "aac", "opus"),
+            initialDirectory = Environment.getExternalStorageDirectory(),
+            onDismiss = { showSyncPlayMediaPicker = false },
+            onSelected = { file ->
+                showSyncPlayMediaPicker = false
+                SyncPlayManager.loadMediaFile(
+                    context = context,
+                    file = file,
+                    passcode = syncRoomState.passcode,
+                    allowGuestControl = syncRoomState.allowGuestControl,
+                    autoStartServer = true
+                )
+                Toast.makeText(context, "Loaded ${file.name} in SyncPlay Party", Toast.LENGTH_SHORT).show()
+            }
+        )
+    }
+
     // Full page file picker overlay
     if (showFullPageFilePicker) {
         FullPageFilePicker(
@@ -218,8 +246,8 @@ fun FtpServerSettingsPanel(
             isHtmlMode = isWebsiteMode,
             onDismiss = {
                 showFullPageFilePicker = false
-                if (!isWebsiteMode && isServerRunning) {
-                    ContinuumHubService.reloadIfRunning(context)
+                if (!isWebsiteMode && unifiedState.isAnyRunning) {
+                    ServerManager.restartCoordinated(context)
                 }
             },
             onHtmlSelected = { selected ->
@@ -227,8 +255,8 @@ fun FtpServerSettingsPanel(
                 hostedMode = FtpHostedMode.CUSTOM_FOLDER
                 SettingsManager.setFtpHostedMode(context, FtpHostedMode.CUSTOM_FOLDER, customFolderPath)
                 showFullPageFilePicker = false
-                if (isServerRunning) {
-                    ContinuumHubService.reloadIfRunning(context)
+                if (unifiedState.isAnyRunning) {
+                    ServerManager.restartCoordinated(context)
                 }
             }
         )
@@ -280,11 +308,17 @@ fun FtpServerSettingsPanel(
                             modifier = Modifier
                                 .size(8.dp)
                                 .clip(CircleShape)
-                                .background(if (isServerRunning) Color(0xFF10B981) else MaterialTheme.colorScheme.outline)
+                                .background(
+                                    when {
+                                        unifiedState.isTransitioning -> Color(0xFFF59E0B)
+                                        isServerRunning -> Color(0xFF10B981)
+                                        else -> MaterialTheme.colorScheme.outline
+                                    }
+                                )
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = if (isWebsiteMode) "Self-Hosted Web Server" else "FTP & HTTP File Server",
+                            text = if (isWebsiteMode) "Self-Hosted Web Server" else "Unified HTTP, FTP & SyncPlay Hub",
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Bold,
                             maxLines = 1,
@@ -292,14 +326,12 @@ fun FtpServerSettingsPanel(
                         )
                     }
 
-                    if (isServerRunning) {
-                        IconButton(onClick = { showLogsDialog = true }) {
-                            Icon(
-                                Icons.Default.Assessment,
-                                contentDescription = "Server Activity & Logs",
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                        }
+                    IconButton(onClick = { showLogsDialog = true }) {
+                        Icon(
+                            Icons.Default.Assessment,
+                            contentDescription = "Server Activity & Logs",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
                     }
 
                     IconButton(onClick = { showQrDialog = true }) {
@@ -337,7 +369,7 @@ fun FtpServerSettingsPanel(
                             if (isWebsiteMode) {
                                 hostedMode = FtpHostedMode.BATCH_FILES
                                 SettingsManager.setFtpHostedMode(context, hostedMode, customFolderPath)
-                                ContinuumHubService.reloadIfRunning(context)
+                                if (unifiedState.isAnyRunning) ServerManager.restartCoordinated(context)
                             }
                         },
                         shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
@@ -350,7 +382,7 @@ fun FtpServerSettingsPanel(
                         }
                     ) {
                         Text(
-                            text = "FTP, Portal & Mini-Apps",
+                            text = "FTP, Portal & SyncPlay",
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.SemiBold,
                             maxLines = 1,
@@ -364,7 +396,7 @@ fun FtpServerSettingsPanel(
                             if (!isWebsiteMode) {
                                 hostedMode = FtpHostedMode.CUSTOM_FOLDER
                                 SettingsManager.setFtpHostedMode(context, FtpHostedMode.CUSTOM_FOLDER, customFolderPath)
-                                ContinuumHubService.reloadIfRunning(context)
+                                if (unifiedState.isAnyRunning) ServerManager.restartCoordinated(context)
                             }
                         },
                         shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
@@ -386,16 +418,16 @@ fun FtpServerSettingsPanel(
                     }
                 }
 
-                // --- MASTER STATUS & ENDPOINT BANNER ---
+                // --- UNIFIED SERVER MANAGER STATUS & INDEPENDENT PROTOCOL CONTROLS ---
                 ServerMasterStatusCard(
-                    isServerRunning = isServerRunning,
+                    unifiedState = unifiedState,
                     isWebsiteMode = isWebsiteMode,
                     uptimeFormatted = uptimeFormatted,
                     ftpUrl = ftpUrl,
                     httpWebUrl = httpWebUrl,
                     context = context,
                     clipboardManager = clipboardManager,
-                    onStartToggle = { start ->
+                    onMasterToggle = { start ->
                         if (start) {
                             val p = portInput.toIntOrNull() ?: 2121
                             if (p !in 1024..65535) {
@@ -403,14 +435,49 @@ fun FtpServerSettingsPanel(
                                 return@ServerMasterStatusCard
                             }
                             saveAllSettings(reloadIfActive = false)
-                            ContinuumHubService.startService(context)
-                            Toast.makeText(context, "Server started", Toast.LENGTH_SHORT).show()
+                            ServerManager.startCoordinated(context, startHttp = true, startFtp = !isWebsiteMode)
                         } else {
-                            ContinuumHubService.stopService(context)
-                            Toast.makeText(context, "Server stopped", Toast.LENGTH_SHORT).show()
+                            ServerManager.stopCoordinated(context, graceful = true)
                         }
+                    },
+                    onToggleHttpOnly = { start ->
+                        if (start) {
+                            saveAllSettings(reloadIfActive = false)
+                            ServerManager.startHttpServer(context)
+                        } else {
+                            ServerManager.stopHttpServer(context, graceful = true)
+                        }
+                    },
+                    onRestartHttpOnly = {
+                        saveAllSettings(reloadIfActive = false)
+                        ServerManager.restartHttpServer(context)
+                    },
+                    onToggleFtpOnly = { start ->
+                        if (start) {
+                            saveAllSettings(reloadIfActive = false)
+                            ServerManager.startFtpServer(context)
+                        } else {
+                            ServerManager.stopFtpServer(context, graceful = true)
+                        }
+                    },
+                    onRestartFtpOnly = {
+                        saveAllSettings(reloadIfActive = false)
+                        ServerManager.restartFtpServer(context)
                     }
                 )
+
+                // --- BEATSYNC-INSPIRED SYNCPLAY GROUP WATCH & LISTEN PARTY CARD ---
+                if (!isWebsiteMode) {
+                    SyncPlayPartyCard(
+                        syncState = syncRoomState,
+                        livePositionMs = liveSyncPosMs,
+                        syncPlayWebUrl = syncPlayWebUrl,
+                        inputShape = inputShape,
+                        context = context,
+                        clipboardManager = clipboardManager,
+                        onPickMediaFile = { showSyncPlayMediaPicker = true }
+                    )
+                }
 
                 // --- MODE-SPECIFIC MINIMALIST CONFIGURATION ---
                 if (isWebsiteMode) {
@@ -426,13 +493,13 @@ fun FtpServerSettingsPanel(
                                 SelfHostedWebsiteTargetCard(
                                     customFolderPath = customFolderPath,
                                     httpWebUrl = httpWebUrl,
-                                    isServerRunning = isServerRunning,
+                                    isServerRunning = unifiedState.isHttpRunning,
                                     context = context,
                                     onSelectSource = { showFullPageFilePicker = true },
                                     onClearSource = {
                                         customFolderPath = ""
                                         SettingsManager.setFtpHostedMode(context, FtpHostedMode.CUSTOM_FOLDER, "")
-                                        ContinuumHubService.reloadIfRunning(context)
+                                        if (unifiedState.isAnyRunning) ServerManager.restartCoordinated(context)
                                     }
                                 )
                             }
@@ -484,13 +551,13 @@ fun FtpServerSettingsPanel(
                         SelfHostedWebsiteTargetCard(
                             customFolderPath = customFolderPath,
                             httpWebUrl = httpWebUrl,
-                            isServerRunning = isServerRunning,
+                            isServerRunning = unifiedState.isHttpRunning,
                             context = context,
                             onSelectSource = { showFullPageFilePicker = true },
                             onClearSource = {
                                 customFolderPath = ""
                                 SettingsManager.setFtpHostedMode(context, FtpHostedMode.CUSTOM_FOLDER, "")
-                                ContinuumHubService.reloadIfRunning(context)
+                                if (unifiedState.isAnyRunning) ServerManager.restartCoordinated(context)
                             }
                         )
                         ScreenCastCard(
@@ -549,7 +616,7 @@ fun FtpServerSettingsPanel(
                                     onScopeChange = { mode ->
                                         hostedMode = mode
                                         SettingsManager.setFtpHostedMode(context, mode, customFolderPath)
-                                        ContinuumHubService.reloadIfRunning(context)
+                                        if (unifiedState.isAnyRunning) ServerManager.restartCoordinated(context)
                                     },
                                     onPickFilesOrFolders = {
                                         hostedMode = FtpHostedMode.BATCH_FILES
@@ -568,7 +635,7 @@ fun FtpServerSettingsPanel(
                                     onAllowUploadChange = {
                                         allowUnifiedUploads = it
                                         SettingsManager.setFtpAllowUpload(context, it)
-                                        if (isServerRunning) ContinuumHubService.reloadIfRunning(context)
+                                        if (unifiedState.isFtpRunning) ServerManager.restartFtpServer(context)
                                     },
                                     onPasswordChange = {
                                         uploadPasswordInput = it
@@ -600,12 +667,16 @@ fun FtpServerSettingsPanel(
                                     onPassChange = { passwordInput = it },
                                     onToggleShowPass = { showPassword = !showPassword },
                                     onApplyNetwork = {
-                                        saveAllSettings(reloadIfActive = true)
-                                        Toast.makeText(
-                                            context,
-                                            if (isServerRunning) "Server reloaded with new settings" else "Settings saved",
-                                            Toast.LENGTH_SHORT
-                                        ).show()
+                                        val p = portInput.toIntOrNull()?.coerceIn(1024, 65535) ?: 2121
+                                        SettingsManager.setFtpPort(context, p)
+                                        SettingsManager.setFtpAnonymousAllowed(context, isAnonymousAccess)
+                                        SettingsManager.setFtpCredentials(context, usernameInput, passwordInput)
+                                        if (unifiedState.isFtpRunning) {
+                                            ServerManager.restartFtpServer(context)
+                                            Toast.makeText(context, "FTP Server restarted on port $p", Toast.LENGTH_SHORT).show()
+                                        } else {
+                                            Toast.makeText(context, "FTP Settings saved", Toast.LENGTH_SHORT).show()
+                                        }
                                     }
                                 )
 
@@ -656,7 +727,7 @@ fun FtpServerSettingsPanel(
                             onScopeChange = { mode ->
                                 hostedMode = mode
                                 SettingsManager.setFtpHostedMode(context, mode, customFolderPath)
-                                ContinuumHubService.reloadIfRunning(context)
+                                if (unifiedState.isAnyRunning) ServerManager.restartCoordinated(context)
                             },
                             onPickFilesOrFolders = {
                                 hostedMode = FtpHostedMode.BATCH_FILES
@@ -675,7 +746,7 @@ fun FtpServerSettingsPanel(
                             onAllowUploadChange = {
                                 allowUnifiedUploads = it
                                 SettingsManager.setFtpAllowUpload(context, it)
-                                if (isServerRunning) ContinuumHubService.reloadIfRunning(context)
+                                if (unifiedState.isFtpRunning) ServerManager.restartFtpServer(context)
                             },
                             onPasswordChange = {
                                 uploadPasswordInput = it
@@ -741,12 +812,16 @@ fun FtpServerSettingsPanel(
                             onPassChange = { passwordInput = it },
                             onToggleShowPass = { showPassword = !showPassword },
                             onApplyNetwork = {
-                                saveAllSettings(reloadIfActive = true)
-                                Toast.makeText(
-                                    context,
-                                    if (isServerRunning) "Server reloaded with new settings" else "Settings saved",
-                                    Toast.LENGTH_SHORT
-                                ).show()
+                                val p = portInput.toIntOrNull()?.coerceIn(1024, 65535) ?: 2121
+                                SettingsManager.setFtpPort(context, p)
+                                SettingsManager.setFtpAnonymousAllowed(context, isAnonymousAccess)
+                                SettingsManager.setFtpCredentials(context, usernameInput, passwordInput)
+                                if (unifiedState.isFtpRunning) {
+                                    ServerManager.restartFtpServer(context)
+                                    Toast.makeText(context, "FTP Server restarted on port $p", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    Toast.makeText(context, "FTP Settings saved", Toast.LENGTH_SHORT).show()
+                                }
                             }
                         )
                     }
@@ -768,20 +843,21 @@ fun FtpServerSettingsPanel(
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
+                    val qrTarget = if (syncRoomState.isActive) syncPlayWebUrl else httpWebUrl
                     Surface(
                         shape = RoundedCornerShape(12.dp),
                         color = Color.White,
                         modifier = Modifier.padding(4.dp)
                     ) {
                         QrCodeView(
-                            content = httpWebUrl,
+                            content = qrTarget,
                             size = 180.dp,
                             darkColor = Color.Black,
                             lightColor = Color.White
                         )
                     }
                     Text(
-                        text = "Web Portal: $httpWebUrl",
+                        text = if (syncRoomState.isActive) "SyncPlay Party: $syncPlayWebUrl" else "Web Portal: $httpWebUrl",
                         style = MaterialTheme.typography.bodySmall,
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Bold,
@@ -924,15 +1000,21 @@ fun FtpServerSettingsPanel(
 
 @Composable
 private fun ServerMasterStatusCard(
-    isServerRunning: Boolean,
+    unifiedState: UnifiedServerState,
     isWebsiteMode: Boolean,
     uptimeFormatted: String,
     ftpUrl: String,
     httpWebUrl: String,
     context: Context,
     clipboardManager: ClipboardManager,
-    onStartToggle: (Boolean) -> Unit
+    onMasterToggle: (Boolean) -> Unit,
+    onToggleHttpOnly: (Boolean) -> Unit,
+    onRestartHttpOnly: () -> Unit,
+    onToggleFtpOnly: (Boolean) -> Unit,
+    onRestartFtpOnly: () -> Unit
 ) {
+    val isServerRunning = unifiedState.isAnyRunning
+
     OutlinedCard(
         shape = RoundedCornerShape(14.dp),
         modifier = Modifier.fillMaxWidth()
@@ -952,11 +1034,21 @@ private fun ServerMasterStatusCard(
                             modifier = Modifier
                                 .size(9.dp)
                                 .clip(CircleShape)
-                                .background(if (isServerRunning) Color(0xFF10B981) else MaterialTheme.colorScheme.outline)
+                                .background(
+                                    when {
+                                        unifiedState.isTransitioning -> Color(0xFFF59E0B)
+                                        isServerRunning -> Color(0xFF10B981)
+                                        else -> MaterialTheme.colorScheme.outline
+                                    }
+                                )
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = if (isServerRunning) "Server Online ($uptimeFormatted)" else "Server Offline",
+                            text = when {
+                                unifiedState.isTransitioning -> "Server Transitioning..."
+                                isServerRunning -> "ServerManager Online ($uptimeFormatted)"
+                                else -> "ServerManager Standby"
+                            },
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Bold,
                             color = if (isServerRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
@@ -967,7 +1059,7 @@ private fun ServerMasterStatusCard(
                         text = if (isWebsiteMode) {
                             "Serving static website & assets over local Wi-Fi HTTP"
                         } else {
-                            "Serving FTP, Web Portal, Device Telemetry & Remote Mini-Apps (works even with 0 shared files)"
+                            "Coordinated & independent lifecycle control for Ktor HTTP/WS and Apache FTP"
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -976,92 +1068,517 @@ private fun ServerMasterStatusCard(
 
                 Switch(
                     checked = isServerRunning,
-                    onCheckedChange = onStartToggle
+                    onCheckedChange = onMasterToggle
                 )
             }
 
-            if (isServerRunning) {
-                HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
-
-                EndpointRow(
-                    label = if (isWebsiteMode) "Website URL" else "Web Portal",
-                    url = httpWebUrl,
-                    onCopy = {
-                        clipboardManager.setText(AnnotatedString(httpWebUrl))
-                        Toast.makeText(context, "Copied $httpWebUrl", Toast.LENGTH_SHORT).show()
-                    },
-                    onOpenBrowser = {
-                        try {
-                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(httpWebUrl)))
-                        } catch (_: Exception) {}
-                    }
-                )
-
-                if (!isWebsiteMode) {
-                    EndpointRow(
-                        label = "FTP Server",
-                        url = ftpUrl,
-                        onCopy = {
-                            clipboardManager.setText(AnnotatedString(ftpUrl))
-                            Toast.makeText(context, "Copied $ftpUrl", Toast.LENGTH_SHORT).show()
-                        },
-                        onOpenBrowser = null
+            if (unifiedState.lastGlobalError != null) {
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.errorContainer,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = unifiedState.lastGlobalError,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                     )
                 }
+            }
+
+            HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
+
+            // Independent Protocol Control Row 1: Ktor HTTP & WebSocket Server
+            ProtocolInstanceControlRow(
+                title = if (isWebsiteMode) "HTTP Website Server" else "HTTP Portal, SyncPlay & Mini-Apps",
+                port = unifiedState.http.port,
+                state = unifiedState.http.state,
+                activeConnections = unifiedState.http.activeConnections,
+                url = if (unifiedState.isHttpRunning) httpWebUrl else null,
+                onToggle = onToggleHttpOnly,
+                onRestart = onRestartHttpOnly,
+                onCopyUrl = {
+                    clipboardManager.setText(AnnotatedString(httpWebUrl))
+                    Toast.makeText(context, "Copied $httpWebUrl", Toast.LENGTH_SHORT).show()
+                },
+                onOpenBrowser = {
+                    try {
+                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(httpWebUrl)))
+                    } catch (_: Exception) {}
+                }
+            )
+
+            // Independent Protocol Control Row 2: Apache FTP Server
+            if (!isWebsiteMode) {
+                ProtocolInstanceControlRow(
+                    title = "Apache FTP Daemon",
+                    port = unifiedState.ftp.port,
+                    state = unifiedState.ftp.state,
+                    activeConnections = unifiedState.ftp.activeConnections,
+                    url = if (unifiedState.isFtpRunning) ftpUrl else null,
+                    onToggle = onToggleFtpOnly,
+                    onRestart = onRestartFtpOnly,
+                    onCopyUrl = {
+                        clipboardManager.setText(AnnotatedString(ftpUrl))
+                        Toast.makeText(context, "Copied $ftpUrl", Toast.LENGTH_SHORT).show()
+                    },
+                    onOpenBrowser = null
+                )
             }
         }
     }
 }
 
 @Composable
-private fun EndpointRow(
-    label: String,
-    url: String,
-    onCopy: () -> Unit,
+private fun ProtocolInstanceControlRow(
+    title: String,
+    port: Int,
+    state: ProtocolLifecycleState,
+    activeConnections: Int,
+    url: String?,
+    onToggle: (Boolean) -> Unit,
+    onRestart: () -> Unit,
+    onCopyUrl: () -> Unit,
     onOpenBrowser: (() -> Unit)?
 ) {
+    val badgeColor = when (state) {
+        ProtocolLifecycleState.RUNNING -> Color(0xFF10B981)
+        ProtocolLifecycleState.STARTING, ProtocolLifecycleState.STOPPING -> Color(0xFFF59E0B)
+        ProtocolLifecycleState.ERROR -> MaterialTheme.colorScheme.error
+        ProtocolLifecycleState.STOPPED -> MaterialTheme.colorScheme.outline
+    }
+
     Surface(
         shape = RoundedCornerShape(10.dp),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         modifier = Modifier.fillMaxWidth()
     ) {
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 10.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = label,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Text(
-                    text = url,
-                    style = MaterialTheme.typography.bodySmall,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.primary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(7.dp)
+                            .clip(CircleShape)
+                            .background(badgeColor)
+                    )
+                    Text(
+                        text = "$title (:$port)",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = badgeColor.copy(alpha = 0.14f)
+                    ) {
+                        Text(
+                            text = if (state == ProtocolLifecycleState.RUNNING && activeConnections > 0) {
+                                "RUNNING • $activeConnections active"
+                            } else {
+                                state.name
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = badgeColor,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    if (state == ProtocolLifecycleState.RUNNING) {
+                        IconButton(
+                            onClick = onRestart,
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(Icons.Default.Refresh, contentDescription = "Restart Protocol", modifier = Modifier.size(15.dp))
+                        }
+                    }
+                    TextButton(
+                        onClick = { onToggle(state != ProtocolLifecycleState.RUNNING) },
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = if (state == ProtocolLifecycleState.RUNNING) "Stop" else "Start",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = if (state == ProtocolLifecycleState.RUNNING) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
             }
 
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                IconButton(
-                    onClick = onCopy,
-                    modifier = Modifier.size(32.dp)
+            if (url != null) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Icon(Icons.Default.ContentCopy, contentDescription = "Copy URL", modifier = Modifier.size(16.dp))
+                    Text(
+                        text = url,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                        IconButton(
+                            onClick = onCopyUrl,
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(Icons.Default.ContentCopy, contentDescription = "Copy URL", modifier = Modifier.size(15.dp))
+                        }
+                        if (onOpenBrowser != null) {
+                            IconButton(
+                                onClick = onOpenBrowser,
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(Icons.Default.OpenInNew, contentDescription = "Open in Browser", modifier = Modifier.size(15.dp))
+                            }
+                        }
+                    }
                 }
-                if (onOpenBrowser != null) {
+            }
+        }
+    }
+}
+
+/**
+ * Beatsync-inspired Synchronized Group Media Playback Card (`SyncPlayPartyCard`).
+ * Allows the host to pick any video or audio file, configure passcode auth & guest control,
+ * and control millisecond-synchronized playback across all connected browsers and devices.
+ */
+@Composable
+private fun SyncPlayPartyCard(
+    syncState: SyncPlayRoomState,
+    livePositionMs: Long,
+    syncPlayWebUrl: String,
+    inputShape: RoundedCornerShape,
+    context: Context,
+    clipboardManager: ClipboardManager,
+    onPickMediaFile: () -> Unit
+) {
+    var passcodeInput by remember(syncState.passcode) { mutableStateOf(syncState.passcode) }
+    var allowGuestControl by remember(syncState.allowGuestControl) { mutableStateOf(syncState.allowGuestControl) }
+    var leadTimeMs by remember(syncState.scheduleLeadTimeMs) { mutableFloatStateOf(syncState.scheduleLeadTimeMs.toFloat()) }
+    var syncHostAudio by remember(syncState.syncHostAudioPlayer) { mutableStateOf(syncState.syncHostAudioPlayer) }
+    var showSecurityConfig by remember { mutableStateOf(false) }
+
+    OutlinedCard(
+        shape = RoundedCornerShape(14.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(
+                        Icons.Default.Sync,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Column {
+                        Text(
+                            text = "SyncPlay Watch & Listen Party (Beatsync Engine)",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            text = if (syncState.isActive) {
+                                "${syncState.mediaFileName} • ${syncState.connectedPeers.size} peer(s) • Lead ${syncState.scheduleLeadTimeMs}ms"
+                            } else {
+                                "Pre-buffered video/audio with NTP clock sync & millisecond-scheduled group controls"
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     IconButton(
-                        onClick = onOpenBrowser,
+                        onClick = { showSecurityConfig = !showSecurityConfig },
                         modifier = Modifier.size(32.dp)
                     ) {
-                        Icon(Icons.Default.OpenInNew, contentDescription = "Open in Browser", modifier = Modifier.size(16.dp))
+                        Icon(
+                            Icons.Default.Security,
+                            contentDescription = "SyncPlay Passcode & Sync Settings",
+                            tint = if (syncState.requiresPasscode) Color(0xFF10B981) else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+
+                    FilledTonalButton(
+                        onClick = onPickMediaFile,
+                        shape = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                    ) {
+                        Icon(Icons.Default.VideoLibrary, contentDescription = null, modifier = Modifier.size(15.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(if (syncState.isActive) "Change Media" else "Pick Audio/Video", style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+            }
+
+            // Expandable Security & Latency Compensation Settings
+            if (showSecurityConfig) {
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            OutlinedTextField(
+                                value = passcodeInput,
+                                onValueChange = {
+                                    passcodeInput = it
+                                    SyncPlayManager.updateRoomSecurity(
+                                        passcode = it,
+                                        allowGuestControl = allowGuestControl,
+                                        scheduleLeadTimeMs = leadTimeMs.toLong(),
+                                        syncHostAudioPlayer = syncHostAudio
+                                    )
+                                },
+                                label = { Text("Room Passcode (empty = open)") },
+                                singleLine = true,
+                                shape = inputShape,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Allow Connected Friends to Control Playback", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
+                                Text("Anyone with passcode (if set) can Play, Pause, Seek & change Speed for everyone", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Switch(
+                                checked = allowGuestControl,
+                                onCheckedChange = {
+                                    allowGuestControl = it
+                                    SyncPlayManager.updateRoomSecurity(passcodeInput, it, leadTimeMs.toLong(), syncHostAudio)
+                                }
+                            )
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Sync Host Device Audio Player", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
+                                Text("Plays audio tracks in lockstep on this phone/tablet alongside remote peers", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Switch(
+                                checked = syncHostAudio,
+                                onCheckedChange = {
+                                    syncHostAudio = it
+                                    SyncPlayManager.updateRoomSecurity(passcodeInput, allowGuestControl, leadTimeMs.toLong(), it)
+                                }
+                            )
+                        }
+
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("Scheduled Sync Lead Window", style = MaterialTheme.typography.bodySmall)
+                                Text("${leadTimeMs.roundToInt()} ms", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                            }
+                            Slider(
+                                value = leadTimeMs,
+                                onValueChange = {
+                                    leadTimeMs = it
+                                    SyncPlayManager.updateRoomSecurity(passcodeInput, allowGuestControl, it.toLong(), syncHostAudio)
+                                },
+                                valueRange = 20f..350f
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (syncState.isActive) {
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            val mins = (livePositionMs / 1000L) / 60L
+                            val secs = (livePositionMs / 1000L) % 60L
+                            Text(
+                                text = "${if (syncState.isPlaying) "▶ PLAYING" else "⏸ PAUSED"} • ${String.format(Locale.US, "%02d:%02d", mins, secs)} • ${syncState.playbackSpeed}x",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                color = if (syncState.isPlaying) Color(0xFF10B981) else MaterialTheme.colorScheme.onSurface
+                            )
+
+                            TextButton(
+                                onClick = { SyncPlayManager.stopSession() },
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                            ) {
+                                Text("End Party", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+                            }
+                        }
+
+                        // Host Synchronized Transport Bar
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            FilledTonalButton(
+                                onClick = {
+                                    SyncPlayManager.triggerScheduledCommand(
+                                        context = context,
+                                        action = if (syncState.isPlaying) "PAUSE" else "PLAY",
+                                        actorName = "Host"
+                                    )
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (syncState.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(if (syncState.isPlaying) "Sync Pause" else "Sync Play", style = MaterialTheme.typography.labelMedium)
+                            }
+
+                            OutlinedButton(
+                                onClick = {
+                                    val target = (syncState.currentPositionMs() - 10_000L).coerceAtLeast(0L)
+                                    SyncPlayManager.triggerScheduledCommand(context, "SEEK", targetPositionMs = target, actorName = "Host")
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                            ) {
+                                Text("-10s", style = MaterialTheme.typography.labelSmall)
+                            }
+
+                            OutlinedButton(
+                                onClick = {
+                                    val target = syncState.currentPositionMs() + 10_000L
+                                    SyncPlayManager.triggerScheduledCommand(context, "SEEK", targetPositionMs = target, actorName = "Host")
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                            ) {
+                                Text("+10s", style = MaterialTheme.typography.labelSmall)
+                            }
+
+                            listOf(0.75f, 1.0f, 1.25f, 1.5f, 2.0f).forEach { spd ->
+                                FilterChip(
+                                    selected = syncState.playbackSpeed == spd,
+                                    onClick = {
+                                        SyncPlayManager.triggerScheduledCommand(context, "SPEED", speed = spd, actorName = "Host")
+                                    },
+                                    label = { Text("${spd}x", style = MaterialTheme.typography.labelSmall) },
+                                    shape = RoundedCornerShape(8.dp)
+                                )
+                            }
+                        }
+
+                        // Direct Share URL for SyncPlay Room
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = syncPlayWebUrl,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontFamily = FontFamily.Monospace,
+                                color = MaterialTheme.colorScheme.primary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                IconButton(
+                                    onClick = {
+                                        clipboardManager.setText(AnnotatedString(syncPlayWebUrl))
+                                        Toast.makeText(context, "Copied SyncPlay Party URL", Toast.LENGTH_SHORT).show()
+                                    },
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Icon(Icons.Default.ContentCopy, contentDescription = "Copy SyncPlay URL", modifier = Modifier.size(15.dp))
+                                }
+                                IconButton(
+                                    onClick = {
+                                        try {
+                                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(syncPlayWebUrl)))
+                                        } catch (_: Exception) {}
+                                    },
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Icon(Icons.Default.OpenInNew, contentDescription = "Open SyncPlay Room", modifier = Modifier.size(15.dp))
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -1127,7 +1644,7 @@ private fun FtpSharedContentCard(
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = if (bucketItems.isEmpty()) {
-                                "0 items selected (Files tab is empty; Screen & Mini-Apps still work)"
+                                "0 items selected (Files tab is empty; SyncPlay, Screen & Mini-Apps still work)"
                             } else {
                                 "${bucketItems.size} file(s) / folder(s) shared"
                             },
@@ -1141,7 +1658,9 @@ private fun FtpSharedContentCard(
                             TextButton(
                                 onClick = {
                                     FtpBucketManager.clearBucket(context)
-                                    ContinuumHubService.reloadIfRunning(context)
+                                    if (ServerManager.state.value.isAnyRunning) {
+                                        ServerManager.restartCoordinated(context)
+                                    }
                                 },
                                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
                             ) {
@@ -1173,7 +1692,9 @@ private fun FtpSharedContentCard(
                                 selected = true,
                                 onClick = {
                                     FtpBucketManager.removeItem(context, item)
-                                    ContinuumHubService.reloadIfRunning(context)
+                                    if (ServerManager.state.value.isAnyRunning) {
+                                        ServerManager.restartCoordinated(context)
+                                    }
                                 },
                                 label = {
                                     Text(
@@ -1234,13 +1755,12 @@ private fun PortalCapabilitiesAndUploadsCard(
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Text(
-                "Uploads & Remote Browser Mini-Apps",
+                "Uploads & Remote Browser Mini-Apps Studio",
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.primary
             )
 
-            // Unified Upload Toggle (Replaces the old duplicate FTP Write + Web Upload switches)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -1314,16 +1834,15 @@ private fun PortalCapabilitiesAndUploadsCard(
 
             HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
 
-            // Admin Toggle: Allow Mini-Apps Remotely in Browser
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("Allow Mini-Apps in Browser", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                    Text("Allow DeX Mini-Apps Studio in Browser", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
                     Text(
-                        "Enables remote Markor Notes, Code Studio, CSV Editor & KB Photo/Format Converter in Web Portal",
+                        "Enables remote Markor Split Studio, Code Studio, Interactive CSV Grid & KB Photo/Format Converter",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -1534,7 +2053,7 @@ private fun NetworkAuthCard(
                 ) {
                     Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(14.dp))
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("Apply", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                    Text("Apply to FTP", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
                 }
             }
 
@@ -1687,7 +2206,6 @@ private fun ScreenCastCard(
                     }
                 }
 
-                // FPS Control Slider (5 - 30 FPS)
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -1704,7 +2222,6 @@ private fun ScreenCastCard(
                     )
                 }
 
-                // Frame Compression Quality Slider (30% - 95%)
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),

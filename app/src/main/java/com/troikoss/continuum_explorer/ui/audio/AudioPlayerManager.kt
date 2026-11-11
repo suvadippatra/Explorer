@@ -4,6 +4,8 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
+import android.media.audiofx.BassBoost
+import android.media.audiofx.Equalizer
 import android.net.Uri
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -34,6 +36,14 @@ enum class AudioPlayerDisplayMode {
     FULLSCREEN_SPOTIFY
 }
 
+enum class AudioEqPreset(val label: String) {
+    FLAT("Flat"),
+    BASS_BOOST("Bass Boost"),
+    VOCAL("Vocal"),
+    ACOUSTIC("Acoustic"),
+    SPATIAL("Spatial Hi-Fi")
+}
+
 data class AudioTrackMetadata(
     val title: String,
     val artist: String,
@@ -46,13 +56,16 @@ data class AudioTrackMetadata(
 /**
  * Singleton Audio Player Manager powering the 3-Mode Music Player:
  * 1. Persistent Bottom Mini-Player Bar
- * 2. Draggable Floating PiP Mini-Card over files
- * 3. Spotify-Style Fullscreen Music Player with folder playlist queue
+ * 2. Redesigned Draggable Pop-Up Window (Floating PiP)
+ * 3. Fullscreen Studio Music Player with Vinyl Mode, Equalizer Presets, Sleep Timer & Folder Queue
  */
 object AudioPlayerManager {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var exoPlayer: ExoPlayer? = null
     private var progressJob: Job? = null
+    private var sleepTimerJob: Job? = null
+    private var equalizer: Equalizer? = null
+    private var bassBoost: BassBoost? = null
 
     var displayMode by mutableStateOf(AudioPlayerDisplayMode.HIDDEN)
     var currentTrack by mutableStateOf<UniversalFile?>(null)
@@ -86,6 +99,11 @@ object AudioPlayerManager {
         private set
     var playbackSpeed by mutableFloatStateOf(1.0f)
         private set
+    var eqPreset by mutableStateOf(AudioEqPreset.FLAT)
+        private set
+    var sleepTimerRemainingSec by mutableIntStateOf(0)
+        private set
+    var isVinylArtworkStyle by mutableStateOf(false)
 
     private val AUDIO_EXTENSIONS = setOf("mp3", "wav", "flac", "m4a", "aac", "ogg", "opus", "wma", "amr")
 
@@ -95,6 +113,7 @@ object AudioPlayerManager {
         return ext in AUDIO_EXTENSIONS
     }
 
+    @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
     private fun ensurePlayer(context: Context): ExoPlayer {
         val existing = exoPlayer
         if (existing != null) return existing
@@ -108,6 +127,9 @@ object AudioPlayerManager {
                 override fun onPlaybackStateChanged(playbackState: Int) {
                     val d = duration
                     if (d > 0) durationMs = d
+                    if (playbackState == Player.STATE_READY) {
+                        applyAudioEffects(audioSessionId, eqPreset)
+                    }
                     if (playbackState == Player.STATE_ENDED) {
                         handleTrackEnded(context.applicationContext)
                     }
@@ -116,6 +138,71 @@ object AudioPlayerManager {
         }
         exoPlayer = created
         return created
+    }
+
+    private fun applyAudioEffects(audioSessionId: Int, preset: AudioEqPreset) {
+        if (audioSessionId <= 0) return
+        runCatching {
+            if (equalizer == null) {
+                equalizer = Equalizer(0, audioSessionId).apply { enabled = true }
+            }
+            if (bassBoost == null) {
+                bassBoost = BassBoost(0, audioSessionId).apply { enabled = true }
+            }
+            val eq = equalizer ?: return@runCatching
+            val bands = eq.numberOfBands.toInt()
+            val range = eq.bandLevelRange
+            val minLvl = range[0].toInt()
+            val maxLvl = range[1].toInt()
+            val mid = (minLvl + maxLvl) / 2
+            val boost = (maxLvl * 0.65f).toInt().coerceIn(minLvl, maxLvl)
+            val slightBoost = (maxLvl * 0.35f).toInt().coerceIn(minLvl, maxLvl)
+            val slightCut = (minLvl * 0.25f).toInt().coerceIn(minLvl, maxLvl)
+
+            for (b in 0 until bands) {
+                val band = b.toShort()
+                val target = when (preset) {
+                    AudioEqPreset.FLAT -> mid
+                    AudioEqPreset.BASS_BOOST -> if (b == 0) boost else if (b == 1) slightBoost else mid
+                    AudioEqPreset.VOCAL -> if (b in 1..(bands - 2).coerceAtLeast(1)) boost else slightCut
+                    AudioEqPreset.ACOUSTIC -> if (b == 0 || b == bands - 1) slightBoost else mid
+                    AudioEqPreset.SPATIAL -> if (b == 0 || b == bands - 1) boost else slightCut
+                }
+                eq.setBandLevel(band, target.toShort())
+            }
+            bassBoost?.setStrength(
+                when (preset) {
+                    AudioEqPreset.BASS_BOOST -> 750.toShort()
+                    AudioEqPreset.SPATIAL -> 450.toShort()
+                    else -> 0.toShort()
+                }
+            )
+        }
+    }
+
+    @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+    fun selectEqPreset(preset: AudioEqPreset) {
+        eqPreset = preset
+        exoPlayer?.let { applyAudioEffects(it.audioSessionId, preset) }
+    }
+
+    fun setSleepTimerMinutes(minutes: Int) {
+        sleepTimerJob?.cancel()
+        if (minutes <= 0) {
+            sleepTimerRemainingSec = 0
+            return
+        }
+        sleepTimerRemainingSec = minutes * 60
+        sleepTimerJob = scope.launch {
+            while (isActive && sleepTimerRemainingSec > 0) {
+                delay(1000L)
+                sleepTimerRemainingSec--
+            }
+            if (sleepTimerRemainingSec <= 0) {
+                exoPlayer?.pause()
+                isPlaying = false
+            }
+        }
     }
 
     private fun startProgressPolling() {
@@ -318,6 +405,11 @@ object AudioPlayerManager {
         exoPlayer?.seekTo(target)
     }
 
+    fun seekRelative(deltaMs: Long) {
+        val target = (currentPositionMs + deltaMs).coerceIn(0L, durationMs.coerceAtLeast(1L))
+        seekTo(target)
+    }
+
     fun playNext(context: Context) {
         if (playlist.isEmpty()) return
         val nextIndex = if (isShuffleEnabled && playlist.size > 1) {
@@ -350,15 +442,25 @@ object AudioPlayerManager {
         }
     }
 
-    fun cyclePlaybackSpeed() {
-        val speeds = listOf(0.75f, 1.0f, 1.25f, 1.5f, 2.0f)
-        val nextIdx = (speeds.indexOfFirst { it == playbackSpeed } + 1) % speeds.size
-        playbackSpeed = speeds[nextIdx]
+    fun setSpeed(speed: Float) {
+        playbackSpeed = speed
         exoPlayer?.playbackParameters = PlaybackParameters(playbackSpeed)
+    }
+
+    fun cyclePlaybackSpeed() {
+        val speeds = listOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f)
+        val nextIdx = (speeds.indexOfFirst { it == playbackSpeed } + 1) % speeds.size
+        setSpeed(speeds[nextIdx])
     }
 
     fun stopAndClose() {
         stopProgressPolling()
+        sleepTimerJob?.cancel()
+        sleepTimerRemainingSec = 0
+        runCatching { equalizer?.release() }
+        runCatching { bassBoost?.release() }
+        equalizer = null
+        bassBoost = null
         exoPlayer?.stop()
         isPlaying = false
         displayMode = AudioPlayerDisplayMode.HIDDEN

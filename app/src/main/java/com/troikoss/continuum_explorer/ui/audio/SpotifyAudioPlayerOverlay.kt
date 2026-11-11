@@ -1,17 +1,27 @@
 package com.troikoss.continuum_explorer.ui.audio
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -21,6 +31,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -28,6 +39,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
@@ -38,10 +50,10 @@ import com.troikoss.continuum_explorer.utils.FileExplorerState
 import kotlin.math.roundToInt
 
 /**
- * Renders the 3-Mode Music Player Overlay across Explorer:
- * 1. Persistent Bottom Mini-Player Bar (default when tapping an audio file)
- * 2. Draggable Floating PiP Mini-Card over files
- * 3. Spotify-Style Fullscreen Music Player with dynamic artwork gradient & folder queue
+ * Redesigned 3-Mode Studio Music Player Overlay across Explorer:
+ * 1. Persistent Bottom Mini-Player Bar (sleek Material 3 tonal dock with seek bar & mode switches)
+ * 2. Redesigned Draggable Pop-Up Window Mode (Floating PiP window with interactive seek, +/-10s, speed & EQ pill)
+ * 3. Fullscreen Studio Music Player (Responsive mobile & tablet/DeX split view, Rotating Vinyl mode, EQ Presets, Sleep Timer & Searchable Queue)
  */
 @Composable
 fun SpotifyAudioPlayerOverlay(
@@ -60,28 +72,33 @@ fun SpotifyAudioPlayerOverlay(
     val progress = (posMs.toFloat() / durMs.toFloat()).coerceIn(0f, 1f)
 
     var pipOffsetX by remember { mutableFloatStateOf(24f) }
-    var pipOffsetY by remember { mutableFloatStateOf(160f) }
+    var pipOffsetY by remember { mutableFloatStateOf(120f) }
+    var isPipExpanded by remember { mutableStateOf(true) }
     var showQueueSheet by remember { mutableStateOf(false) }
 
     Box(modifier = modifier.fillMaxSize()) {
-        // 1. Persistent Bottom Mini-Player Bar
+        // =====================================================================
+        // 1. PERSISTENT BOTTOM MINI-PLAYER BAR
+        // =====================================================================
         AnimatedVisibility(
             visible = mode == AudioPlayerDisplayMode.BOTTOM_BAR,
             enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
             exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(horizontal = 12.dp, vertical = 12.dp)
-                .widthIn(max = 760.dp)
+                .padding(horizontal = 12.dp, vertical = 10.dp)
+                .widthIn(max = 820.dp)
                 .fillMaxWidth()
         ) {
             Surface(
-                shape = RoundedCornerShape(16.dp),
-                color = Color(0xFF18181B),
-                tonalElevation = 8.dp,
-                shadowElevation = 12.dp,
+                shape = RoundedCornerShape(20.dp),
+                color = Color(0xFF141418),
+                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.10f)),
+                tonalElevation = 10.dp,
+                shadowElevation = 16.dp,
                 modifier = Modifier
                     .fillMaxWidth()
+                    .testTag("music_bottom_bar")
                     .clickable {
                         AudioPlayerManager.displayMode = AudioPlayerDisplayMode.FULLSCREEN_SPOTIFY
                     }
@@ -93,39 +110,56 @@ fun SpotifyAudioPlayerOverlay(
                             .padding(horizontal = 12.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // Artwork thumbnail
                         AlbumArtBox(
                             metadata = metadata,
+                            isPlaying = isPlaying,
+                            isVinyl = false,
                             modifier = Modifier
-                                .size(46.dp)
-                                .clip(RoundedCornerShape(10.dp))
+                                .size(48.dp)
+                                .clip(RoundedCornerShape(12.dp))
                         )
 
                         Spacer(Modifier.width(12.dp))
 
-                        // Track Title & Artist
                         Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = metadata.title,
-                                color = Color.White,
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 14.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Text(
+                                    text = metadata.title,
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f, fill = false)
+                                )
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = Color(0xFF1DB954).copy(alpha = 0.18f)
+                                ) {
+                                    Text(
+                                        text = metadata.formatBadge.substringBefore(" "),
+                                        color = Color(0xFF1DB954),
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
                             Text(
                                 text = "${metadata.artist} • ${formatAudioTime(posMs)} / ${formatAudioTime(durMs)}",
-                                color = Color.White.copy(alpha = 0.7f),
-                                fontSize = 12.sp,
+                                color = Color.White.copy(alpha = 0.72f),
+                                fontSize = 11.5.sp,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
                         }
 
-                        // Previous
                         IconButton(
                             onClick = { AudioPlayerManager.playPrevious(context) },
-                            modifier = Modifier.size(38.dp)
+                            modifier = Modifier.size(36.dp)
                         ) {
                             Icon(
                                 Icons.Default.SkipPrevious,
@@ -134,14 +168,15 @@ fun SpotifyAudioPlayerOverlay(
                             )
                         }
 
-                        // Play / Pause
                         FilledIconButton(
                             onClick = { AudioPlayerManager.togglePlayPause() },
                             colors = IconButtonDefaults.filledIconButtonColors(
                                 containerColor = Color(0xFF1DB954),
                                 contentColor = Color.Black
                             ),
-                            modifier = Modifier.size(40.dp)
+                            modifier = Modifier
+                                .size(40.dp)
+                                .testTag("music_bottom_play_pause")
                         ) {
                             Icon(
                                 imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
@@ -149,10 +184,9 @@ fun SpotifyAudioPlayerOverlay(
                             )
                         }
 
-                        // Next
                         IconButton(
                             onClick = { AudioPlayerManager.playNext(context) },
-                            modifier = Modifier.size(38.dp)
+                            modifier = Modifier.size(36.dp)
                         ) {
                             Icon(
                                 Icons.Default.SkipNext,
@@ -161,46 +195,50 @@ fun SpotifyAudioPlayerOverlay(
                             )
                         }
 
-                        // Minimize to Floating PiP Mini-Card
+                        // Switch to Pop-Up Window Mode
                         IconButton(
                             onClick = {
                                 AudioPlayerManager.displayMode = AudioPlayerDisplayMode.FLOATING_PIP
                             },
-                            modifier = Modifier.size(36.dp)
+                            modifier = Modifier
+                                .size(34.dp)
+                                .testTag("music_switch_popup")
                         ) {
                             Icon(
                                 Icons.Default.PictureInPictureAlt,
-                                contentDescription = "Minimize to Floating PiP Card",
+                                contentDescription = "Pop-Up Window Mode",
                                 tint = Color.White.copy(alpha = 0.85f),
-                                modifier = Modifier.size(19.dp)
+                                modifier = Modifier.size(18.dp)
                             )
                         }
 
-                        // Expand to Spotify Fullscreen
+                        // Expand to Fullscreen Studio
                         IconButton(
                             onClick = {
                                 AudioPlayerManager.displayMode = AudioPlayerDisplayMode.FULLSCREEN_SPOTIFY
                             },
-                            modifier = Modifier.size(36.dp)
+                            modifier = Modifier
+                                .size(34.dp)
+                                .testTag("music_switch_fullscreen")
                         ) {
                             Icon(
                                 Icons.Default.OpenInFull,
-                                contentDescription = "Expand to Fullscreen Player",
+                                contentDescription = "Fullscreen Player",
                                 tint = Color.White.copy(alpha = 0.85f),
-                                modifier = Modifier.size(19.dp)
+                                modifier = Modifier.size(18.dp)
                             )
                         }
 
                         // Close Player
                         IconButton(
                             onClick = { AudioPlayerManager.stopAndClose() },
-                            modifier = Modifier.size(36.dp)
+                            modifier = Modifier.size(34.dp)
                         ) {
                             Icon(
                                 Icons.Default.Close,
-                                contentDescription = "Stop and Close Audio Player",
+                                contentDescription = "Close Audio Player",
                                 tint = Color.White.copy(alpha = 0.7f),
-                                modifier = Modifier.size(19.dp)
+                                modifier = Modifier.size(18.dp)
                             )
                         }
                     }
@@ -211,22 +249,26 @@ fun SpotifyAudioPlayerOverlay(
                             .fillMaxWidth()
                             .height(3.dp),
                         color = Color(0xFF1DB954),
-                        trackColor = Color.White.copy(alpha = 0.15f)
+                        trackColor = Color.White.copy(alpha = 0.14f)
                     )
                 }
             }
         }
 
-        // 2. Draggable Floating PiP Mini-Card over files
+        // =====================================================================
+        // 2. REDESIGNED POP-UP WINDOW MODE (DRAGGABLE FLOATING PIP WINDOW)
+        // =====================================================================
         if (mode == AudioPlayerDisplayMode.FLOATING_PIP) {
             Surface(
-                shape = RoundedCornerShape(18.dp),
-                color = Color(0xFF18181B).copy(alpha = 0.96f),
-                tonalElevation = 10.dp,
-                shadowElevation = 16.dp,
+                shape = RoundedCornerShape(22.dp),
+                color = Color(0xFF141418).copy(alpha = 0.97f),
+                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.14f)),
+                tonalElevation = 12.dp,
+                shadowElevation = 22.dp,
                 modifier = Modifier
                     .offset { IntOffset(pipOffsetX.roundToInt(), pipOffsetY.roundToInt()) }
-                    .width(276.dp)
+                    .width(328.dp)
+                    .testTag("music_popup_window")
                     .pointerInput(Unit) {
                         detectDragGestures { change, dragAmount ->
                             change.consume()
@@ -235,143 +277,315 @@ fun SpotifyAudioPlayerOverlay(
                         }
                     }
             ) {
-                Column(modifier = Modifier.padding(10.dp)) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    // Pop-up Window Header Bar (Drag Handle + Window Mode Controls)
                     Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(
+                                Brush.horizontalGradient(
+                                    colors = listOf(
+                                        metadata.dominantColor.copy(alpha = 0.55f),
+                                        Color(0xFF1E1E24)
+                                    )
+                                )
+                            )
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth()
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        AlbumArtBox(
-                            metadata = metadata,
-                            modifier = Modifier
-                                .size(42.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .clickable {
-                                    AudioPlayerManager.displayMode = AudioPlayerDisplayMode.FULLSCREEN_SPOTIFY
-                                }
-                        )
-                        Spacer(Modifier.width(10.dp))
-                        Column(
-                            modifier = Modifier
-                                .weight(1f)
-                                .clickable {
-                                    AudioPlayerManager.displayMode = AudioPlayerDisplayMode.FULLSCREEN_SPOTIFY
-                                }
-                        ) {
-                            Text(
-                                text = metadata.title,
-                                color = Color.White,
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 13.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                text = metadata.artist,
-                                color = Color.White.copy(alpha = 0.68f),
-                                fontSize = 11.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                        IconButton(
-                            onClick = { AudioPlayerManager.stopAndClose() },
-                            modifier = Modifier.size(28.dp)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             Icon(
-                                Icons.Default.Close,
-                                contentDescription = "Close Player",
+                                Icons.Default.DragIndicator,
+                                contentDescription = "Drag Window",
                                 tint = Color.White.copy(alpha = 0.7f),
                                 modifier = Modifier.size(16.dp)
                             )
+                            Text(
+                                text = "MINI PLAYER",
+                                color = Color.White.copy(alpha = 0.85f),
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 0.8.sp
+                            )
+                        }
+
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            // Collapse/Expand Pop-up Details
+                            IconButton(
+                                onClick = { isPipExpanded = !isPipExpanded },
+                                modifier = Modifier.size(26.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (isPipExpanded) Icons.Default.UnfoldLess else Icons.Default.UnfoldMore,
+                                    contentDescription = "Toggle Compact Pop-Up",
+                                    tint = Color.White.copy(alpha = 0.8f),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                            // Dock to Bottom Bar
+                            IconButton(
+                                onClick = {
+                                    AudioPlayerManager.displayMode = AudioPlayerDisplayMode.BOTTOM_BAR
+                                },
+                                modifier = Modifier.size(26.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Dock,
+                                    contentDescription = "Dock to Bottom Bar",
+                                    tint = Color.White.copy(alpha = 0.8f),
+                                    modifier = Modifier.size(15.dp)
+                                )
+                            }
+                            // Expand to Fullscreen
+                            IconButton(
+                                onClick = {
+                                    AudioPlayerManager.displayMode = AudioPlayerDisplayMode.FULLSCREEN_SPOTIFY
+                                },
+                                modifier = Modifier.size(26.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.OpenInFull,
+                                    contentDescription = "Expand to Fullscreen",
+                                    tint = Color.White.copy(alpha = 0.85f),
+                                    modifier = Modifier.size(15.dp)
+                                )
+                            }
+                            // Close
+                            IconButton(
+                                onClick = { AudioPlayerManager.stopAndClose() },
+                                modifier = Modifier.size(26.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Close,
+                                    contentDescription = "Close Player",
+                                    tint = Color.White.copy(alpha = 0.75f),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
                         }
                     }
 
-                    Spacer(Modifier.height(8.dp))
-
-                    LinearProgressIndicator(
-                        progress = { progress },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(3.dp)
-                            .clip(RoundedCornerShape(2.dp)),
-                        color = Color(0xFF1DB954),
-                        trackColor = Color.White.copy(alpha = 0.15f)
-                    )
-
-                    Spacer(Modifier.height(6.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        // Restore to Bottom Mini-Player Bar
-                        TextButton(
-                            onClick = {
-                                AudioPlayerManager.displayMode = AudioPlayerDisplayMode.BOTTOM_BAR
-                            },
-                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
-                            modifier = Modifier.height(30.dp)
+                    Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
+                        // Artwork & Track Details
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth()
                         ) {
-                            Icon(
-                                Icons.Default.Dock,
-                                contentDescription = "Dock to Bottom Bar",
-                                tint = Color.White.copy(alpha = 0.85f),
-                                modifier = Modifier.size(15.dp)
+                            AlbumArtBox(
+                                metadata = metadata,
+                                isPlaying = isPlaying,
+                                isVinyl = AudioPlayerManager.isVinylArtworkStyle,
+                                modifier = Modifier
+                                    .size(56.dp)
+                                    .clip(if (AudioPlayerManager.isVinylArtworkStyle) CircleShape else RoundedCornerShape(14.dp))
+                                    .clickable {
+                                        AudioPlayerManager.displayMode = AudioPlayerDisplayMode.FULLSCREEN_SPOTIFY
+                                    }
                             )
-                            Spacer(Modifier.width(4.dp))
-                            Text("Bar", color = Color.White.copy(alpha = 0.85f), fontSize = 11.sp)
+                            Spacer(Modifier.width(12.dp))
+                            Column(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clickable {
+                                        AudioPlayerManager.displayMode = AudioPlayerDisplayMode.FULLSCREEN_SPOTIFY
+                                    }
+                            ) {
+                                Text(
+                                    text = metadata.title,
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = "${metadata.artist} • ${metadata.album}",
+                                    color = Color.White.copy(alpha = 0.7f),
+                                    fontSize = 11.5.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Spacer(Modifier.height(4.dp))
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Surface(
+                                        shape = RoundedCornerShape(6.dp),
+                                        color = Color(0xFF1DB954).copy(alpha = 0.16f)
+                                    ) {
+                                        Text(
+                                            text = metadata.formatBadge,
+                                            color = Color(0xFF1DB954),
+                                            fontSize = 9.5.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                    Surface(
+                                        shape = RoundedCornerShape(6.dp),
+                                        color = Color.White.copy(alpha = 0.1f),
+                                        modifier = Modifier.clickable { AudioPlayerManager.cyclePlaybackSpeed() }
+                                    ) {
+                                        Text(
+                                            text = "${AudioPlayerManager.playbackSpeed}x",
+                                            color = Color.White,
+                                            fontSize = 9.5.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+                            }
                         }
 
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (isPipExpanded) {
+                            Spacer(Modifier.height(10.dp))
+
+                            // Interactive Seek Slider inside Pop-Up Window
+                            Slider(
+                                value = posMs.toFloat().coerceIn(0f, durMs.toFloat()),
+                                onValueChange = { AudioPlayerManager.seekTo(it.toLong()) },
+                                valueRange = 0f..durMs.toFloat().coerceAtLeast(1f),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(22.dp),
+                                colors = SliderDefaults.colors(
+                                    thumbColor = Color.White,
+                                    activeTrackColor = Color(0xFF1DB954),
+                                    inactiveTrackColor = Color.White.copy(alpha = 0.2f)
+                                )
+                            )
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = formatAudioTime(posMs),
+                                    color = Color.White.copy(alpha = 0.65f),
+                                    fontSize = 10.5.sp
+                                )
+                                Text(
+                                    text = formatAudioTime(durMs),
+                                    color = Color.White.copy(alpha = 0.65f),
+                                    fontSize = 10.5.sp
+                                )
+                            }
+
+                            Spacer(Modifier.height(6.dp))
+                        } else {
+                            Spacer(Modifier.height(8.dp))
+                            LinearProgressIndicator(
+                                progress = { progress },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(3.dp)
+                                    .clip(RoundedCornerShape(2.dp)),
+                                color = Color(0xFF1DB954),
+                                trackColor = Color.White.copy(alpha = 0.15f)
+                            )
+                            Spacer(Modifier.height(8.dp))
+                        }
+
+                        // Pop-Up Transport Controls Row
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            IconButton(
+                                onClick = { AudioPlayerManager.toggleShuffle() },
+                                modifier = Modifier.size(30.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Shuffle,
+                                    contentDescription = "Shuffle",
+                                    tint = if (AudioPlayerManager.isShuffleEnabled) Color(0xFF1DB954) else Color.White.copy(alpha = 0.65f),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+
                             IconButton(
                                 onClick = { AudioPlayerManager.playPrevious(context) },
-                                modifier = Modifier.size(30.dp)
+                                modifier = Modifier.size(34.dp)
                             ) {
                                 Icon(Icons.Default.SkipPrevious, contentDescription = "Previous", tint = Color.White)
                             }
+
+                            IconButton(
+                                onClick = { AudioPlayerManager.seekRelative(-10_000L) },
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Replay10,
+                                    contentDescription = "Rewind 10s",
+                                    tint = Color.White.copy(alpha = 0.85f),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+
                             FilledIconButton(
                                 onClick = { AudioPlayerManager.togglePlayPause() },
                                 colors = IconButtonDefaults.filledIconButtonColors(
                                     containerColor = Color(0xFF1DB954),
                                     contentColor = Color.Black
                                 ),
-                                modifier = Modifier.size(32.dp)
+                                modifier = Modifier.size(42.dp)
                             ) {
                                 Icon(
                                     imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                                     contentDescription = "Play/Pause",
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+
+                            IconButton(
+                                onClick = { AudioPlayerManager.seekRelative(10_000L) },
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Forward10,
+                                    contentDescription = "Forward 10s",
+                                    tint = Color.White.copy(alpha = 0.85f),
                                     modifier = Modifier.size(18.dp)
                                 )
                             }
+
                             IconButton(
                                 onClick = { AudioPlayerManager.playNext(context) },
-                                modifier = Modifier.size(30.dp)
+                                modifier = Modifier.size(34.dp)
                             ) {
                                 Icon(Icons.Default.SkipNext, contentDescription = "Next", tint = Color.White)
                             }
-                        }
 
-                        // Expand to Fullscreen Spotify Player
-                        IconButton(
-                            onClick = {
-                                AudioPlayerManager.displayMode = AudioPlayerDisplayMode.FULLSCREEN_SPOTIFY
-                            },
-                            modifier = Modifier.size(30.dp)
-                        ) {
-                            Icon(
-                                Icons.Default.OpenInFull,
-                                contentDescription = "Fullscreen Spotify Player",
-                                tint = Color.White.copy(alpha = 0.85f),
-                                modifier = Modifier.size(16.dp)
-                            )
+                            IconButton(
+                                onClick = { AudioPlayerManager.cycleRepeatMode() },
+                                modifier = Modifier.size(30.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (AudioPlayerManager.repeatMode == Player.REPEAT_MODE_ONE) Icons.Default.RepeatOne else Icons.Default.Repeat,
+                                    contentDescription = "Repeat",
+                                    tint = if (AudioPlayerManager.repeatMode != Player.REPEAT_MODE_OFF) Color(0xFF1DB954) else Color.White.copy(alpha = 0.65f),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
                         }
                     }
                 }
             }
         }
 
-        // 3. Spotify-Style Fullscreen Music Player
+        // =====================================================================
+        // 3. REDESIGNED FULLSCREEN STUDIO MUSIC PLAYER
+        // =====================================================================
         AnimatedVisibility(
             visible = mode == AudioPlayerDisplayMode.FULLSCREEN_SPOTIFY,
             enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
@@ -381,7 +595,7 @@ fun SpotifyAudioPlayerOverlay(
             val bgGradient = Brush.verticalGradient(
                 colors = listOf(
                     metadata.dominantColor,
-                    Color(0xFF121214),
+                    Color(0xFF121216),
                     Color(0xFF09090B)
                 )
             )
@@ -391,15 +605,16 @@ fun SpotifyAudioPlayerOverlay(
                     .background(bgGradient)
                     .statusBarsPadding()
                     .navigationBarsPadding()
+                    .testTag("music_fullscreen_player")
             ) {
-                val isWide = maxWidth > 720.dp
+                val isWide = maxWidth >= 680.dp
 
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(horizontal = 24.dp, vertical = 14.dp)
+                        .padding(horizontal = if (isWide) 28.dp else 20.dp, vertical = 12.dp)
                 ) {
-                    // Top Bar: Minimize to Bottom Bar, Minimize to Floating PiP, Folder Name, Queue Toggle
+                    // Unified Top Bar: Minimize to Bottom Bar, Pop-Up Window, Album Header, Vinyl Toggle, Queue & Close
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
@@ -415,7 +630,7 @@ fun SpotifyAudioPlayerOverlay(
                                     Icons.Default.KeyboardArrowDown,
                                     contentDescription = "Minimize to Bottom Bar",
                                     tint = Color.White,
-                                    modifier = Modifier.size(30.dp)
+                                    modifier = Modifier.size(28.dp)
                                 )
                             }
                             IconButton(
@@ -425,15 +640,18 @@ fun SpotifyAudioPlayerOverlay(
                             ) {
                                 Icon(
                                     Icons.Default.PictureInPictureAlt,
-                                    contentDescription = "Minimize to Floating PiP",
+                                    contentDescription = "Switch to Pop-Up Window",
                                     tint = Color.White.copy(alpha = 0.85f)
                                 )
                             }
                         }
 
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.weight(1f)
+                        ) {
                             Text(
-                                text = "PLAYING FROM FOLDER",
+                                text = "STUDIO AUDIO PLAYER",
                                 color = Color.White.copy(alpha = 0.65f),
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold,
@@ -450,12 +668,26 @@ fun SpotifyAudioPlayerOverlay(
                         }
 
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            IconButton(onClick = { showQueueSheet = !showQueueSheet }) {
+                            // Toggle Rotating Vinyl vs Square Artwork
+                            IconButton(
+                                onClick = {
+                                    AudioPlayerManager.isVinylArtworkStyle = !AudioPlayerManager.isVinylArtworkStyle
+                                }
+                            ) {
                                 Icon(
-                                    Icons.Default.QueueMusic,
-                                    contentDescription = "Folder Playlist Queue",
-                                    tint = if (showQueueSheet) Color(0xFF1DB954) else Color.White
+                                    Icons.Default.Album,
+                                    contentDescription = "Toggle Vinyl Disc Mode",
+                                    tint = if (AudioPlayerManager.isVinylArtworkStyle) Color(0xFF1DB954) else Color.White.copy(alpha = 0.8f)
                                 )
+                            }
+                            if (!isWide) {
+                                IconButton(onClick = { showQueueSheet = !showQueueSheet }) {
+                                    Icon(
+                                        Icons.Default.QueueMusic,
+                                        contentDescription = "Folder Playlist Queue",
+                                        tint = if (showQueueSheet) Color(0xFF1DB954) else Color.White
+                                    )
+                                }
                             }
                             IconButton(onClick = { AudioPlayerManager.stopAndClose() }) {
                                 Icon(
@@ -467,15 +699,15 @@ fun SpotifyAudioPlayerOverlay(
                         }
                     }
 
-                    Spacer(Modifier.height(16.dp))
+                    Spacer(Modifier.height(12.dp))
 
                     if (isWide) {
-                        // Tablet / DeX Side-by-Side Spotify Layout (Artwork & Controls on Left, Queue on Right)
+                        // Tablet / DeX / Desktop 2-Column Split View
                         Row(
                             modifier = Modifier
                                 .weight(1f)
                                 .fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(32.dp),
+                            horizontalArrangement = Arrangement.spacedBy(28.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Column(
@@ -484,13 +716,18 @@ fun SpotifyAudioPlayerOverlay(
                             ) {
                                 AlbumArtBox(
                                     metadata = metadata,
+                                    isPlaying = isPlaying,
+                                    isVinyl = AudioPlayerManager.isVinylArtworkStyle,
                                     modifier = Modifier
-                                        .sizeIn(maxWidth = 320.dp, maxHeight = 320.dp)
+                                        .sizeIn(maxWidth = 280.dp, maxHeight = 280.dp)
                                         .aspectRatio(1f)
-                                        .shadow(24.dp, RoundedCornerShape(20.dp))
-                                        .clip(RoundedCornerShape(20.dp))
+                                        .shadow(
+                                            24.dp,
+                                            if (AudioPlayerManager.isVinylArtworkStyle) CircleShape else RoundedCornerShape(24.dp)
+                                        )
+                                        .clip(if (AudioPlayerManager.isVinylArtworkStyle) CircleShape else RoundedCornerShape(24.dp))
                                 )
-                                Spacer(Modifier.height(24.dp))
+                                Spacer(Modifier.height(18.dp))
                                 SpotifyControlsBlock(
                                     metadata = metadata,
                                     posMs = posMs,
@@ -500,10 +737,11 @@ fun SpotifyAudioPlayerOverlay(
                                 )
                             }
 
-                            // Persistent Folder Playlist Queue on Wide Screens
+                            // Persistent Searchable Folder Playlist Queue on Wide Screens
                             Surface(
                                 color = Color.White.copy(alpha = 0.06f),
-                                shape = RoundedCornerShape(18.dp),
+                                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.1f)),
+                                shape = RoundedCornerShape(20.dp),
                                 modifier = Modifier
                                     .weight(0.9f)
                                     .fillMaxHeight()
@@ -520,7 +758,8 @@ fun SpotifyAudioPlayerOverlay(
                         if (showQueueSheet) {
                             Surface(
                                 color = Color.White.copy(alpha = 0.07f),
-                                shape = RoundedCornerShape(18.dp),
+                                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.1f)),
+                                shape = RoundedCornerShape(20.dp),
                                 modifier = Modifier
                                     .weight(1f)
                                     .fillMaxWidth()
@@ -540,16 +779,21 @@ fun SpotifyAudioPlayerOverlay(
                             ) {
                                 AlbumArtBox(
                                     metadata = metadata,
+                                    isPlaying = isPlaying,
+                                    isVinyl = AudioPlayerManager.isVinylArtworkStyle,
                                     modifier = Modifier
-                                        .fillMaxWidth(0.84f)
+                                        .fillMaxWidth(0.76f)
                                         .aspectRatio(1f)
-                                        .shadow(24.dp, RoundedCornerShape(20.dp))
-                                        .clip(RoundedCornerShape(20.dp))
+                                        .shadow(
+                                            24.dp,
+                                            if (AudioPlayerManager.isVinylArtworkStyle) CircleShape else RoundedCornerShape(24.dp)
+                                        )
+                                        .clip(if (AudioPlayerManager.isVinylArtworkStyle) CircleShape else RoundedCornerShape(24.dp))
                                 )
                             }
                         }
 
-                        Spacer(Modifier.height(20.dp))
+                        Spacer(Modifier.height(14.dp))
 
                         SpotifyControlsBlock(
                             metadata = metadata,
@@ -577,12 +821,16 @@ private fun SpotifyControlsBlock(
     val isShuffle = AudioPlayerManager.isShuffleEnabled
     val repeatMode = AudioPlayerManager.repeatMode
     val speed = AudioPlayerManager.playbackSpeed
+    val eqPreset = AudioPlayerManager.eqPreset
+    val sleepSec = AudioPlayerManager.sleepTimerRemainingSec
+    var showSleepMenu by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
-            .widthIn(max = 560.dp)
+            .widthIn(max = 580.dp)
             .fillMaxWidth()
     ) {
+        // Track Title, Artist & Format/Speed Badges
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
@@ -592,16 +840,16 @@ private fun SpotifyControlsBlock(
                 Text(
                     text = metadata.title,
                     color = Color.White,
-                    fontSize = 22.sp,
+                    fontSize = 21.sp,
                     fontWeight = FontWeight.Bold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-                Spacer(Modifier.height(4.dp))
+                Spacer(Modifier.height(2.dp))
                 Text(
                     text = "${metadata.artist} • ${metadata.album}",
                     color = Color.White.copy(alpha = 0.72f),
-                    fontSize = 15.sp,
+                    fontSize = 14.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -609,34 +857,111 @@ private fun SpotifyControlsBlock(
 
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Surface(
                     shape = RoundedCornerShape(50),
-                    color = Color.White.copy(alpha = 0.12f)
+                    color = Color(0xFF1DB954).copy(alpha = 0.16f)
                 ) {
                     Text(
                         text = metadata.formatBadge,
                         color = Color(0xFF1DB954),
-                        fontSize = 11.sp,
+                        fontSize = 10.5.sp,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
                     )
                 }
 
-                // Playback Speed Pill
                 OutlinedButton(
                     onClick = { AudioPlayerManager.cyclePlaybackSpeed() },
                     shape = RoundedCornerShape(50),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
+                    modifier = Modifier.height(30.dp)
                 ) {
-                    Text("${speed}x", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    Text("${speed}x", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
 
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(10.dp))
+
+        // Audio Enhancer / Equalizer Preset Row + Sleep Timer
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                Icons.Default.GraphicEq,
+                contentDescription = null,
+                tint = Color(0xFF1DB954),
+                modifier = Modifier.size(16.dp)
+            )
+            AudioEqPreset.entries.forEach { preset ->
+                val selected = eqPreset == preset
+                FilterChip(
+                    selected = selected,
+                    onClick = { AudioPlayerManager.selectEqPreset(preset) },
+                    label = { Text(preset.label, fontSize = 11.sp) },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = Color(0xFF1DB954).copy(alpha = 0.24f),
+                        selectedLabelColor = Color(0xFF1DB954),
+                        containerColor = Color.White.copy(alpha = 0.08f),
+                        labelColor = Color.White.copy(alpha = 0.8f)
+                    ),
+                    border = null,
+                    modifier = Modifier.height(28.dp)
+                )
+            }
+
+            // Sleep Timer Pill
+            Box {
+                FilterChip(
+                    selected = sleepSec > 0,
+                    onClick = { showSleepMenu = true },
+                    leadingIcon = {
+                        Icon(
+                            Icons.Default.Bedtime,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp)
+                        )
+                    },
+                    label = {
+                        Text(
+                            if (sleepSec > 0) "Sleep ${sleepSec / 60}m" else "Sleep Timer",
+                            fontSize = 11.sp
+                        )
+                    },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = Color(0xFF1DB954).copy(alpha = 0.24f),
+                        selectedLabelColor = Color(0xFF1DB954),
+                        containerColor = Color.White.copy(alpha = 0.08f),
+                        labelColor = Color.White.copy(alpha = 0.8f)
+                    ),
+                    border = null,
+                    modifier = Modifier.height(28.dp)
+                )
+                DropdownMenu(
+                    expanded = showSleepMenu,
+                    onDismissRequest = { showSleepMenu = false }
+                ) {
+                    listOf(0 to "Off", 15 to "15 Minutes", 30 to "30 Minutes", 60 to "60 Minutes").forEach { (mins, label) ->
+                        DropdownMenuItem(
+                            text = { Text(label) },
+                            onClick = {
+                                AudioPlayerManager.setSleepTimerMinutes(mins)
+                                showSleepMenu = false
+                            }
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(10.dp))
 
         // Seek Slider
         Slider(
@@ -657,19 +982,19 @@ private fun SpotifyControlsBlock(
         ) {
             Text(
                 text = formatAudioTime(posMs),
-                color = Color.White.copy(alpha = 0.65f),
+                color = Color.White.copy(alpha = 0.68f),
                 fontSize = 12.sp
             )
             Text(
                 text = "-${formatAudioTime(remainingMs)} / ${formatAudioTime(durMs)}",
-                color = Color.White.copy(alpha = 0.65f),
+                color = Color.White.copy(alpha = 0.68f),
                 fontSize = 12.sp
             )
         }
 
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(10.dp))
 
-        // Transport Controls Row
+        // Transport Controls Row (Shuffle, Prev, -10s, Play/Pause, +10s, Next, Repeat)
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -685,13 +1010,25 @@ private fun SpotifyControlsBlock(
 
             IconButton(
                 onClick = { AudioPlayerManager.playPrevious(context) },
-                modifier = Modifier.size(52.dp)
+                modifier = Modifier.size(46.dp)
             ) {
                 Icon(
                     Icons.Default.SkipPrevious,
                     contentDescription = "Previous",
                     tint = Color.White,
-                    modifier = Modifier.size(36.dp)
+                    modifier = Modifier.size(32.dp)
+                )
+            }
+
+            IconButton(
+                onClick = { AudioPlayerManager.seekRelative(-10_000L) },
+                modifier = Modifier.size(42.dp)
+            ) {
+                Icon(
+                    Icons.Default.Replay10,
+                    contentDescription = "Rewind 10s",
+                    tint = Color.White.copy(alpha = 0.85f),
+                    modifier = Modifier.size(26.dp)
                 )
             }
 
@@ -701,24 +1038,36 @@ private fun SpotifyControlsBlock(
                     containerColor = Color(0xFF1DB954),
                     contentColor = Color.Black
                 ),
-                modifier = Modifier.size(68.dp)
+                modifier = Modifier.size(64.dp)
             ) {
                 Icon(
                     imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                     contentDescription = if (isPlaying) "Pause" else "Play",
-                    modifier = Modifier.size(36.dp)
+                    modifier = Modifier.size(34.dp)
+                )
+            }
+
+            IconButton(
+                onClick = { AudioPlayerManager.seekRelative(10_000L) },
+                modifier = Modifier.size(42.dp)
+            ) {
+                Icon(
+                    Icons.Default.Forward10,
+                    contentDescription = "Forward 10s",
+                    tint = Color.White.copy(alpha = 0.85f),
+                    modifier = Modifier.size(26.dp)
                 )
             }
 
             IconButton(
                 onClick = { AudioPlayerManager.playNext(context) },
-                modifier = Modifier.size(52.dp)
+                modifier = Modifier.size(46.dp)
             ) {
                 Icon(
                     Icons.Default.SkipNext,
                     contentDescription = "Next",
                     tint = Color.White,
-                    modifier = Modifier.size(36.dp)
+                    modifier = Modifier.size(32.dp)
                 )
             }
 
@@ -731,9 +1080,9 @@ private fun SpotifyControlsBlock(
             }
         }
 
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(6.dp))
 
-        // Bottom Quick Switch Bar (Dock to Bottom Bar | Floating PiP | Queue count)
+        // Bottom Quick Switch Bar (Bottom Dock | Pop-Up Window | Queue count)
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -747,11 +1096,11 @@ private fun SpotifyControlsBlock(
                 Icon(
                     Icons.Default.Dock,
                     contentDescription = null,
-                    tint = Color.White.copy(alpha = 0.75f),
-                    modifier = Modifier.size(18.dp)
+                    tint = Color.White.copy(alpha = 0.78f),
+                    modifier = Modifier.size(17.dp)
                 )
                 Spacer(Modifier.width(6.dp))
-                Text("Bottom Mini-Bar", color = Color.White.copy(alpha = 0.75f), fontSize = 12.sp)
+                Text("Bottom Bar", color = Color.White.copy(alpha = 0.78f), fontSize = 12.sp)
             }
 
             TextButton(
@@ -762,24 +1111,24 @@ private fun SpotifyControlsBlock(
                 Icon(
                     Icons.Default.PictureInPictureAlt,
                     contentDescription = null,
-                    tint = Color.White.copy(alpha = 0.75f),
-                    modifier = Modifier.size(18.dp)
+                    tint = Color.White.copy(alpha = 0.78f),
+                    modifier = Modifier.size(17.dp)
                 )
                 Spacer(Modifier.width(6.dp))
-                Text("Floating PiP", color = Color.White.copy(alpha = 0.75f), fontSize = 12.sp)
+                Text("Pop-Up Window", color = Color.White.copy(alpha = 0.78f), fontSize = 12.sp)
             }
 
             TextButton(onClick = onToggleQueue) {
                 Icon(
                     Icons.Default.QueueMusic,
                     contentDescription = null,
-                    tint = Color.White.copy(alpha = 0.75f),
-                    modifier = Modifier.size(18.dp)
+                    tint = Color.White.copy(alpha = 0.78f),
+                    modifier = Modifier.size(17.dp)
                 )
                 Spacer(Modifier.width(6.dp))
                 Text(
                     "Queue (${AudioPlayerManager.playlist.size})",
-                    color = Color.White.copy(alpha = 0.75f),
+                    color = Color.White.copy(alpha = 0.78f),
                     fontSize = 12.sp
                 )
             }
@@ -793,24 +1142,69 @@ private fun PlaylistQueueContent(
 ) {
     val playlist = AudioPlayerManager.playlist
     val currentIdx = AudioPlayerManager.currentTrackIndex
+    var filterQuery by remember { mutableStateOf("") }
+
+    val filteredIndices = remember(playlist.size, filterQuery) {
+        if (filterQuery.isBlank()) {
+            playlist.indices.toList()
+        } else {
+            playlist.indices.filter { idx ->
+                playlist[idx].name.contains(filterQuery, ignoreCase = true)
+            }
+        }
+    }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(16.dp)
+            .padding(14.dp)
     ) {
-        Text(
-            text = "Folder Audio Queue (${playlist.size} tracks)",
-            color = Color.White,
-            fontWeight = FontWeight.Bold,
-            fontSize = 15.sp
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Folder Queue (${playlist.size} tracks)",
+                color = Color.White,
+                fontWeight = FontWeight.Bold,
+                fontSize = 15.sp
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+        OutlinedTextField(
+            value = filterQuery,
+            onValueChange = { filterQuery = it },
+            placeholder = { Text("Filter queue tracks...", color = Color.White.copy(alpha = 0.5f), fontSize = 12.sp) },
+            leadingIcon = {
+                Icon(Icons.Default.Search, contentDescription = null, tint = Color.White.copy(alpha = 0.7f), modifier = Modifier.size(18.dp))
+            },
+            trailingIcon = {
+                if (filterQuery.isNotEmpty()) {
+                    IconButton(onClick = { filterQuery = "" }, modifier = Modifier.size(24.dp)) {
+                        Icon(Icons.Default.Clear, contentDescription = "Clear", tint = Color.White.copy(alpha = 0.7f), modifier = Modifier.size(16.dp))
+                    }
+                }
+            },
+            singleLine = true,
+            shape = RoundedCornerShape(12.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedTextColor = Color.White,
+                unfocusedTextColor = Color.White,
+                focusedBorderColor = Color(0xFF1DB954),
+                unfocusedBorderColor = Color.White.copy(alpha = 0.2f)
+            ),
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("music_queue_search")
         )
         Spacer(Modifier.height(10.dp))
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            itemsIndexed(playlist) { index, item ->
+            itemsIndexed(filteredIndices) { _, index ->
+                val item = playlist[index]
                 val isCurrent = index == currentIdx
                 Surface(
                     shape = RoundedCornerShape(12.dp),
@@ -855,18 +1249,33 @@ private fun PlaylistQueueContent(
 @Composable
 private fun AlbumArtBox(
     metadata: AudioTrackMetadata,
+    isPlaying: Boolean,
+    isVinyl: Boolean,
     modifier: Modifier = Modifier
 ) {
     val bmp = metadata.albumArt
-    Box(
-        modifier = modifier.background(
-            Brush.linearGradient(
-                colors = listOf(
-                    metadata.dominantColor,
-                    Color(0xFF27272A)
-                )
-            )
+    val infiniteTransition = rememberInfiniteTransition(label = "vinyl_spin")
+    val rotation by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 12000, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
         ),
+        label = "vinyl_angle"
+    )
+
+    Box(
+        modifier = modifier
+            .then(if (isVinyl && isPlaying) Modifier.rotate(rotation) else Modifier)
+            .background(
+                Brush.linearGradient(
+                    colors = listOf(
+                        metadata.dominantColor,
+                        Color(0xFF27272A)
+                    )
+                )
+            ),
         contentAlignment = Alignment.Center
     ) {
         if (bmp != null) {
@@ -882,6 +1291,17 @@ private fun AlbumArtBox(
                 contentDescription = null,
                 tint = Color.White.copy(alpha = 0.85f),
                 modifier = Modifier.fillMaxSize(0.52f)
+            )
+        }
+
+        // Vinyl center spindle hole when Vinyl mode is active
+        if (isVinyl) {
+            Box(
+                modifier = Modifier
+                    .size(28.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFF121216))
+                    .border(2.dp, Color.White.copy(alpha = 0.35f), CircleShape)
             )
         }
     }
