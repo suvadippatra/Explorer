@@ -126,16 +126,22 @@ class FolderConfigurations(private val context: Context) {
 
     fun resolveViewMode(key: String?) {
         val prefs = context.getSharedPreferences("folder_view_modes", Context.MODE_PRIVATE)
+        val isGalleryKey = key == "virtual://gallery" || key?.startsWith("virtual://gallery_album:") == true
         if (key != null) {
             val saved = prefs.getString(key, null)
             if (saved != null) {
                 try {
-                    updateViewMode(ViewMode.valueOf(saved), null)
+                    val savedMode = ViewMode.valueOf(saved)
+                    if (isGalleryKey && (savedMode == ViewMode.DETAILS || savedMode == ViewMode.CONTENT)) {
+                        updateViewMode(ViewMode.GALLERY, key)
+                        return
+                    }
+                    updateViewMode(savedMode, null)
                     return
                 } catch (_: Exception) {}
             }
         }
-        val fallback = if (key == "virtual://gallery" || key?.startsWith("virtual://gallery_album:") == true) ViewMode.GALLERY else SettingsManager.defaultViewMode.value
+        val fallback = if (isGalleryKey) ViewMode.GALLERY else SettingsManager.defaultViewMode.value
         updateViewMode(fallback, null)
     }
 

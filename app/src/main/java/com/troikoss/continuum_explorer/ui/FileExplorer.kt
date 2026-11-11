@@ -409,10 +409,36 @@ fun FileExplorer(
         }
     }
 
-    // Ensure ModalNavigationDrawer is closed if user resizes/rotates to Tablet/DeX
-    LaunchedEffect(isMobileScreen) {
-        if (!isMobileScreen && drawerState.isOpen) {
-            drawerState.close()
+    // Ensure ModalNavigationDrawer and permanent sidebar never pop open automatically when resizing window
+    val previousScreenSizeState = remember { androidx.compose.runtime.mutableStateOf(screenSize) }
+    LaunchedEffect(screenSize) {
+        val prev = previousScreenSizeState.value
+        if (prev != screenSize) {
+            if (drawerState.isOpen) {
+                drawerState.close()
+            }
+            if (prev == ScreenSize.SMALL && screenSize != ScreenSize.SMALL) {
+                SettingsManager.setWideSidebarCollapsed(true)
+            }
+            previousScreenSizeState.value = screenSize
+        }
+    }
+
+    // Listen for global navigation requests (e.g., "Open Server Hub" from SettingsActivity)
+    LaunchedEffect(Unit) {
+        com.troikoss.continuum_explorer.utils.GlobalEvents.openLibraryItemEvent.collect { targetItem ->
+            val existingIdx = tabs.indexOfFirst { it.libraryItem == targetItem && it.viewingFile == null }
+            if (existingIdx >= 0) {
+                selectedTabIndex = existingIdx
+            } else {
+                val activeTab = tabs.getOrNull(selectedTabIndex.coerceIn(0, tabs.lastIndex))
+                if (activeTab != null) {
+                    activeTab.viewingFile = null
+                    activeTab.openInEditMode = false
+                    activeTab.activeEditorToolId = null
+                    activeTab.navigateTo(null, null, addToHistory = true, libraryItem = targetItem)
+                }
+            }
         }
     }
 

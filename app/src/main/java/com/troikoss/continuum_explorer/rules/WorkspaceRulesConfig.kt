@@ -14,12 +14,12 @@ enum class WorkspaceWindowMode(
 ) {
     DEX_WINDOWS_TABLET_MOBILE_TABS(
         id = 1,
-        title = "1. Separate Windows on DeX, Animated Tabs on Tablet & Mobile (Default)",
+        title = "1. Separate Windows on DeX, Animated Tabs on Tablet & Mobile",
         description = "Launches separate multi-instance windows on DeX/Desktop (or clean return-tabs) and smooth animated tabs on Tablet and Mobile."
     ),
     ANIMATED_TABS_ALL_SCREENS(
         id = 2,
-        title = "2. Animated In-App Tabs across DeX, Tablet & Mobile",
+        title = "2. Animated In-App Tabs across DeX, Tablet & Mobile (Default)",
         description = "Opens all editors, previews, and My Suite mini-apps inside animated in-app tabs with automatic back-to-origin tab restoration."
     ),
     FLOATING_PANELS_DEX_TABLET_TABS_MOBILE(
@@ -30,7 +30,7 @@ enum class WorkspaceWindowMode(
 
     companion object {
         fun fromId(id: Int): WorkspaceWindowMode {
-            return entries.firstOrNull { it.id == id } ?: DEX_WINDOWS_TABLET_MOBILE_TABS
+            return entries.firstOrNull { it.id == id } ?: ANIMATED_TABS_ALL_SCREENS
         }
     }
 }

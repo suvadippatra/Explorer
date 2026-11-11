@@ -664,27 +664,143 @@ fun SettingsScreen(onBack: () -> Unit) {
                         }
                     }
                     4 -> {
-                        PixelCategoryCard(
-                            title = "Server Hub",
-                            icon = Icons.Default.Router
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable {
-                                        val intent = Intent(context, MainActivity::class.java).apply {
-                                            putExtra("isFtpServer", true)
-                                            flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
-                                        }
-                                        context.startActivity(intent)
-                                        (context as? ComponentActivity)?.finish()
-                                    }
-                                    .padding(vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
+                        val hubState by com.troikoss.continuum_explorer.server.ServerManager.state.collectAsState()
+                        val ftpAnon by SettingsManager.isFtpAnonymousAllowed
+                        val ftpAllowUpload by SettingsManager.ftpAllowUpload
+                        val ftpAllowMiniApps by SettingsManager.ftpAllowMiniApps
+                        val httpRequireAuth by SettingsManager.httpWebsiteRequireAuth
+                        val ftpPortVal by SettingsManager.ftpPort
+
+                        Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                            PixelCategoryCard(
+                                title = "Server Hub & Modes",
+                                icon = Icons.Default.Router
                             ) {
-                                Text("Open Server Hub", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-                                Icon(Icons.Default.ChevronRight, contentDescription = null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    // Independent FTP Server Switch
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text("FTP Server (:$ftpPortVal)", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                                            Text(
+                                                if (hubState.isFtpRunning) "ftp://${hubState.ipAddress}:${hubState.ftp.port}"
+                                                else "Host files, folders, or upload dropzone over FTP",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                        Switch(
+                                            checked = hubState.isFtpRunning,
+                                            onCheckedChange = { enable ->
+                                                if (enable) com.troikoss.continuum_explorer.server.ServerManager.startFtpServer(context)
+                                                else com.troikoss.continuum_explorer.server.ServerManager.stopFtpServer(context)
+                                            }
+                                        )
+                                    }
+
+                                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+
+                                    // Independent HTTP Website Server Switch
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text("HTTP Website & Sync Host (:8080)", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                                            Text(
+                                                if (hubState.isHttpRunning) "http://${hubState.ipAddress}:${hubState.http.port}"
+                                                else "Host unzipped website folders, HTML files, or SyncPlay room",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                        Switch(
+                                            checked = hubState.isHttpRunning,
+                                            onCheckedChange = { enable ->
+                                                if (enable) com.troikoss.continuum_explorer.server.ServerManager.startHttpServer(context)
+                                                else com.troikoss.continuum_explorer.server.ServerManager.stopHttpServer(context)
+                                            }
+                                        )
+                                    }
+
+                                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+
+                                    Button(
+                                        onClick = {
+                                            com.troikoss.continuum_explorer.utils.GlobalEvents.requestOpenLibraryItem(
+                                                com.troikoss.continuum_explorer.model.LibraryItem.FtpServer
+                                            )
+                                            val intent = Intent(context, MainActivity::class.java).apply {
+                                                putExtra("isFtpServer", true)
+                                                flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                                            }
+                                            context.startActivity(intent)
+                                            (context as? ComponentActivity)?.finish()
+                                        },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        shape = RoundedCornerShape(12.dp)
+                                    ) {
+                                        Icon(Icons.Default.Router, contentDescription = null, modifier = Modifier.size(18.dp))
+                                        Spacer(Modifier.width(8.dp))
+                                        Text("Open Server Hub Dashboard", fontWeight = FontWeight.SemiBold)
+                                    }
+                                }
+                            }
+
+                            PixelCategoryCard(
+                                title = "Network Security & Sandbox",
+                                icon = Icons.Default.Tune
+                            ) {
+                                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text("Require PIN on Untrusted Wi-Fi (HTTP)", style = MaterialTheme.typography.bodyMedium)
+                                        Switch(
+                                            checked = httpRequireAuth,
+                                            onCheckedChange = { SettingsManager.setHttpWebsiteSecurity(context, it) }
+                                        )
+                                    }
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text("FTP Anonymous Read Access", style = MaterialTheme.typography.bodyMedium)
+                                        Switch(
+                                            checked = ftpAnon,
+                                            onCheckedChange = { SettingsManager.setFtpAnonymousAllowed(context, it) }
+                                        )
+                                    }
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text("Allow Authenticated File Uploads", style = MaterialTheme.typography.bodyMedium)
+                                        Switch(
+                                            checked = ftpAllowUpload,
+                                            onCheckedChange = { SettingsManager.setFtpAllowUpload(context, it) }
+                                        )
+                                    }
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text("Isolated Browser Mini-Apps Sandbox", style = MaterialTheme.typography.bodyMedium)
+                                        Switch(
+                                            checked = ftpAllowMiniApps,
+                                            onCheckedChange = { SettingsManager.setFtpAllowMiniApps(context, it) }
+                                        )
+                                    }
+                                }
                             }
                         }
                     }

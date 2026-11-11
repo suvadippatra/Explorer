@@ -522,10 +522,11 @@ fun ExternalFtpViewerPanel(
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.surface)
     ) {
-        // 50.dp Flush Top Heading Bar with Triple-Line Menu Button on Left
+        // 50.dp Lockable Top Heading Bar with Triple-Line Menu Button on Left
+        val isHeaderPinned by SettingsManager.isSubpageHeaderPinned
         Surface(
             color = MaterialTheme.colorScheme.surfaceContainer,
-            tonalElevation = 1.dp
+            tonalElevation = if (isHeaderPinned) 2.dp else 0.dp
         ) {
             val showMenuIcon = appState == null ||
                 appState.getScreenSize() == com.troikoss.continuum_explorer.model.ScreenSize.SMALL ||
@@ -564,6 +565,18 @@ fun ExternalFtpViewerPanel(
                     )
                 }
 
+                IconButton(
+                    onClick = { SettingsManager.toggleSubpageHeaderPinned(context) },
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.PushPin,
+                        contentDescription = if (isHeaderPinned) "Header Locked on Top" else "Lock Header on Top",
+                        tint = if (isHeaderPinned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+
                 if (activeConnectedServer != null) {
                     TextButton(
                         onClick = {
@@ -577,7 +590,7 @@ fun ExternalFtpViewerPanel(
                         Text("Disconnect", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelMedium)
                     }
                 } else {
-                    Spacer(modifier = Modifier.width(48.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
                 }
             }
         }

@@ -337,6 +337,8 @@ object ServerManager {
     }
 
     private suspend fun stopHttpInternal(graceful: Boolean) {
+        // Every time a server is stopped, clear the previously loaded media file on SyncPlay
+        SyncPlayManager.stopSession(clearMediaHistory = true)
         httpMutex.withLock {
             val existing = ktorServerInstance
             if (existing == null) {
@@ -463,6 +465,8 @@ object ServerManager {
     }
 
     private suspend fun stopFtpInternal(graceful: Boolean) {
+        // Every time a server is stopped, clear the previously loaded media file on SyncPlay
+        SyncPlayManager.stopSession(clearMediaHistory = true)
         ftpMutex.withLock {
             val existing = ftpServerInstance
             val ftpPort = SettingsManager.ftpPort.value.coerceIn(1024, 65535)
@@ -515,27 +519,33 @@ object ServerManager {
         FtpBucketManager.initialize(context)
         val hostedMode = SettingsManager.ftpHostedMode.value
         val customPath = SettingsManager.ftpHostedPath.value
+        val uploadDropzone = File(SettingsManager.ftpUploadFolderPath.value).apply {
+            if (!exists()) mkdirs()
+        }
         return when (hostedMode) {
             FtpHostedMode.CUSTOM_FOLDER -> {
                 if (customPath.isNotBlank()) {
                     val f = File(customPath)
-                    if (f.exists()) (if (f.isDirectory) f else f.parentFile ?: Environment.getExternalStorageDirectory())
-                    else Environment.getExternalStorageDirectory()
+                    if (f.exists()) (if (f.isDirectory) f else f.parentFile ?: uploadDropzone)
+                    else uploadDropzone
                 } else {
-                    Environment.getExternalStorageDirectory()
+                    uploadDropzone
                 }
             }
             FtpHostedMode.BATCH_FILES -> {
                 val items = FtpBucketManager.bucketItems
                 when {
                     items.size == 1 && items.first().isDirectory -> {
-                        File(items.first().absolutePath).takeIf { it.exists() } ?: Environment.getExternalStorageDirectory()
+                        File(items.first().absolutePath).takeIf { it.exists() } ?: uploadDropzone
                     }
                     items.isNotEmpty() -> {
                         val firstParent = File(items.first().absolutePath).parentFile
-                        firstParent?.takeIf { it.exists() } ?: Environment.getExternalStorageDirectory()
+                        firstParent?.takeIf { it.exists() } ?: uploadDropzone
                     }
-                    else -> Environment.getExternalStorageDirectory()
+                    else -> {
+                        // Hosted without a file or folder: serve isolated upload/dropzone folder
+                        uploadDropzone
+                    }
                 }
             }
             FtpHostedMode.FULL_STORAGE -> Environment.getExternalStorageDirectory()

@@ -86,13 +86,29 @@ object SettingsManager {
     private const val KEY_DEFAULT_HEADER_TYPE = "default_header_type"
     private const val KEY_DEFAULT_GRID_ZOOM = "default_grid_zoom"
     private const val KEY_DEFAULT_GRID_COLUMNS = "default_grid_columns"
-    private const val KEY_WORKSPACE_WINDOW_MODE = "workspace_window_mode"
+    private const val KEY_WORKSPACE_WINDOW_MODE = "workspace_window_mode_v2"
+    private const val KEY_SUBPAGE_HEADER_PINNED = "subpage_header_pinned"
+    private const val KEY_HTTP_WEBSITE_PATH = "http_website_path"
+    private const val KEY_HTTP_WEBSITE_SECURE_TOKEN = "http_website_secure_token"
+    private const val KEY_HTTP_WEBSITE_REQUIRE_AUTH = "http_website_require_auth"
 
     private val _isFullScreenTabBarHidden = mutableStateOf(false)
     val isFullScreenTabBarHidden: State<Boolean> = _isFullScreenTabBarHidden
 
-    private val _isWideSidebarCollapsed = mutableStateOf(false)
+    private val _isWideSidebarCollapsed = mutableStateOf(true)
     val isWideSidebarCollapsed: State<Boolean> = _isWideSidebarCollapsed
+
+    private val _isSubpageHeaderPinned = mutableStateOf(true)
+    val isSubpageHeaderPinned: State<Boolean> = _isSubpageHeaderPinned
+
+    private val _httpWebsitePath = mutableStateOf("")
+    val httpWebsitePath: State<String> = _httpWebsitePath
+
+    private val _httpWebsiteRequireAuth = mutableStateOf(false)
+    val httpWebsiteRequireAuth: State<Boolean> = _httpWebsiteRequireAuth
+
+    private val _httpWebsiteAccessPin = mutableStateOf("248610")
+    val httpWebsiteAccessPin: State<String> = _httpWebsiteAccessPin
 
     fun toggleWideSidebarCollapsed() {
         _isWideSidebarCollapsed.value = !_isWideSidebarCollapsed.value
@@ -102,7 +118,33 @@ object SettingsManager {
         _isWideSidebarCollapsed.value = collapsed
     }
 
-    private val _workspaceWindowMode = mutableStateOf(WorkspaceWindowMode.DEX_WINDOWS_TABLET_MOBILE_TABS)
+    fun toggleSubpageHeaderPinned(context: Context? = null) {
+        val next = !_isSubpageHeaderPinned.value
+        _isSubpageHeaderPinned.value = next
+        context?.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            ?.edit()?.putBoolean(KEY_SUBPAGE_HEADER_PINNED, next)?.apply()
+    }
+
+    fun setHttpWebsitePath(context: Context, path: String) {
+        _httpWebsitePath.value = path
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit().putString(KEY_HTTP_WEBSITE_PATH, path).apply()
+        GlobalEvents.triggerConfigUpdate()
+    }
+
+    fun setHttpWebsiteSecurity(context: Context, requireAuth: Boolean, pin: String = _httpWebsiteAccessPin.value) {
+        _httpWebsiteRequireAuth.value = requireAuth
+        val cleanPin = pin.trim().ifBlank { "248610" }
+        _httpWebsiteAccessPin.value = cleanPin
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(KEY_HTTP_WEBSITE_REQUIRE_AUTH, requireAuth)
+            .putString(KEY_HTTP_WEBSITE_SECURE_TOKEN, cleanPin)
+            .apply()
+        GlobalEvents.triggerConfigUpdate()
+    }
+
+    private val _workspaceWindowMode = mutableStateOf(WorkspaceWindowMode.ANIMATED_TABS_ALL_SCREENS)
     val workspaceWindowMode: State<WorkspaceWindowMode> = _workspaceWindowMode
 
     fun setWorkspaceWindowMode(context: Context, mode: WorkspaceWindowMode) {
@@ -389,8 +431,12 @@ object SettingsManager {
 
         _isHoverPreviewEnabled.value = prefs.getBoolean(KEY_HOVER_PREVIEW_ENABLED, false)
         _workspaceWindowMode.value = WorkspaceWindowMode.fromId(
-            prefs.getInt(KEY_WORKSPACE_WINDOW_MODE, WorkspaceWindowMode.DEX_WINDOWS_TABLET_MOBILE_TABS.id)
+            prefs.getInt(KEY_WORKSPACE_WINDOW_MODE, WorkspaceWindowMode.ANIMATED_TABS_ALL_SCREENS.id)
         )
+        _isSubpageHeaderPinned.value = prefs.getBoolean(KEY_SUBPAGE_HEADER_PINNED, true)
+        _httpWebsitePath.value = prefs.getString(KEY_HTTP_WEBSITE_PATH, "") ?: ""
+        _httpWebsiteRequireAuth.value = prefs.getBoolean(KEY_HTTP_WEBSITE_REQUIRE_AUTH, false)
+        _httpWebsiteAccessPin.value = prefs.getString(KEY_HTTP_WEBSITE_SECURE_TOKEN, "248610") ?: "248610"
 
         val loadHandler = { key: String ->
             val saved = prefs.getString(key, DefaultAppHandler.INTERNAL_PREVIEWER.name)

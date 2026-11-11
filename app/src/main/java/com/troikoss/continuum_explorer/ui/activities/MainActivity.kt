@@ -187,6 +187,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        setIntent(intent)
         if (intent.action == "com.troikoss.continuum_explorer.OPEN_NEW_WINDOW") {
             val newWindowIntent = Intent(this, MainActivity::class.java).apply {
                 action = Intent.ACTION_MAIN
@@ -197,6 +198,18 @@ class MainActivity : AppCompatActivity() {
             }
             startActivity(newWindowIntent)
             return
+        }
+        val targetLibraryItem = when {
+            intent.getBooleanExtra("isRecent", false) -> LibraryItem.Recent
+            intent.getBooleanExtra("isGallery", false) -> LibraryItem.Gallery
+            intent.getBooleanExtra("isRecycleBin", false) -> LibraryItem.RecycleBin
+            intent.getBooleanExtra("isVibeArea", false) -> LibraryItem.VibeArea
+            intent.getBooleanExtra("isFtpServer", false) -> LibraryItem.FtpServer
+            intent.getBooleanExtra("isExternalFtp", false) -> LibraryItem.ExternalFtp
+            else -> null
+        }
+        if (targetLibraryItem != null) {
+            com.troikoss.continuum_explorer.utils.GlobalEvents.requestOpenLibraryItem(targetLibraryItem)
         }
     }
 }

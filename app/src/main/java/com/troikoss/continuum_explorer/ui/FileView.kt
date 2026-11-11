@@ -122,10 +122,10 @@ fun FileView(
 
     // Layout Configuration
     val viewMode = appState.activeViewMode
-    val isGridView = viewMode == ViewMode.GRID
-    val shape = if (isGridView) RoundedCornerShape(8.dp) else RectangleShape
-    
-    Box(modifier = if (isGridView) Modifier.padding(4.dp) else Modifier) {
+    val isGridView = viewMode == ViewMode.GRID || viewMode == ViewMode.GALLERY
+    val shape = if (isGridView) RoundedCornerShape(10.dp) else RectangleShape
+
+    Box {
             Surface(
                 color = Color.Transparent,
                 shape = shape,
@@ -219,9 +219,11 @@ private fun FileGalleryView(
     appState: FileExplorerState,
     toolTipProvider: PopupPositionProvider
 ) {
-
     val tooltipState = rememberTooltipState()
     var isOverflowing by remember { mutableStateOf(false) }
+    val tileShape = RoundedCornerShape(10.dp)
+    val isPreviewableMedia = !file.isDirectory && isMimeTypePreviewable(file) &&
+        !file.name.lowercase().endsWith(".pdf") && !file.name.lowercase().endsWith(".apk") && !file.name.lowercase().endsWith(".txt")
 
     TooltipBox(
         positionProvider = toolTipProvider,
@@ -229,39 +231,47 @@ private fun FileGalleryView(
         state = tooltipState
     ) {
         Box(
-            modifier = Modifier.padding(2.dp).fillMaxWidth().aspectRatio(1f),
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(1f)
+                .background(MaterialTheme.colorScheme.surfaceContainerLow, tileShape),
             contentAlignment = Alignment.Center
         ) {
             IconHelper.ItemIcon(
                 file = file,
                 isSelected = isSelected,
-                contentSize = appState.folderConfigs.gridItemSize.dp,
+                contentSize = (appState.folderConfigs.gridItemSize * 0.65f).dp,
                 modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop
+                contentScale = ContentScale.Crop,
+                fillBounds = isPreviewableMedia
             )
 
-
-            if (!isMimeTypePreviewable(file) || file.isDirectory || file.name.lowercase().endsWith(".txt")) {
+            if (!isPreviewableMedia || file.isDirectory) {
                 Box(
-                    modifier = Modifier
-                        .fillMaxSize(),
+                    modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.BottomCenter
                 ) {
-                    Box (modifier = Modifier.background(Color.Black.copy(alpha = 0.5f)).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    Box(
+                        modifier = Modifier
+                            .background(Color.Black.copy(alpha = 0.55f))
+                            .fillMaxWidth()
+                            .padding(vertical = 3.dp, horizontal = 4.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
                         if (appState.renamingFile == file) {
                             InlineRenameField(
                                 file = file,
                                 appState = appState,
-                                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
-                                textStyle = MaterialTheme.typography.bodyMedium.copy(color = Color.White, textAlign = TextAlign.Center)
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                                textStyle = MaterialTheme.typography.bodySmall.copy(color = Color.White, textAlign = TextAlign.Center)
                             )
                         } else {
                             Text(
                                 text = file.name,
                                 color = Color.White,
                                 textAlign = TextAlign.Center,
-                                style = MaterialTheme.typography.bodyMedium,
-                                maxLines = 2,
+                                style = MaterialTheme.typography.labelSmall,
+                                maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.renameOnClick(file, appState.selectionManager, appState),
                                 onTextLayout = { textLayoutResult ->
@@ -271,7 +281,9 @@ private fun FileGalleryView(
                         }
                     }
                 }
-            } else isOverflowing = true
+            } else {
+                isOverflowing = true
+            }
 
             Box(
                 modifier = Modifier
@@ -294,32 +306,46 @@ private fun FileGridView(
     appState: FileExplorerState,
     toolTipProvider: PopupPositionProvider
 ) {
-
     val tooltipState = rememberTooltipState()
     var isOverflowing by remember { mutableStateOf(false) }
 
-    val shape = RoundedCornerShape(8.dp)
+    val shape = RoundedCornerShape(10.dp)
+    val isPreviewableMedia = !file.isDirectory && isMimeTypePreviewable(file) &&
+        !file.name.lowercase().endsWith(".pdf") && !file.name.lowercase().endsWith(".apk") && !file.name.lowercase().endsWith(".txt")
 
     Column(
         modifier = Modifier
-            .padding(8.dp).fillMaxWidth()
-            .selectionBackground(isSelected, isHovered, isLead, shape = shape),
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.6f), shape)
+            .selectionBackground(isSelected, isHovered, isLead, shape = shape)
+            .padding(6.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
+        val contentSize = (appState.folderConfigs.gridItemSize * 0.56f).dp
 
-        val contentSize = (appState.folderConfigs.gridItemSize * 0.6f).dp
-
-        IconHelper.ItemIcon(
-            file = file,
-            isSelected = isSelected,
-            contentSize = contentSize
-        )
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(1.18f)
+                .background(MaterialTheme.colorScheme.surfaceContainer, RoundedCornerShape(8.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            IconHelper.ItemIcon(
+                file = file,
+                isSelected = isSelected,
+                contentSize = contentSize,
+                contentScale = if (isPreviewableMedia) ContentScale.Crop else ContentScale.Fit,
+                fillBounds = isPreviewableMedia,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+        Spacer(modifier = Modifier.height(4.dp))
         if (appState.renamingFile == file) {
             InlineRenameField(
                 file = file,
                 appState = appState,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
-                textStyle = MaterialTheme.typography.bodyMedium.copy(textAlign = TextAlign.Center)
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                textStyle = MaterialTheme.typography.bodySmall.copy(textAlign = TextAlign.Center)
             )
         } else {
             TooltipBox(
@@ -330,7 +356,7 @@ private fun FileGridView(
                 Text(
                     text = file.name,
                     textAlign = TextAlign.Center,
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = MaterialTheme.typography.bodySmall,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.renameOnClick(file, appState.selectionManager, appState),

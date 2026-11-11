@@ -93,6 +93,29 @@ class ApacheFtpServerDaemon(
                 val ip = session.clientAddress?.address?.hostAddress ?: "unknown"
                 val cmd = request.command?.uppercase() ?: ""
                 val arg = request.argument ?: ""
+
+                // Security Firewall: Block path traversal and system directory access
+                if (arg.contains("..") || arg.startsWith("/proc") || arg.startsWith("/sys") || arg.startsWith("/data")) {
+                    ContinuumHubService.recordLog(ip, "FTP", "BLOCKED", "$cmd $arg (Path traversal blocked)")
+                    return FtpletResult.SKIP
+                }
+
+                // Security Firewall: Block dangerous executable uploads over FTP
+                if (cmd in listOf("STOR", "APPE", "RNTO")) {
+                    val lowerArg = arg.lowercase()
+                    val blockedExts = listOf(".sh", ".bat", ".cmd", ".exe", ".msi", ".dex", ".so", ".elf", ".apk", ".jar", ".ps1", ".vbs", ".php")
+                    if (blockedExts.any { lowerArg.endsWith(it) }) {
+                        ContinuumHubService.recordLog(ip, "FTP", "BLOCKED", "$cmd $arg (Executable blocked)")
+                        return FtpletResult.SKIP
+                    }
+                }
+
+                // Block destructive delete commands from anonymous FTP sessions
+                if (cmd in listOf("DELE", "RMD") && session.user?.name.equals("anonymous", ignoreCase = true)) {
+                    ContinuumHubService.recordLog(ip, "FTP", "BLOCKED", "$cmd $arg (Anonymous delete blocked)")
+                    return FtpletResult.SKIP
+                }
+
                 if (cmd in listOf("RETR", "STOR", "APPE")) {
                     activeTransfers.incrementAndGet()
                 }
@@ -121,12 +144,18 @@ class ApacheFtpServerDaemon(
         val userManagerFactory = PropertiesUserManagerFactory()
         val userManager: UserManager = userManagerFactory.createUserManager()
 
-        val authorities = mutableListOf<Authority>()
+        val authAuthorities = mutableListOf<Authority>()
         if (allowWrite) {
-            authorities.add(WritePermission())
+            authAuthorities.add(WritePermission())
         }
-        authorities.add(ConcurrentLoginPermission(20, 10))
-        authorities.add(TransferRatePermission(0, 0))
+        authAuthorities.add(ConcurrentLoginPermission(20, 10))
+        authAuthorities.add(TransferRatePermission(0, 0))
+
+        // Anonymous users get read-only access to prevent unauthorized file tampering on untrusted Wi-Fi
+        val anonAuthorities = mutableListOf<Authority>(
+            ConcurrentLoginPermission(20, 10),
+            TransferRatePermission(0, 0)
+        )
 
         if (!rootDirectory.exists()) {
             rootDirectory.mkdirs()
@@ -139,17 +168,17 @@ class ApacheFtpServerDaemon(
                 this.password = this@ApacheFtpServerDaemon.password
                 homeDirectory = rootDirectory.absolutePath
                 enabled = true
-                this.authorities = authorities
+                this.authorities = authAuthorities
             }
             userManager.save(authUser)
         }
 
-        // Configure Anonymous User
+        // Configure Anonymous User (Read-Only)
         val anonUser = BaseUser().apply {
             name = "anonymous"
             homeDirectory = rootDirectory.absolutePath
             enabled = allowAnonymous
-            this.authorities = authorities
+            this.authorities = anonAuthorities
         }
         userManager.save(anonUser)
 

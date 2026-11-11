@@ -11,9 +11,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -39,25 +36,21 @@ import com.troikoss.continuum_explorer.managers.SettingsManager
 import com.troikoss.continuum_explorer.rules.MiniAppRegistry
 import com.troikoss.continuum_explorer.utils.FileExplorerState
 import com.troikoss.continuum_explorer.utils.IconHelper
-import com.troikoss.continuum_explorer.utils.openInEdit
 import com.troikoss.continuum_explorer.utils.toUniversal
 import java.io.File
 import java.io.FileOutputStream
 
 /**
- * Minimalist Landing Page for every My Suite Studio:
+ * Desktop & Mobile optimized Landing Page for every My Suite Studio:
  * - Markor Text & Markdown Studio (`text_editor`)
  * - Code Studio (`code_studio`)
  * - CSV & Table Studio (`csv_editor`)
  * - PhotoEditor Studio (`image_studio`)
  *
  * Features:
- * 1. Unified 50.dp Flush Top Heading Bar with Triple-Line Menu button (`Icons.Default.Menu`),
- *    Back to My Suite button, List/Grid toggle, and Fullscreen toggle.
- * 2. Two primary action cards:
- *    - "Create New File" (with studio-specific format presets or blank canvas creation)
- *    - "Open Existing File to Edit" (launching the universal file picker filtered to that studio)
- * 3. Studio-filtered Recent Edited & Created files supporting both List and Grid layouts.
+ * 1. Lockable 50.dp Top Heading Bar with Back to My Suite button, Narrow-Window Icon-Only New/Open buttons,
+ *    Pin/Lock toggle, View Mode toggle, and Fullscreen toggle.
+ * 2. Desktop/DeX multi-column compact tile layout for Recent Studio Files (no stretched full-width rows).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -88,6 +81,7 @@ fun MiniAppLandingScreen(
     var showFilePicker by remember { mutableStateOf(false) }
     var showFolderPicker by remember { mutableStateOf(false) }
     var showCreateDialog by remember { mutableStateOf(false) }
+    val isHeaderPinned by SettingsManager.isSubpageHeaderPinned
 
     val studioExtensions = remember(toolId) {
         when (toolId) {
@@ -361,113 +355,177 @@ fun MiniAppLandingScreen(
 
     val isFullScreen by SettingsManager.isFullScreenTabBarHidden
 
-    Column(
+    BoxWithConstraints(
         modifier = modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.surface)
     ) {
-        // Unified 50.dp Flush Top Heading Bar with Single Clean Back Navigation Button
-        Surface(
-            color = MaterialTheme.colorScheme.surfaceContainer,
-            tonalElevation = 1.dp,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(50.dp)
-        ) {
-            Row(
+        val containerWidth = maxWidth
+        val isNarrowWindow = containerWidth < 560.dp
+        val isDesktopLayout = containerWidth >= 660.dp
+
+        Column(modifier = Modifier.fillMaxSize()) {
+            // --- LOCKABLE 50.dp TOP HEADING BAR ---
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceContainer,
+                tonalElevation = if (isHeaderPinned) 2.dp else 0.dp,
                 modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
+                    .fillMaxWidth()
+                    .height(50.dp)
             ) {
-                IconButton(
-                    onClick = onBackToSuite,
-                    modifier = Modifier.size(36.dp)
+                Row(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Back to My Suite",
-                        tint = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-
-                Spacer(modifier = Modifier.width(4.dp))
-
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = descriptor.accentColor.copy(alpha = 0.15f),
-                    modifier = Modifier.size(28.dp)
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
+                    IconButton(
+                        onClick = onBackToSuite,
+                        modifier = Modifier.size(36.dp)
+                    ) {
                         Icon(
-                            imageVector = descriptor.icon,
-                            contentDescription = null,
-                            tint = descriptor.accentColor,
-                            modifier = Modifier.size(16.dp)
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back to My Suite",
+                            tint = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(4.dp))
+
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = descriptor.accentColor.copy(alpha = 0.15f),
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = descriptor.icon,
+                                contentDescription = null,
+                                tint = descriptor.accentColor,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = descriptor.title,
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = descriptor.badge,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = descriptor.accentColor,
+                            maxLines = 1
+                        )
+                    }
+
+                    // Header Action Buttons (Icon-only in narrow window, labeled button in wide window)
+                    if (isNarrowWindow) {
+                        FilledTonalIconButton(
+                            onClick = { showCreateDialog = true },
+                            modifier = Modifier.size(34.dp),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.NoteAdd,
+                                contentDescription = "New File",
+                                modifier = Modifier.size(17.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(4.dp))
+                        OutlinedIconButton(
+                            onClick = { showFilePicker = true },
+                            modifier = Modifier.size(34.dp),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.FolderOpen,
+                                contentDescription = "Open File",
+                                modifier = Modifier.size(17.dp)
+                            )
+                        }
+                    } else {
+                        FilledTonalButton(
+                            onClick = { showCreateDialog = true },
+                            shape = RoundedCornerShape(10.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                            modifier = Modifier.height(32.dp)
+                        ) {
+                            Icon(Icons.Default.NoteAdd, contentDescription = null, modifier = Modifier.size(15.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("New File", style = MaterialTheme.typography.labelMedium)
+                        }
+                        Spacer(modifier = Modifier.width(6.dp))
+                        OutlinedButton(
+                            onClick = { showFilePicker = true },
+                            shape = RoundedCornerShape(10.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                            modifier = Modifier.height(32.dp)
+                        ) {
+                            Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(15.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Open", style = MaterialTheme.typography.labelMedium)
+                        }
+                    }
+
+                    // Pin / Lock Heading Bar Toggle
+                    IconButton(
+                        onClick = { SettingsManager.toggleSubpageHeaderPinned(context) },
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.PushPin,
+                            contentDescription = if (isHeaderPinned) "Header Locked on Top" else "Lock Header on Top",
+                            tint = if (isHeaderPinned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+
+                    IconButton(
+                        onClick = { isGridView = !isGridView },
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (isGridView) Icons.Default.ViewModule else Icons.Default.GridView,
+                            contentDescription = if (isGridView) "Switch to Compact Cards" else "Switch to Icon Grid",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(19.dp)
+                        )
+                    }
+
+                    IconButton(
+                        onClick = { SettingsManager.toggleFullScreenTabBar() },
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (isFullScreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
+                            contentDescription = "Fullscreen",
+                            tint = if (isFullScreen) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(19.dp)
                         )
                     }
                 }
-
-                Spacer(modifier = Modifier.width(8.dp))
-
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = descriptor.title,
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Text(
-                        text = descriptor.badge,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = descriptor.accentColor,
-                        maxLines = 1
-                    )
-                }
-
-                IconButton(
-                    onClick = { isGridView = !isGridView },
-                    modifier = Modifier.size(36.dp)
-                ) {
-                    Icon(
-                        imageVector = if (isGridView) Icons.Default.ViewList else Icons.Default.GridView,
-                        contentDescription = if (isGridView) "Switch to List View" else "Switch to Grid View",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(19.dp)
-                    )
-                }
-
-                IconButton(
-                    onClick = { SettingsManager.toggleFullScreenTabBar() },
-                    modifier = Modifier.size(36.dp)
-                ) {
-                    Icon(
-                        imageVector = if (isFullScreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
-                        contentDescription = "Fullscreen",
-                        tint = if (isFullScreen) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(19.dp)
-                    )
-                }
             }
-        }
 
-        HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
-
-        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-            val isWide = maxWidth >= 640.dp
+            HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
 
             LazyColumn(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(horizontal = 14.dp),
                 contentPadding = PaddingValues(vertical = 14.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp)
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 // Hero Action Cards: Create New vs Open File to Edit
                 item {
-                    if (isWide) {
+                    if (isDesktopLayout) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -572,7 +630,11 @@ fun MiniAppLandingScreen(
                         }
                     }
                 } else if (isGridView) {
-                    val columns = if (isWide) 4 else 2
+                    val columns = when {
+                        containerWidth >= 980.dp -> 5
+                        isDesktopLayout -> 4
+                        else -> 2
+                    }
                     val chunked = recentStudioFiles.chunked(columns)
                     items(chunked) { rowItems ->
                         Row(
@@ -592,7 +654,7 @@ fun MiniAppLandingScreen(
                                     Column(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .padding(12.dp),
+                                            .padding(10.dp),
                                         horizontalAlignment = Alignment.CenterHorizontally,
                                         verticalArrangement = Arrangement.spacedBy(6.dp)
                                     ) {
@@ -630,69 +692,90 @@ fun MiniAppLandingScreen(
                         }
                     }
                 } else {
-                    items(recentStudioFiles, key = { it.first.absolutePath }) { (record, uFile) ->
-                        val relativeTime = remember(record.timestamp) {
-                            DateUtils.getRelativeTimeSpanString(
-                                record.timestamp,
-                                System.currentTimeMillis(),
-                                DateUtils.MINUTE_IN_MILLIS
-                            ).toString()
-                        }
-                        OutlinedCard(
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    val f = File(record.absolutePath)
-                                    if (f.exists()) onOpenFileInStudio(f)
-                                }
+                    // Multi-column compact tiles on Desktop/DeX (2 or 3 columns, never stretched full-width rows)
+                    val cols = when {
+                        containerWidth >= 1020.dp -> 3
+                        isDesktopLayout -> 2
+                        else -> 1
+                    }
+                    val chunked = recentStudioFiles.chunked(cols)
+                    items(chunked) { rowItems ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(12.dp)
-                            ) {
-                                Box(
+                            rowItems.forEach { (record, uFile) ->
+                                val relativeTime = remember(record.timestamp) {
+                                    DateUtils.getRelativeTimeSpanString(
+                                        record.timestamp,
+                                        System.currentTimeMillis(),
+                                        DateUtils.MINUTE_IN_MILLIS
+                                    ).toString()
+                                }
+                                OutlinedCard(
+                                    shape = RoundedCornerShape(10.dp),
                                     modifier = Modifier
-                                        .size(36.dp)
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(MaterialTheme.colorScheme.surfaceVariant),
-                                    contentAlignment = Alignment.Center
+                                        .weight(1f)
+                                        .clickable {
+                                            val f = File(record.absolutePath)
+                                            if (f.exists()) onOpenFileInStudio(f)
+                                        }
                                 ) {
-                                    IconHelper.FileThumbnail(
-                                        file = uFile,
-                                        iconSize = 32.dp,
-                                        modifier = Modifier.size(32.dp)
-                                    )
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(34.dp)
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(MaterialTheme.colorScheme.surfaceVariant),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            IconHelper.FileThumbnail(
+                                                file = uFile,
+                                                iconSize = 28.dp,
+                                                modifier = Modifier.size(28.dp)
+                                            )
+                                        }
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = record.fileName,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                fontWeight = FontWeight.SemiBold,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            Text(
+                                                text = "${Formatter.formatFileSize(context, uFile.length)} • $relativeTime",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                        IconButton(
+                                            onClick = {
+                                                val f = File(record.absolutePath)
+                                                if (f.exists()) onOpenFileInStudio(f)
+                                            },
+                                            modifier = Modifier.size(28.dp)
+                                        ) {
+                                            Icon(
+                                                Icons.Default.Edit,
+                                                contentDescription = "Edit",
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                    }
                                 }
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = record.fileName,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        fontWeight = FontWeight.Medium,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    Text(
-                                        text = "${Formatter.formatFileSize(context, uFile.length)} • $relativeTime",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                                FilledTonalButton(
-                                    onClick = {
-                                        val f = File(record.absolutePath)
-                                        if (f.exists()) onOpenFileInStudio(f)
-                                    },
-                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
-                                    modifier = Modifier.height(28.dp)
-                                ) {
-                                    Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(13.dp))
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Edit", style = MaterialTheme.typography.labelSmall)
-                                }
+                            }
+                            repeat(cols - rowItems.size) {
+                                Spacer(modifier = Modifier.weight(1f))
                             }
                         }
                     }

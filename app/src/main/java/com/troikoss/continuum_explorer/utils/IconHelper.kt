@@ -11,6 +11,7 @@ import android.graphics.drawable.Drawable
 import android.os.ParcelFileDescriptor
 import coil.compose.AsyncImage
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
@@ -77,7 +78,8 @@ object IconHelper {
         modifier: Modifier = Modifier,
         iconSize: Dp = 24.dp,
         tint: Color = MaterialTheme.colorScheme.secondary,
-        contentScale: ContentScale = ContentScale.Fit
+        contentScale: ContentScale = ContentScale.Fit,
+        fillBounds: Boolean = false
     ) {
         val fallbackIcon = getIconForItem(file)
 
@@ -90,7 +92,7 @@ object IconHelper {
                     AsyncImage(
                         model = if (file.provider.capabilities.isRemote) file else (file.documentFileRef?.uri ?: file.fileRef?.absolutePath),
                         contentDescription = null,
-                        modifier = modifier.size(iconSize),
+                        modifier = if (fillBounds) modifier.fillMaxSize() else modifier.size(iconSize),
                         contentScale = contentScale,
                     )
                 }
@@ -112,8 +114,9 @@ object IconHelper {
         isSelected: Boolean = false,
         contentSize: Dp,
         contentScale: ContentScale = ContentScale.Fit,
+        fillBounds: Boolean = false
     ) {
-        Box(modifier = modifier) {
+        Box(modifier = modifier, contentAlignment = Alignment.Center) {
             if (file.isDirectory) {
                 FolderIcon(
                     folder = file,
@@ -126,7 +129,8 @@ object IconHelper {
                     tint = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary,
                     iconSize = contentSize,
                     contentScale = contentScale,
-                    modifier = Modifier.align(Alignment.Center)
+                    fillBounds = fillBounds,
+                    modifier = if (fillBounds) Modifier.fillMaxSize() else Modifier.align(Alignment.Center)
                 )
             }
         }

@@ -534,12 +534,14 @@ class FileExplorerState(
             archiveCache = null
         }
 
-        // Resolve sort params early so files are sorted correctly during IO work.
-        // ViewMode/gridSize/columnVisibility are resolved together with the file list
-        // assignment so they never change before the new list is visible.
         val key = getCurrentStorageKey()
-        folderConfigs.resolveSortParams(key)
-        folderConfigs.resolveShowHiddenFiles(key)
+        withContext(Dispatchers.Main) {
+            folderConfigs.resolveViewMode(key)
+            folderConfigs.resolveGridSize(key)
+            folderConfigs.resolveGridColumnCount(key)
+            folderConfigs.resolveSortParams(key)
+            folderConfigs.resolveShowHiddenFiles(key)
+        }
 
         val sortParams = folderConfigs.sortParams
         val showHidden = folderConfigs.showHiddenFiles
@@ -553,8 +555,8 @@ class FileExplorerState(
                     LibraryItem.ExternalFtp -> emptyList()
                     LibraryItem.Gallery -> when {
                         currentPath != null -> GalleryManager.getAlbumContents(context, currentPath!!.absolutePath)
-                        appConfigs.isGalleryAlbumsEnabled -> GalleryManager.getGalleryAlbums(context)
-                        else -> GalleryManager.getGalleryFiles(context)
+                        appConfigs.isGalleryAlbumsEnabled -> GalleryManager.getGalleryAlbums(context, forceRefresh)
+                        else -> GalleryManager.getGalleryFiles(context, forceRefresh)
                     }
                     LibraryItem.RecycleBin -> if (currentPath != null) {
                         val trashRoot = File(Environment.getExternalStorageDirectory(), ".Trash")

@@ -1,5 +1,6 @@
 package com.troikoss.continuum_explorer.utils
 
+import com.troikoss.continuum_explorer.model.LibraryItem
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 
@@ -13,6 +14,9 @@ object GlobalEvents {
     private val _configChangeEvent = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     val configChangeEvent = _configChangeEvent.asSharedFlow()
 
+    private val _openLibraryItemEvent = MutableSharedFlow<LibraryItem>(extraBufferCapacity = 1)
+    val openLibraryItemEvent = _openLibraryItemEvent.asSharedFlow()
+
     /**
      * Triggers a refresh across all active file explorer windows for file contents.
      */
@@ -25,5 +29,12 @@ object GlobalEvents {
      */
     fun triggerConfigUpdate() {
         _configChangeEvent.tryEmit(Unit)
+    }
+
+    /**
+     * Navigates the active FileExplorer window to a specific LibraryItem (such as Server Hub).
+     */
+    fun requestOpenLibraryItem(item: LibraryItem) {
+        _openLibraryItemEvent.tryEmit(item)
     }
 }

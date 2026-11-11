@@ -241,9 +241,10 @@ fun FileConverterScreen(
             .background(MaterialTheme.colorScheme.surface)
     ) {
         // Unified 50.dp Flush Top Heading Bar with Triple-Line Menu Button on Left
+        val isHeaderPinned by SettingsManager.isSubpageHeaderPinned
         Surface(
             color = MaterialTheme.colorScheme.surfaceContainer,
-            tonalElevation = 1.dp,
+            tonalElevation = if (isHeaderPinned) 2.dp else 0.dp,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(50.dp)
@@ -309,6 +310,18 @@ fun FileConverterScreen(
                 )
 
                 Spacer(modifier = Modifier.width(4.dp))
+
+                IconButton(
+                    onClick = { SettingsManager.toggleSubpageHeaderPinned(context) },
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.PushPin,
+                        contentDescription = if (isHeaderPinned) "Header Locked on Top" else "Lock Header on Top",
+                        tint = if (isHeaderPinned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
 
                 IconButton(
                     onClick = { SettingsManager.toggleFullScreenTabBar() },

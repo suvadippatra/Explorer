@@ -130,6 +130,13 @@ class KtorEmbeddedServer(
 
                 get("/api/syncplay/stream") {
                     val state = SyncPlayManager.roomState.value
+                    val providedPinHash = call.request.queryParameters["pin"] ?: ""
+                    val providedRawPass = call.request.queryParameters["passcode"] ?: ""
+                    val expectedPinHash = state.passcode.hashCode().toString()
+                    if (state.requiresPasscode && providedPinHash != expectedPinHash && providedRawPass != state.passcode) {
+                        call.respondText("SyncPlay Passcode Required", status = HttpStatusCode.Forbidden)
+                        return@get
+                    }
                     val file = if (state.isActive && state.mediaFilePath.isNotBlank()) File(state.mediaFilePath) else null
                     if (file == null || !file.exists() || !file.isFile) {
                         call.respondText("No active SyncPlay media file", status = HttpStatusCode.NotFound)
@@ -210,17 +217,50 @@ class KtorEmbeddedServer(
                 // --- 1. ROOT PORTAL OR SELF-HOSTED WEBSITE ENTRY ---
                 get("/") {
                     val clientIp = call.request.origin.remoteHost
-                    val hostedMode = SettingsManager.ftpHostedMode.value
-                    val customPath = SettingsManager.ftpHostedPath.value
+                    val websitePath = SettingsManager.httpWebsitePath.value.ifBlank {
+                        if (SettingsManager.ftpHostedMode.value == FtpHostedMode.CUSTOM_FOLDER) {
+                            SettingsManager.ftpHostedPath.value
+                        } else ""
+                    }
                     val subPath = call.request.queryParameters["path"] ?: ""
                     val forcePortal = call.request.queryParameters["portal"] == "1"
                     val initialTab = call.request.queryParameters["tab"] ?: "files"
 
+                    call.response.header("X-Content-Type-Options", "nosniff")
+                    call.response.header("X-Frame-Options", "SAMEORIGIN")
+                    call.response.header("Referrer-Policy", "no-referrer")
+
+                    // Optional PIN Gate for Untrusted Wi-Fi Networks
+                    if (SettingsManager.httpWebsiteRequireAuth.value) {
+                        val expectedPin = SettingsManager.httpWebsiteAccessPin.value
+                        val queryPin = call.request.queryParameters["pin"] ?: ""
+                        val cookiePin = call.request.cookies["continuum_http_pin"] ?: ""
+                        if (queryPin == expectedPin) {
+                            call.response.cookies.append("continuum_http_pin", expectedPin, path = "/", maxAge = 86400L)
+                        } else if (cookiePin != expectedPin) {
+                            call.respondText(
+                                """
+                                <!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+                                <title>Secure Network Access Gate</title>
+                                <style>body{background:#0f1117;color:#f1f5f9;font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0}
+                                .card{background:#181b24;border:1px solid #2e3446;border-radius:18px;padding:28px;max-width:360px;width:90%;text-align:center;box-shadow:0 16px 40px rgba(0,0,0,0.45)}
+                                input{width:100%;box-sizing:border-box;padding:12px 14px;border-radius:10px;border:1px solid #3b4258;background:#0f1117;color:#fff;font-size:16px;margin:14px 0;text-align:center;letter-spacing:3px}
+                                button{width:100%;padding:12px;border-radius:10px;border:none;background:#6366f1;color:#fff;font-weight:700;font-size:15px;cursor:pointer}</style>
+                                </head><body><div class="card"><h2>🔒 Protected Host</h2><p style="color:#94a3b8;font-size:13px">Untrusted Wi-Fi protection is active. Enter the Host Access PIN to continue.</p>
+                                <form method="GET" action="/"><input type="password" name="pin" placeholder="Enter Host PIN" required autofocus><button type="submit">Unlock Secure Session</button></form></div></body></html>
+                                """.trimIndent(),
+                                ContentType.Text.Html,
+                                HttpStatusCode.Unauthorized
+                            )
+                            return@get
+                        }
+                    }
+
                     ContinuumHubService.recordLog(clientIp, "HTTP", "GET /", if (subPath.isEmpty()) "Root" else subPath)
 
-                    if (hostedMode == FtpHostedMode.CUSTOM_FOLDER && customPath.isNotBlank() && !forcePortal && subPath.isEmpty()) {
-                        val selectedTarget = File(customPath)
-                        if (selectedTarget.exists()) {
+                    if (websitePath.isNotBlank() && !forcePortal && subPath.isEmpty() && !call.request.queryParameters.contains("tab")) {
+                        val selectedTarget = File(websitePath)
+                        if (selectedTarget.exists() && !isBlockedSystemPath(selectedTarget)) {
                             val htmlFile: File? = when {
                                 selectedTarget.isFile && (selectedTarget.name.endsWith(".html", true) || selectedTarget.name.endsWith(".htm", true)) -> selectedTarget
                                 selectedTarget.isDirectory -> {
@@ -339,32 +379,31 @@ class KtorEmbeddedServer(
                         val body = JSONObject(call.receiveText())
                         val rawName = body.optString("fileName", "Remote_Note.md").trim()
                         val content = body.optString("content", "")
-                        val targetHostPath = body.optString("targetPath", "").trim()
-                        val safeName = File(rawName).name.ifBlank { "Remote_Note.md" }
-
-                        val outFile = if (targetHostPath.isNotBlank() && SettingsManager.ftpAllowUpload.value) {
-                            val candidate = File(targetHostPath)
-                            if (candidate.exists() && candidate.isFile && isFileAccessPermitted(candidate)) candidate
-                            else {
-                                val outDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "ContinuumSuite")
-                                if (!outDir.exists()) outDir.mkdirs()
-                                File(outDir, safeName)
-                            }
-                        } else {
-                            val outDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "ContinuumSuite")
-                            if (!outDir.exists()) outDir.mkdirs()
-                            File(outDir, safeName)
+                        if (content.length > 2 * 1024 * 1024) {
+                            val err = JSONObject().put("success", false).put("message", "Content exceeds 2 MB sandbox limit.")
+                            call.respondText(err.toString(), ContentType.Application.Json, HttpStatusCode.BadRequest)
+                            return@post
                         }
+                        val sanitizedName = sanitizeUploadedFileName(File(rawName).name.ifBlank { "Remote_Note.md" })
+                        if (isBlockedExecutableName(sanitizedName)) {
+                            val err = JSONObject().put("success", false).put("message", "Executable or script file types are blocked in Mini-Apps Sandbox.")
+                            call.respondText(err.toString(), ContentType.Application.Json, HttpStatusCode.Forbidden)
+                            return@post
+                        }
+
+                        // Isolated Sandbox: Remote browser mini-apps write strictly inside MiniAppsSandbox so host files cannot be modified or infected
+                        val sandboxDir = getMiniAppsSandboxDirectory()
+                        val outFile = File(sandboxDir, sanitizedName)
 
                         withContext(Dispatchers.IO) {
                             outFile.writeText(content)
                         }
 
-                        ContinuumHubService.recordLog(clientIp, "HTTP", "MINIAPP_SAVE", outFile.name, outFile.length())
+                        ContinuumHubService.recordLog(clientIp, "HTTP", "SANDBOX_SAVE", outFile.name, outFile.length())
                         val res = JSONObject()
                             .put("success", true)
                             .put("path", outFile.absolutePath)
-                            .put("message", "Saved to ${outFile.absolutePath}")
+                            .put("message", "Saved in isolated MiniAppsSandbox: ${outFile.name}")
                         call.respondText(res.toString(), ContentType.Application.Json)
                     } catch (e: Exception) {
                         val err = JSONObject().put("success", false).put("message", "Save error: ${e.message}")
@@ -383,7 +422,7 @@ class KtorEmbeddedServer(
                         val body = JSONObject(call.receiveText())
                         val sourcePath = body.optString("sourcePath", "").trim()
                         val targetFormat = body.optString("targetFormat", "pdf").trim().lowercase(Locale.ROOT)
-                        val maxKb = body.optInt("maxKb", 0)
+                            .replace(Regex("[^a-z0-9]"), "")
 
                         val srcFile = File(sourcePath)
                         if (!srcFile.exists() || !srcFile.isFile || !isFileAccessPermitted(srcFile)) {
@@ -392,10 +431,12 @@ class KtorEmbeddedServer(
                             return@post
                         }
 
-                        val outDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "ContinuumConverted")
-                        if (!outDir.exists()) outDir.mkdirs()
+                        val outDir = File(getMiniAppsSandboxDirectory(), "Converted").apply {
+                            if (!exists()) mkdirs()
+                        }
 
-                        val outFile = File(outDir, "${srcFile.nameWithoutExtension}_converted.$targetFormat")
+                        val safeBase = sanitizeUploadedFileName(srcFile.nameWithoutExtension)
+                        val outFile = File(outDir, "${safeBase}_converted.$targetFormat")
                         val tuning = ConversionTuningConfig()
                         val category = ConversionFormatMatrix.resolveCategory(srcFile.extension)
                         val result: Result<File> = withContext(Dispatchers.IO) {
@@ -409,13 +450,13 @@ class KtorEmbeddedServer(
                         val generatedFile = result.getOrNull()
                         if (result.isSuccess && generatedFile != null && generatedFile.exists()) {
                             FtpBucketManager.addItem(appContext, generatedFile)
-                            ContinuumHubService.recordLog(clientIp, "HTTP", "MINIAPP_CONVERT", "${srcFile.name} -> ${generatedFile.name}", generatedFile.length())
+                            ContinuumHubService.recordLog(clientIp, "HTTP", "SANDBOX_CONVERT", "${srcFile.name} -> ${generatedFile.name}", generatedFile.length())
                             val encPath = URLEncoder.encode(generatedFile.absolutePath, "UTF-8")
                             val res = JSONObject()
                                 .put("success", true)
                                 .put("outputPath", generatedFile.absolutePath)
                                 .put("downloadUrl", "/download?path=$encPath")
-                                .put("message", "Converted: ${generatedFile.name} (${formatSize(generatedFile.length())})")
+                                .put("message", "Converted in Sandbox: ${generatedFile.name} (${formatSize(generatedFile.length())})")
                             call.respondText(res.toString(), ContentType.Application.Json)
                         } else {
                             val err = JSONObject().put("success", false).put("message", result.exceptionOrNull()?.message ?: "Conversion failed")
@@ -578,14 +619,16 @@ class KtorEmbeddedServer(
                                 }
                                 is PartData.FileItem -> {
                                     val originalName = part.originalFileName?.takeIf { it.isNotBlank() } ?: "uploaded_${System.currentTimeMillis()}"
-                                    val safeName = File(originalName).name
-                                    val tempFile = File(appContext.cacheDir, "upload_${System.currentTimeMillis()}_$safeName")
-                                    part.streamProvider().use { input ->
-                                        tempFile.outputStream().buffered().use { output ->
-                                            input.copyTo(output)
+                                    val safeName = sanitizeUploadedFileName(File(originalName).name)
+                                    if (!isBlockedExecutableName(safeName)) {
+                                        val tempFile = File(appContext.cacheDir, "upload_${System.currentTimeMillis()}_$safeName")
+                                        part.streamProvider().use { input ->
+                                            tempFile.outputStream().buffered().use { output ->
+                                                input.copyTo(output)
+                                            }
                                         }
+                                        tempFiles.add(safeName to tempFile)
                                     }
-                                    tempFiles.add(safeName to tempFile)
                                 }
                                 else -> {}
                             }
@@ -600,9 +643,20 @@ class KtorEmbeddedServer(
                             return@post
                         }
 
+                        if (tempFiles.isEmpty()) {
+                            val err = JSONObject().put("success", false).put("message", "No valid files uploaded (executable/script files are blocked for security).")
+                            call.respondText(err.toString(), ContentType.Application.Json, HttpStatusCode.BadRequest)
+                            return@post
+                        }
+
+                        // Strictly isolate uploads into the configured upload folder (or validated sub-folder inside it)
+                        val canonicalBaseUpload = baseUploadDir.canonicalPath
                         val destDir = if (targetSubDir.isNotBlank()) {
                             val candidate = File(targetSubDir)
-                            if (candidate.exists() && candidate.isDirectory && isFileAccessPermitted(candidate) && candidate.canWrite()) {
+                            if (candidate.exists() && candidate.isDirectory &&
+                                candidate.canonicalPath.startsWith(canonicalBaseUpload) &&
+                                candidate.canWrite()
+                            ) {
                                 candidate
                             } else baseUploadDir
                         } else baseUploadDir
@@ -633,7 +687,7 @@ class KtorEmbeddedServer(
 
                         val ok = JSONObject()
                             .put("success", true)
-                            .put("message", "Uploaded ${savedFileNames.size} file(s) to ${destDir.absolutePath}")
+                            .put("message", "Securely uploaded ${savedFileNames.size} file(s) to ${destDir.absolutePath}")
                         call.respondText(ok.toString(), ContentType.Application.Json)
                     } catch (e: Exception) {
                         Log.e("KtorEmbeddedServer", "Upload failed", e)
@@ -648,22 +702,28 @@ class KtorEmbeddedServer(
                 get("/{path...}") {
                     val segments = call.parameters.getAll("path") ?: emptyList()
                     val relPath = segments.joinToString("/")
-                    val hostedMode = SettingsManager.ftpHostedMode.value
-                    val customPath = SettingsManager.ftpHostedPath.value
+                    val websitePath = SettingsManager.httpWebsitePath.value.ifBlank {
+                        if (SettingsManager.ftpHostedMode.value == FtpHostedMode.CUSTOM_FOLDER) {
+                            SettingsManager.ftpHostedPath.value
+                        } else ""
+                    }
 
-                    if (hostedMode == FtpHostedMode.CUSTOM_FOLDER && customPath.isNotBlank()) {
-                        val selectedTarget = File(customPath)
+                    call.response.header("X-Content-Type-Options", "nosniff")
+                    call.response.header("X-Frame-Options", "SAMEORIGIN")
+
+                    if (websitePath.isNotBlank()) {
+                        val selectedTarget = File(websitePath)
                         val rootDir = when {
                             !selectedTarget.exists() -> null
                             selectedTarget.isDirectory -> selectedTarget
                             selectedTarget.isFile -> selectedTarget.parentFile
                             else -> null
                         }
-                        if (rootDir != null && rootDir.exists()) {
+                        if (rootDir != null && rootDir.exists() && !isBlockedSystemPath(rootDir)) {
                             val requested = File(rootDir, relPath)
                             val rootCanonical = rootDir.canonicalPath
                             val reqCanonical = requested.canonicalPath
-                            if (reqCanonical.startsWith(rootCanonical) && requested.exists()) {
+                            if (reqCanonical.startsWith(rootCanonical) && requested.exists() && !isBlockedSystemPath(requested)) {
                                 if (requested.isDirectory) {
                                     val idx = File(requested, "index.html").takeIf { it.exists() }
                                         ?: File(requested, "index.htm").takeIf { it.exists() }
@@ -719,6 +779,8 @@ class KtorEmbeddedServer(
         val fileLength = file.length()
         val contentType = ContentType.defaultForFile(file)
         response.header(HttpHeaders.AcceptRanges, "bytes")
+        response.header(HttpHeaders.CacheControl, "public, max-age=3600")
+        response.header("X-Content-Type-Options", "nosniff")
         if (!inline) {
             response.header(
                 HttpHeaders.ContentDisposition,
@@ -761,7 +823,7 @@ class KtorEmbeddedServer(
             respondOutputStream(contentType = contentType, status = HttpStatusCode.PartialContent) {
                 RandomAccessFile(file, "r").use { raf ->
                     raf.seek(start)
-                    val buffer = ByteArray(64 * 1024)
+                    val buffer = ByteArray(128 * 1024)
                     var remaining = contentLength
                     while (remaining > 0L) {
                         val toRead = minOf(buffer.size.toLong(), remaining).toInt()
@@ -778,6 +840,37 @@ class KtorEmbeddedServer(
         }
     }
 
+    private fun getMiniAppsSandboxDirectory(): File {
+        val suiteDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "ContinuumSuite")
+        val sandboxDir = File(suiteDir, "MiniAppsSandbox")
+        if (!sandboxDir.exists()) sandboxDir.mkdirs()
+        return sandboxDir
+    }
+
+    private fun sanitizeUploadedFileName(rawName: String): String {
+        val cleaned = rawName.replace(Regex("[^a-zA-Z0-9._\\- ()]"), "_").trim('.')
+        return cleaned.ifBlank { "file_${System.currentTimeMillis()}" }
+    }
+
+    private fun isBlockedExecutableName(fileName: String): Boolean {
+        val lower = fileName.lowercase(Locale.ROOT)
+        val blockedExts = setOf(
+            ".sh", ".bat", ".cmd", ".exe", ".msi", ".dex", ".so", ".elf",
+            ".scr", ".vbs", ".ps1", ".jar", ".apk", ".php", ".jsp", ".cgi"
+        )
+        return blockedExts.any { lower.endsWith(it) }
+    }
+
+    private fun isBlockedSystemPath(file: File): Boolean {
+        return try {
+            val c = file.canonicalPath
+            c.startsWith("/proc") || c.startsWith("/sys") || c.startsWith("/dev") ||
+                c.startsWith("/system") || c.startsWith("/data/data") || c.startsWith("/data/user")
+        } catch (_: Exception) {
+            true
+        }
+    }
+
     private fun getRootSharedFiles(): List<File> {
         FtpBucketManager.initialize(appContext)
         val mode = SettingsManager.ftpHostedMode.value
@@ -786,14 +879,14 @@ class KtorEmbeddedServer(
         return when (mode) {
             FtpHostedMode.BATCH_FILES -> {
                 FtpBucketManager.bucketItems.mapNotNull { item ->
-                    File(item.absolutePath).takeIf { it.exists() }
+                    File(item.absolutePath).takeIf { it.exists() && !isBlockedSystemPath(it) }
                 }
             }
             FtpHostedMode.CUSTOM_FOLDER -> {
                 if (customPath.isNotBlank()) {
                     val f = File(customPath)
                     val dir = if (f.exists() && f.isFile) f.parentFile else f
-                    if (dir != null && dir.exists()) {
+                    if (dir != null && dir.exists() && !isBlockedSystemPath(dir)) {
                         dir.listFiles()?.toList() ?: emptyList()
                     } else emptyList()
                 } else emptyList()
@@ -806,7 +899,13 @@ class KtorEmbeddedServer(
 
     private fun collectSharedFileCandidates(maxCount: Int = 200): List<File> {
         val results = LinkedHashMap<String, File>()
-        // Include files in /Documents/ContinuumSuite/
+        // Include files in isolated MiniAppsSandbox first
+        val sandboxDir = getMiniAppsSandboxDirectory()
+        if (sandboxDir.exists() && sandboxDir.isDirectory) {
+            sandboxDir.listFiles()?.filter { it.isFile }?.sortedByDescending { it.lastModified() }?.forEach { f ->
+                if (results.size < maxCount) results[f.absolutePath] = f
+            }
+        }
         val suiteDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "ContinuumSuite")
         if (suiteDir.exists() && suiteDir.isDirectory) {
             suiteDir.listFiles()?.filter { it.isFile }?.sortedByDescending { it.lastModified() }?.forEach { f ->
@@ -831,13 +930,22 @@ class KtorEmbeddedServer(
 
     private fun isFileAccessPermitted(target: File): Boolean {
         return try {
+            if (isBlockedSystemPath(target)) return false
             val targetCanonical = target.canonicalPath
+            val sandboxDir = getMiniAppsSandboxDirectory()
             val suiteDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "ContinuumSuite")
             val convDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "ContinuumConverted")
+            if (sandboxDir.exists() && targetCanonical.startsWith(sandboxDir.canonicalPath)) return true
             if (suiteDir.exists() && targetCanonical.startsWith(suiteDir.canonicalPath)) return true
             if (convDir.exists() && targetCanonical.startsWith(convDir.canonicalPath)) return true
             val syncMediaPath = SyncPlayManager.roomState.value.mediaFilePath
             if (syncMediaPath.isNotBlank() && File(syncMediaPath).canonicalPath == targetCanonical) return true
+            val websitePath = SettingsManager.httpWebsitePath.value
+            if (websitePath.isNotBlank()) {
+                val webTarget = File(websitePath)
+                val webBase = if (webTarget.isFile) webTarget.parentFile else webTarget
+                if (webBase != null && webBase.exists() && targetCanonical.startsWith(webBase.canonicalPath)) return true
+            }
 
             val mode = SettingsManager.ftpHostedMode.value
             val customPath = SettingsManager.ftpHostedPath.value
@@ -3035,12 +3143,19 @@ class KtorEmbeddedServer(
 
                             if (currentStreamUrl !== state.streamUrl) {
                                 currentStreamUrl = state.streamUrl;
-                                media.src = state.streamUrl;
-                                media.load();
+                                if (state.streamUrl) {
+                                    media.preload = 'auto';
+                                    media.src = state.streamUrl;
+                                    media.load();
+                                } else {
+                                    media.pause();
+                                    media.removeAttribute('src');
+                                    media.load();
+                                }
                             }
 
                             const targetSpeed = parseFloat(state.playbackSpeed || 1.0);
-                            if (Math.abs(media.playbackRate - targetSpeed) > 0.01) {
+                            if (state.type !== 'HEARTBEAT' && Math.abs(media.playbackRate - targetSpeed) > 0.01) {
                                 media.playbackRate = targetSpeed;
                             }
                             if (speedSel) speedSel.value = targetSpeed.toString();
@@ -3063,21 +3178,21 @@ class KtorEmbeddedServer(
                                 // Compute exact target position at execution instant
                                 const targetSec = (state.basePositionMs || 0) / 1000.0;
 
-                                // Pre-seek immediately during the lead window so buffer is warm at execution millisecond
-                                if (Math.abs((media.currentTime || 0) - targetSec) > 0.06) {
+                                // Pre-seek only if difference exceeds 250ms so buffer is not flushed unnecessarily
+                                if (Math.abs((media.currentTime || 0) - targetSec) > 0.25) {
                                     try { media.currentTime = targetSec; } catch (e) {}
                                 }
 
                                 const waitMs = Math.max(2, Math.min(1000, delayMs));
                                 scheduledTimerId = setTimeout(() => {
                                     scheduledTimerId = null;
-                                    if (state.isPlaying) {
+                                    media.playbackRate = targetSpeed;
+                                    if (state.isPlaying && state.streamUrl) {
                                         const compensatedSec = ((state.basePositionMs || 0) + Math.max(0, estimatedServerNow() - Math.max(execAt, state.stateUpdatedAtServerEpochMs || execAt)) * targetSpeed) / 1000.0;
-                                        if (Math.abs((media.currentTime || 0) - compensatedSec) > 0.08) {
+                                        if (Math.abs((media.currentTime || 0) - compensatedSec) > 0.35) {
                                             try { media.currentTime = compensatedSec; } catch (e) {}
                                         }
                                         media.play().catch(() => {
-                                            // Browser autoplay policy fallback: mute and play
                                             media.muted = true;
                                             const muteBtn = document.getElementById('btnSyncMute');
                                             if (muteBtn) muteBtn.innerText = '🔇 Unmute';
@@ -3085,22 +3200,48 @@ class KtorEmbeddedServer(
                                         });
                                     } else {
                                         media.pause();
-                                        try { media.currentTime = targetSec; } catch (e) {}
+                                        if (Math.abs((media.currentTime || 0) - targetSec) > 0.15) {
+                                            try { media.currentTime = targetSec; } catch (e) {}
+                                        }
                                     }
                                 }, waitMs);
                             } else if (state.type === 'HEARTBEAT') {
-                                // Smooth drift correction during continuous playback
-                                if (state.isPlaying && !media.paused) {
+                                // Zero-freeze continuous drift correction:
+                                // Use gentle playbackRate micro-nudging (±3%) for small drift instead of media.currentTime hard-seeking,
+                                // which avoids flushing the browser's video decode buffer and prevents periodic playback freezes.
+                                if (state.isPlaying && state.streamUrl) {
+                                    if (media.paused && media.readyState >= 2) {
+                                        media.play().catch(() => {});
+                                    }
                                     const anchor = Math.max(state.executeAtServerEpochMs || 0, state.stateUpdatedAtServerEpochMs || srvNow);
                                     const expectedMs = (state.basePositionMs || 0) + Math.max(0, srvNow - anchor) * targetSpeed;
                                     const actualMs = (media.currentTime || 0) * 1000.0;
                                     const driftMs = actualMs - expectedMs;
-                                    if (Math.abs(driftMs) > 280) {
+                                    const absDrift = Math.abs(driftMs);
+
+                                    if (absDrift > 2800) {
+                                        // Only hard-seek when drift exceeds 2.8 seconds
+                                        media.playbackRate = targetSpeed;
                                         try { media.currentTime = expectedMs / 1000.0; } catch (e) {}
+                                    } else if (absDrift > 320) {
+                                        // Smoothly nudge playback rate by ±3% without re-buffering
+                                        const nudgeFactor = driftMs > 0 ? 0.97 : 1.03;
+                                        const nudgedRate = Math.max(0.25, Math.min(3.0, +(targetSpeed * nudgeFactor).toFixed(3)));
+                                        if (Math.abs(media.playbackRate - nudgedRate) > 0.005) {
+                                            media.playbackRate = nudgedRate;
+                                        }
+                                    } else if (Math.abs(media.playbackRate - targetSpeed) > 0.005) {
+                                        media.playbackRate = targetSpeed;
                                     }
                                 } else if (!state.isPlaying && !media.paused) {
+                                    media.playbackRate = targetSpeed;
                                     media.pause();
                                 }
+                            } else if (state.type === 'STOP') {
+                                media.pause();
+                                media.removeAttribute('src');
+                                media.load();
+                                currentStreamUrl = '';
                             }
                         }
 

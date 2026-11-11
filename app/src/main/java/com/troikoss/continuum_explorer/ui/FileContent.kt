@@ -140,8 +140,6 @@ fun FileContent(appState: FileExplorerState) {
         derivedStateOf {
             if (viewMode == ViewMode.DETAILS || viewMode == ViewMode.CONTENT) {
                 1
-            } else if (viewMode == ViewMode.GRID) {
-                3
             } else {
                 val visibleItems = gridState.layoutInfo.visibleItemsInfo
                 if (visibleItems.isNotEmpty()) {
@@ -151,11 +149,11 @@ fun FileContent(appState: FileExplorerState) {
                     // Fallback to mathematical estimation before first layout pass
                     val width = containerCoordinates?.size?.width ?: 0
                     if (width > 0) {
-                        val totalPaddingPx = with(density) { 64.dp.toPx() } // 32.dp * 2 padding
-                        val gridItemSizePx = with(density) { appState.folderConfigs.gridItemSize.dp.toPx() }
+                        val totalPaddingPx = with(density) { 16.dp.toPx() }
+                        val gridItemSizePx = with(density) { appState.folderConfigs.gridItemSize.dp.coerceIn(96.dp, 220.dp).toPx() }
                         val availableGridWidthPx = (width - totalPaddingPx).coerceAtLeast(0f)
-                        (availableGridWidthPx / gridItemSizePx).toInt().coerceAtLeast(1)
-                    } else 1
+                        (availableGridWidthPx / gridItemSizePx).toInt().coerceAtLeast(2)
+                    } else 3
                 }
             }
         }
@@ -553,20 +551,29 @@ private fun FileGrid(
         }
     }
 
-    val configuredCols = appState.folderConfigs.gridColumnCount.coerceIn(2, 8)
+    val adaptiveMinSize = appState.folderConfigs.gridItemSize.dp.coerceIn(96.dp, 220.dp)
+    val galleryAdaptiveMinSize = (appState.folderConfigs.gridItemSize + 14).dp.coerceIn(108.dp, 240.dp)
 
     LazyVerticalGrid(
         state = gridState,
         columns = when (viewMode) {
-            ViewMode.GRID -> GridCells.Fixed(configuredCols)
-            ViewMode.GALLERY -> GridCells.Fixed(configuredCols)
+            ViewMode.GRID -> GridCells.Adaptive(minSize = adaptiveMinSize)
+            ViewMode.GALLERY -> GridCells.Adaptive(minSize = galleryAdaptiveMinSize)
             else -> GridCells.Fixed(1)
         },
         modifier = Modifier.fillMaxSize(),
+        horizontalArrangement = when (viewMode) {
+            ViewMode.GRID, ViewMode.GALLERY -> androidx.compose.foundation.layout.Arrangement.spacedBy(6.dp)
+            else -> androidx.compose.foundation.layout.Arrangement.spacedBy(0.dp)
+        },
+        verticalArrangement = when (viewMode) {
+            ViewMode.GRID, ViewMode.GALLERY -> androidx.compose.foundation.layout.Arrangement.spacedBy(6.dp)
+            else -> androidx.compose.foundation.layout.Arrangement.spacedBy(0.dp)
+        },
         contentPadding = when (viewMode) {
             ViewMode.DETAILS -> PaddingValues(0.dp)
             ViewMode.CONTENT -> PaddingValues(horizontal = 4.dp, vertical = 2.dp)
-            else -> PaddingValues(horizontal = 6.dp, vertical = 6.dp)
+            else -> PaddingValues(horizontal = 8.dp, vertical = 8.dp)
         }
     ) {
         items(

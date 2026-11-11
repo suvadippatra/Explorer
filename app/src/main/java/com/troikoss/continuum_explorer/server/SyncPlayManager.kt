@@ -56,14 +56,14 @@ data class SyncPlayRoomState(
     val lastActor: String = "Host",
     val executeAtServerEpochMs: Long = 0L,
     val scheduleLeadTimeMs: Long = 140L,
-    val passcode: String = "",
-    val allowGuestControl: Boolean = true,
+    val passcode: String = SyncPlayManager.generatePin(),
+    val allowGuestControl: Boolean = false,
     val syncHostAudioPlayer: Boolean = true,
     val connectedPeers: List<SyncPlayPeerInfo> = emptyList(),
     val recentEvents: List<String> = emptyList()
 ) {
     val requiresPasscode: Boolean
-        get() = passcode.isNotBlank()
+        get() = true
 
     /**
      * Computes the live interpolated playback position at [nowEpochMs] taking into account
@@ -93,12 +93,17 @@ data class SyncPlayRoomState(
  *    `PLAY`, `PAUSE`, `SEEK`, or `SPEED`, the server schedules execution at `serverNow + leadTimeMs`
  *    (e.g. 80–160ms ahead, or adaptive to peer RTT). All devices pre-seek during the lead window and
  *    fire playback at the exact same synchronized millisecond.
- * 4. Optional Passcode Authentication & Bi-directional Guest Control.
+ * 4. Mandatory Passcode Authentication & Host-Controlled Space (with optional Guest Co-Control).
  */
 object SyncPlayManager {
     private const val TAG = "SyncPlayManager"
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO + CoroutineName("SyncPlayEngine"))
     private val mainHandler = Handler(Looper.getMainLooper())
+
+    fun generatePin(): String {
+        val code = (100000..999999).random()
+        return code.toString()
+    }
 
     private val _roomState = MutableStateFlow(SyncPlayRoomState())
     val roomState: StateFlow<SyncPlayRoomState> = _roomState.asStateFlow()
@@ -127,7 +132,7 @@ object SyncPlayManager {
     init {
         scope.launch {
             while (isActive) {
-                delay(2500L)
+                delay(3000L)
                 val now = System.currentTimeMillis()
                 var changed = false
                 val iter = wsPeers.entries.iterator()
@@ -162,7 +167,7 @@ object SyncPlayManager {
 
     /**
      * Starts or updates a SyncPlay session with the selected audio or video file.
-     * Automatically ensures the file is added to the shared bucket and starts HTTP/FTP server if needed.
+     * Enforces a mandatory room password (generating a 6-digit PIN if blank) so no guest can join without a password.
      */
     fun loadMediaFile(
         context: Context,
@@ -174,6 +179,7 @@ object SyncPlayManager {
         if (!file.exists() || !file.isFile) return
         val isVid = isVideoFile(file)
         val now = System.currentTimeMillis()
+        val effectivePasscode = passcode.trim().ifBlank { generatePin() }
 
         // Ensure file is accessible in FtpBucketManager if in BATCH_FILES mode
         try {
@@ -182,10 +188,10 @@ object SyncPlayManager {
         } catch (_: Exception) {}
 
         if (autoStartServer && !ServerManager.state.value.isHttpRunning) {
-            ServerManager.startCoordinated(context)
+            ServerManager.startHttpServer(context)
         }
 
-        val eventMsg = "${timeStamp()} Host loaded \"${file.name}\" (${formatBytes(file.length())})"
+        val eventMsg = "${timeStamp()} Host loaded \"${file.name}\" (${formatBytes(file.length())}) • PIN Protected"
         _roomState.update { current ->
             current.copy(
                 isActive = true,
@@ -200,7 +206,7 @@ object SyncPlayManager {
                 lastAction = "LOAD",
                 lastActor = "Host",
                 executeAtServerEpochMs = now + current.scheduleLeadTimeMs,
-                passcode = passcode.trim(),
+                passcode = effectivePasscode,
                 allowGuestControl = allowGuestControl,
                 recentEvents = (listOf(eventMsg) + current.recentEvents).take(25)
             )
@@ -233,9 +239,14 @@ object SyncPlayManager {
         scheduleLeadTimeMs: Long = _roomState.value.scheduleLeadTimeMs,
         syncHostAudioPlayer: Boolean = _roomState.value.syncHostAudioPlayer
     ) {
-        val cleanPass = passcode.trim()
-        wsPeers.values.forEach { peer ->
-            peer.isAuthenticated = cleanPass.isEmpty() || peer.isAuthenticated
+        val cleanPass = passcode.trim().ifBlank {
+            _roomState.value.passcode.ifBlank { generatePin() }
+        }
+        val passChanged = cleanPass != _roomState.value.passcode
+        if (passChanged) {
+            wsPeers.values.forEach { peer ->
+                peer.isAuthenticated = false
+            }
         }
         _roomState.update { current ->
             current.copy(
@@ -251,14 +262,33 @@ object SyncPlayManager {
         }
     }
 
-    fun stopSession() {
+    /**
+     * Stops the active SyncPlay session and completely removes the previously loaded media file
+     * from SyncPlay state/history so the user must select a file fresh on next launch.
+     */
+    fun stopSession(clearMediaHistory: Boolean = true) {
         _roomState.update { current ->
-            current.copy(
-                isActive = false,
-                isPlaying = false,
-                lastAction = "STOP",
-                recentEvents = (listOf("${timeStamp()} Host ended SyncPlay session") + current.recentEvents).take(25)
-            )
+            if (clearMediaHistory) {
+                current.copy(
+                    isActive = false,
+                    mediaFilePath = "",
+                    mediaFileName = "",
+                    mediaSizeBytes = 0L,
+                    isPlaying = false,
+                    basePositionMs = 0L,
+                    lastAction = "IDLE",
+                    lastActor = "Host",
+                    executeAtServerEpochMs = 0L,
+                    recentEvents = emptyList()
+                )
+            } else {
+                current.copy(
+                    isActive = false,
+                    isPlaying = false,
+                    lastAction = "STOP",
+                    recentEvents = (listOf("${timeStamp()} Host ended SyncPlay session") + current.recentEvents).take(25)
+                )
+            }
         }
         scope.launch {
             broadcastStateFrame("STOP")
@@ -542,27 +572,35 @@ object SyncPlayManager {
     private fun buildStateJsonInternal(eventType: String = "STATE", forPeer: ConnectedWsPeer? = null): JSONObject {
         val s = _roomState.value
         val now = System.currentTimeMillis()
+        val isPeerAuthed = forPeer == null || forPeer.isAuthenticated
         return JSONObject().apply {
             put("type", eventType)
             put("serverEpochMs", now)
             put("isActive", s.isActive)
-            put("mediaFileName", s.mediaFileName)
-            put("mediaSizeBytes", s.mediaSizeBytes)
+            put("mediaFileName", if (isPeerAuthed) s.mediaFileName else "🔒 Locked SyncPlay Space (Enter Passcode to Join)")
+            put("mediaSizeBytes", if (isPeerAuthed) s.mediaSizeBytes else 0L)
             put("isVideo", s.isVideo)
-            put("streamUrl", if (s.isActive && s.mediaFilePath.isNotBlank()) "/api/syncplay/stream?t=${s.mediaSizeBytes}" else "")
-            put("isPlaying", s.isPlaying)
-            put("basePositionMs", s.basePositionMs)
-            put("livePositionMs", s.currentPositionMs(now))
+            put(
+                "streamUrl",
+                if (isPeerAuthed && s.isActive && s.mediaFilePath.isNotBlank()) {
+                    "/api/syncplay/stream?t=${s.mediaSizeBytes}&pin=${s.passcode.hashCode()}"
+                } else {
+                    ""
+                }
+            )
+            put("isPlaying", if (isPeerAuthed) s.isPlaying else false)
+            put("basePositionMs", if (isPeerAuthed) s.basePositionMs else 0L)
+            put("livePositionMs", if (isPeerAuthed) s.currentPositionMs(now) else 0L)
             put("stateUpdatedAtServerEpochMs", s.stateUpdatedAtServerEpochMs)
             put("playbackSpeed", s.playbackSpeed.toDouble())
             put("lastAction", s.lastAction)
             put("lastActor", s.lastActor)
             put("executeAtServerEpochMs", s.executeAtServerEpochMs)
             put("scheduleLeadTimeMs", s.scheduleLeadTimeMs)
-            put("requiresPasscode", s.requiresPasscode)
+            put("requiresPasscode", true)
             put("allowGuestControl", s.allowGuestControl)
             if (forPeer != null) {
-                put("authenticated", forPeer.isAuthenticated || !s.requiresPasscode)
+                put("authenticated", forPeer.isAuthenticated)
                 put("peerId", forPeer.peerId)
             }
 

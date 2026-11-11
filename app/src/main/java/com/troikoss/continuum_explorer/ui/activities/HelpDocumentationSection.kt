@@ -41,7 +41,7 @@ data class HelpGuideSection(
 /**
  * Concise Material UI Help & Open-Source Reference Center.
  * Uses short single-line headings, zero multi-line subheadings, a single-line M3 OutlinedTextField search bar,
- * and scannable 1-line reference bullets updated for every codebase modification.
+ * and scannable reference items updated for every codebase modification.
  */
 @Composable
 fun HelpDocumentationSection(
@@ -51,36 +51,37 @@ fun HelpDocumentationSection(
     var selectedCategory by remember { mutableStateOf("All") }
 
     val categories = remember {
-        listOf("All", "Server", "Media", "Studios", "Converter", "Themes", "Open Source")
+        listOf("All", "Server", "Desktop & UI", "Media", "Studios", "Converter", "Open Source")
     }
 
     val sections = remember {
         listOf(
             HelpGuideSection(
-                id = "themes_and_fonts",
-                category = "Themes",
-                title = "Material UI Theme & Fonts",
-                badge = "UI",
-                icon = Icons.Default.Palette,
+                id = "unified_server_and_syncplay",
+                category = "Server",
+                title = "FTP Mode vs. HTTP Website Host",
+                badge = "Server Hub",
+                icon = Icons.Default.Sync,
                 items = listOf(
-                    HelpTopicItem("Material UI Theme", "Select 'Material UI' in Settings → Appearance for crisp M3 surfaces & indigo accents."),
-                    HelpTopicItem("Zero-Lag Custom Fonts", "Pre-cached async Typefaces for System Default, Plus Jakarta Sans & JetBrains Mono."),
-                    HelpTopicItem("Compact Headings", "Single-line titles across all panels without multi-line subheading clutter."),
-                    HelpTopicItem("60/120fps Touch Pipeline", "Optimized pointer event pass and background I/O warmup across Android 8 to Android 15.")
+                    HelpTopicItem("Independent Service Switches", "FTP (:2121), HTTP Website Host (:8080), SyncPlay Party, and Screen Mirroring each have independent switches — never activated all at once."),
+                    HelpTopicItem("Mode 1: FTP, SyncPlay & Cast", "Host FTP with Upload Dropzone Only (0 host files exposed), Selected Items, or Full Storage, plus optional Screen Share or SyncPlay."),
+                    HelpTopicItem("Mode 2: HTTP Website Host", "Host an unzipped website directory (HTML/CSS/JS/assets) or a single HTML file as a live web server with in-app WebView preview."),
+                    HelpTopicItem("SyncPlay Party & Mandatory PIN", "Host-controlled watch/listen space with mandatory 6-digit Room Passcode, smooth ±3% playbackRate drift micro-nudging (zero periodic freeze), and auto history wipe on stop."),
+                    HelpTopicItem("Network Firewall & Sandbox", "Canonical path traversal protection, executable upload blocker, Untrusted Wi-Fi PIN gate, and isolated ContinuumSuite/MiniAppsSandbox workspace.")
                 )
             ),
             HelpGuideSection(
-                id = "unified_server_and_syncplay",
-                category = "Server",
-                title = "Server Hub & SyncPlay",
-                badge = "Server",
-                icon = Icons.Default.Sync,
+                id = "desktop_and_ui",
+                category = "Desktop & UI",
+                title = "Android Desktop/DeX & Gallery",
+                badge = "DeX + M3",
+                icon = Icons.Default.DesktopWindows,
                 items = listOf(
-                    HelpTopicItem("ServerManager", "Crash-safe Ktor HTTP (:8080) & Apache FTP (:2121) lifecycle with Android 14/15 DATA_SYNC FGS."),
-                    HelpTopicItem("SyncPlay Party", "HTTP 206 pre-buffered group video/audio playback with synchronized Play, Pause, Seek & Speed."),
-                    HelpTopicItem("NTP Clock Sync", "WebSocket PING/PONG latency calibration for millisecond-aligned playback."),
-                    HelpTopicItem("Room Security", "Optional SyncPlay passcode and guest playback control toggle."),
-                    HelpTopicItem("Browser Mini-Apps", "5-app remote browser workspace: Markdown, Code, CSV Grid, KB Photo & Converter.")
+                    HelpTopicItem("Default Window Mode (Option 2)", "Animated In-App Tabs across DeX, Tablet & Mobile is set as the default workspace mode."),
+                    HelpTopicItem("Split-Pane Desktop File Pickers", "File selection dialogs and full-page pickers render a Left Places Sidebar + Multi-Column Compact Tiles on Desktop/DeX."),
+                    HelpTopicItem("My Suite Desktop Grid", "Multi-column Studio and Recent File cards on Desktop/DeX; narrow windows (<560dp) collapse New File & Open into icon-only header buttons."),
+                    HelpTopicItem("Lockable Top Heading Bars", "All subpages include a Pin/Lock button to keep the 50dp heading bar frozen on top while scrolling."),
+                    HelpTopicItem("Instant Gallery & Adaptive Grid", "Zero-syscall indexed MediaStore query with warm cache + full-bleed adaptive grid tiles without gaps.")
                 )
             ),
             HelpGuideSection(
@@ -117,7 +118,7 @@ fun HelpDocumentationSection(
                 icon = Icons.Default.Transform,
                 items = listOf(
                     HelpTopicItem("Exact-KB Resizer", "Binary-search JPEG/WebP quality & DPI solver for 20KB/50KB exam uploads."),
-                    HelpTopicItem("PDF Compressor", " Grayscale & DPI rasterization to shrink scanned PDFs offline."),
+                    HelpTopicItem("PDF Compressor", "Grayscale & DPI rasterization to shrink scanned PDFs offline."),
                     HelpTopicItem("Batch Converter", "Convert images, audio/video, documents, data (JSON/YAML/XML/CSV) & ZIP archives.")
                 )
             ),
@@ -132,8 +133,8 @@ fun HelpDocumentationSection(
                     HelpTopicItem("Markor (Apache 2.0)", "Markdown, Todo.txt, Org-Mode & AsciiDoc text engine by Gregor Santner."),
                     HelpTopicItem("PhotoEditor (MIT)", "Canvas brush, filter matrix & sticker layers by Burhanuddin Rashid."),
                     HelpTopicItem("Google Fonts (SIL OFL 1.1)", "Bundled Plus Jakarta Sans & JetBrains Mono offline typography."),
-                    HelpTopicItem("Ktor & Apache FtpServer (Apache 2.0)", "Embedded HTTP/WebSocket SyncPlay portal & RFC-959 FTP daemon."),
-                    HelpTopicItem("AndroidX Media3 & Compose M3 (Apache 2.0)", "Hardware media engine & Material UI theme system."),
+                    HelpTopicItem("Ktor & Apache FtpServer (Apache 2.0)", "Embedded HTTP Website/SyncPlay server & RFC-959 FTP daemon."),
+                    HelpTopicItem("AndroidX Media3 & Compose M3 (Apache 2.0)", "Hardware media engine, Adaptive Grid & Material UI theme system."),
                     HelpTopicItem("PDFBox, POI, Commons Compress & ZXing", "Offline PDF, Office, archive & QR engines (Apache 2.0).")
                 )
             )
@@ -164,7 +165,6 @@ fun HelpDocumentationSection(
             .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        // Single-line Material 3 OutlinedTextField Search Bar
         OutlinedTextField(
             value = searchFilter,
             onValueChange = { searchFilter = it },
@@ -196,7 +196,6 @@ fun HelpDocumentationSection(
                 .testTag("help_search_input")
         )
 
-        // Category Filter Bar + Expand/Collapse Toggle
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -239,7 +238,6 @@ fun HelpDocumentationSection(
             )
         }
 
-        // Concise Collapsible Section Cards
         filteredSections.forEach { sec ->
             val isExpanded = expandedStates[sec.id] ?: true
             val q = searchFilter.trim().lowercase()
