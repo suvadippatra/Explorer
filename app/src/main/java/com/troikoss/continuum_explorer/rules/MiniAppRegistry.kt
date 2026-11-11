@@ -18,8 +18,8 @@ object MiniAppRegistry {
         MiniAppRuleDescriptor(
             id = "file_converter",
             title = "File Converter",
-            subtitle = "Student Photo/Signature KB Resizer, PDF Compressor, VERT Single & Batch Converter",
-            badge = "VERT + Squoosh",
+            subtitle = "Convert & compress files",
+            badge = "VERT",
             icon = Icons.Default.Transform,
             accentColor = Color(0xFF0EA5E9),
             supportedExtensions = emptySet(),
@@ -29,9 +29,9 @@ object MiniAppRegistry {
         ),
         MiniAppRuleDescriptor(
             id = "text_editor",
-            title = "Markor Text & Markdown Studio",
-            subtitle = "Markdown, Todo.txt, Org-Mode, AsciiDoc, LaTeX math, Mermaid diagrams & plain notes",
-            badge = "Markor Engine",
+            title = "Markdown Studio",
+            subtitle = "Notes, Markdown & Todo.txt",
+            badge = "Markor",
             icon = Icons.Default.Description,
             accentColor = Color(0xFF4F46E5),
             supportedExtensions = setOf(
@@ -44,8 +44,8 @@ object MiniAppRegistry {
         MiniAppRuleDescriptor(
             id = "code_studio",
             title = "Code Studio",
-            subtitle = "Monospace code workbench with line numbers, syntax highlighting, search & UTF-8 stats",
-            badge = "Code IDE",
+            subtitle = "Syntax code editor",
+            badge = "IDE",
             icon = Icons.Default.Code,
             accentColor = Color(0xFF7C3AED),
             supportedExtensions = setOf(
@@ -59,9 +59,9 @@ object MiniAppRegistry {
         ),
         MiniAppRuleDescriptor(
             id = "csv_editor",
-            title = "CSV & Table Studio",
-            subtitle = "Visual spreadsheet cell grid editor with row/column insertion & raw CSV sync",
-            badge = "Table Grid",
+            title = "Table Studio",
+            subtitle = "CSV & TSV grid editor",
+            badge = "CSV",
             icon = Icons.Default.TableChart,
             accentColor = Color(0xFFD97706),
             supportedExtensions = setOf("csv", "tsv"),
@@ -71,9 +71,9 @@ object MiniAppRegistry {
         ),
         MiniAppRuleDescriptor(
             id = "image_studio",
-            title = "PhotoEditor Studio",
-            subtitle = "Non-destructive filters, crop, curves, HSL sliders, brush, text & stickers",
-            badge = "Image Studio",
+            title = "Photo Studio",
+            subtitle = "Filters, crop & draw",
+            badge = "Photo",
             icon = Icons.Default.Image,
             accentColor = Color(0xFF059669),
             supportedExtensions = setOf("jpg", "jpeg", "png", "webp", "bmp"),

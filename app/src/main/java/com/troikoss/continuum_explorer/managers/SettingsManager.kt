@@ -36,8 +36,16 @@ enum class TouchDragBehavior {
 enum class ThemeMode {
     SYSTEM,
     LIGHT,
-    DARK
+    DARK,
+    MATERIAL_UI
 }
+
+enum class AppFontFamily(val label: String) {
+    SYSTEM_DEFAULT("System Default"),
+    PLUS_JAKARTA_SANS("Plus Jakarta Sans"),
+    JETBRAINS_MONO("JetBrains Mono")
+}
+
 
 enum class DefaultAppHandler {
     INTERNAL_PREVIEWER,
@@ -57,6 +65,8 @@ object SettingsManager {
     private const val KEY_TOUCH_DRAG_BEHAVIOR = "touch_drag_behavior"
     private const val KEY_DEFAULT_ARCHIVE_VIEWER = "default_archive_viewer"
     private const val KEY_THEME_MODE = "theme_mode"
+    private const val KEY_APP_FONT_FAMILY = "app_font_family"
+
 
     private const val KEY_LANGUAGE = "language"
     private const val KEY_BATCH_RENAME_ENABLED = "batch_rename_enabled"
@@ -149,6 +159,10 @@ object SettingsManager {
 
     private val _themeMode = mutableStateOf(ThemeMode.SYSTEM)
     val themeMode: State<ThemeMode> = _themeMode
+
+    private val _appFontFamily = mutableStateOf(AppFontFamily.SYSTEM_DEFAULT)
+    val appFontFamily: State<AppFontFamily> = _appFontFamily
+
 
     private val _language = mutableStateOf("system")
     val language: State<String> = _language
@@ -317,6 +331,14 @@ object SettingsManager {
             ThemeMode.SYSTEM
         }
         _themeMode.value = theme
+
+        val savedFont = prefs.getString(KEY_APP_FONT_FAMILY, AppFontFamily.SYSTEM_DEFAULT.name)
+        _appFontFamily.value = try {
+            AppFontFamily.valueOf(savedFont ?: AppFontFamily.SYSTEM_DEFAULT.name)
+        } catch (_: Exception) {
+            AppFontFamily.SYSTEM_DEFAULT
+        }
+
 
         val savedLanguage = prefs.getString(KEY_LANGUAGE, "system") ?: "system"
         _language.value = savedLanguage
@@ -683,7 +705,16 @@ object SettingsManager {
         _themeMode.value = mode
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         prefs.edit().putString(KEY_THEME_MODE, mode.name).apply()
+        GlobalEvents.triggerConfigUpdate()
     }
+
+    fun setAppFontFamily(context: Context, fontFamily: AppFontFamily) {
+        _appFontFamily.value = fontFamily
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putString(KEY_APP_FONT_FAMILY, fontFamily.name).apply()
+        GlobalEvents.triggerConfigUpdate()
+    }
+
 
     private fun updateBehaviorInternal(behavior: DeleteBehavior) {
         _deleteBehavior.value = behavior

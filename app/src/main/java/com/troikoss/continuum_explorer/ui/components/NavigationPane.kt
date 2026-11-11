@@ -272,7 +272,7 @@ fun NavigationPane(
         val isDarkTheme = when (currentThemeMode) {
             ThemeMode.DARK -> true
             ThemeMode.LIGHT -> false
-            ThemeMode.SYSTEM -> isSystemDark
+            ThemeMode.SYSTEM, ThemeMode.MATERIAL_UI -> isSystemDark
         }
 
         Row(

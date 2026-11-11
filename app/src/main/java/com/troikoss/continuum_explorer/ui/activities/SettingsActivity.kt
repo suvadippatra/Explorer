@@ -46,6 +46,7 @@ import androidx.compose.ui.unit.dp
 import coil.compose.rememberAsyncImagePainter
 import com.troikoss.continuum_explorer.R
 import com.troikoss.continuum_explorer.ui.theme.FileExplorerTheme
+import com.troikoss.continuum_explorer.managers.AppFontFamily
 import com.troikoss.continuum_explorer.managers.DefaultAppHandler
 import com.troikoss.continuum_explorer.managers.DeleteBehavior
 import com.troikoss.continuum_explorer.managers.DetailsMode
@@ -148,13 +149,13 @@ fun SettingsScreen(onBack: () -> Unit) {
 
     val masterCategories = remember(context) {
         listOf(
-            SettingsMasterCategory(0, "General & Localization", "Folder defaults, language & navigation", Icons.Default.Tune),
-            SettingsMasterCategory(1, context.getString(R.string.settings_appearance), "Themes, toolbars, command bar & details", Icons.Default.Palette),
-            SettingsMasterCategory(2, "Editors & Handlers", "Window modes, default viewers & previews", Icons.Default.Apps),
-            SettingsMasterCategory(3, "Storage & File Ops", "Deletion, drag gestures, archives & batch rename", Icons.Default.Folder),
-            SettingsMasterCategory(4, "Network & FTP Hub", "Wi-Fi file server, screen share & remote apps", Icons.Default.Router),
-            SettingsMasterCategory(5, "Diagnostics & System", "RAM usage, shortcuts, app info & resets", Icons.Default.Info),
-            SettingsMasterCategory(6, "Help & Reference", "Feature guides, studios & open-source credits", Icons.Default.HelpOutline)
+            SettingsMasterCategory(0, "General", "Defaults & language", Icons.Default.Tune),
+            SettingsMasterCategory(1, context.getString(R.string.settings_appearance), "Themes, fonts & bars", Icons.Default.Palette),
+            SettingsMasterCategory(2, "Editors & Handlers", "Windows & file viewers", Icons.Default.Apps),
+            SettingsMasterCategory(3, "Storage & Files", "Delete, drag & archives", Icons.Default.Folder),
+            SettingsMasterCategory(4, "Server Hub", "HTTP, FTP & SyncPlay", Icons.Default.Router),
+            SettingsMasterCategory(5, "Diagnostics", "Memory, shortcuts & about", Icons.Default.Info),
+            SettingsMasterCategory(6, "Help Guide", "Quick reference & credits", Icons.Default.HelpOutline)
         )
     }
 
@@ -287,6 +288,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                         }
                     }
                     1 -> {
+                        val currentFont by SettingsManager.appFontFamily
                         PixelCategoryCard(
                             title = stringResource(R.string.settings_appearance),
                             icon = Icons.Default.Palette
@@ -302,23 +304,59 @@ fun SettingsScreen(onBack: () -> Unit) {
                                 SegmentedButton(
                                     selected = themeMode == ThemeMode.SYSTEM,
                                     onClick = { SettingsManager.setThemeMode(context, ThemeMode.SYSTEM) },
-                                    shape = SegmentedButtonDefaults.itemShape(index = 0, count = 3)
+                                    shape = SegmentedButtonDefaults.itemShape(index = 0, count = 4)
                                 ) {
-                                    Text(stringResource(R.string.settings_theme_system), style = MaterialTheme.typography.labelMedium)
+                                    Text(stringResource(R.string.settings_theme_system), style = MaterialTheme.typography.labelSmall, maxLines = 1)
                                 }
                                 SegmentedButton(
                                     selected = themeMode == ThemeMode.LIGHT,
                                     onClick = { SettingsManager.setThemeMode(context, ThemeMode.LIGHT) },
-                                    shape = SegmentedButtonDefaults.itemShape(index = 1, count = 3)
+                                    shape = SegmentedButtonDefaults.itemShape(index = 1, count = 4)
                                 ) {
-                                    Text(stringResource(R.string.settings_theme_light), style = MaterialTheme.typography.labelMedium)
+                                    Text(stringResource(R.string.settings_theme_light), style = MaterialTheme.typography.labelSmall, maxLines = 1)
                                 }
                                 SegmentedButton(
                                     selected = themeMode == ThemeMode.DARK,
                                     onClick = { SettingsManager.setThemeMode(context, ThemeMode.DARK) },
-                                    shape = SegmentedButtonDefaults.itemShape(index = 2, count = 3)
+                                    shape = SegmentedButtonDefaults.itemShape(index = 2, count = 4)
                                 ) {
-                                    Text(stringResource(R.string.settings_theme_dark), style = MaterialTheme.typography.labelMedium)
+                                    Text(stringResource(R.string.settings_theme_dark), style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                                }
+                                SegmentedButton(
+                                    selected = themeMode == ThemeMode.MATERIAL_UI,
+                                    onClick = { SettingsManager.setThemeMode(context, ThemeMode.MATERIAL_UI) },
+                                    shape = SegmentedButtonDefaults.itemShape(index = 3, count = 4)
+                                ) {
+                                    Text("Material UI", style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                                }
+                            }
+
+                            HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+                            Text(
+                                text = "App Font",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            SingleChoiceSegmentedButtonRow(
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                AppFontFamily.entries.forEachIndexed { index, fontOption ->
+                                    SegmentedButton(
+                                        selected = currentFont == fontOption,
+                                        onClick = { SettingsManager.setAppFontFamily(context, fontOption) },
+                                        shape = SegmentedButtonDefaults.itemShape(index = index, count = AppFontFamily.entries.size)
+                                    ) {
+                                        Text(
+                                            text = when (fontOption) {
+                                                AppFontFamily.SYSTEM_DEFAULT -> "Default"
+                                                AppFontFamily.PLUS_JAKARTA_SANS -> "Jakarta Sans"
+                                                AppFontFamily.JETBRAINS_MONO -> "JetBrains"
+                                            },
+                                            style = MaterialTheme.typography.labelSmall,
+                                            maxLines = 1
+                                        )
+                                    }
                                 }
                             }
 
@@ -412,15 +450,9 @@ fun SettingsScreen(onBack: () -> Unit) {
                         val currentWorkspaceMode by SettingsManager.workspaceWindowMode
                         Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                             PixelCategoryCard(
-                                title = "Workspace & Mini-App Windowing Mode",
+                                title = "Window Mode",
                                 icon = Icons.Default.Layers
                             ) {
-                                Text(
-                                    text = "Choose how My Suite Mini-Apps, File Editors, and Server Tools launch across DeX/Desktop, Tablet, and Mobile:",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-
                                 com.troikoss.continuum_explorer.rules.WorkspaceWindowMode.entries.forEach { mode ->
                                     val isSelected = currentWorkspaceMode == mode
                                     Surface(
@@ -442,7 +474,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                                             }
                                     ) {
                                         Row(
-                                            modifier = Modifier.padding(12.dp),
+                                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             RadioButton(
@@ -450,27 +482,21 @@ fun SettingsScreen(onBack: () -> Unit) {
                                                 onClick = { SettingsManager.setWorkspaceWindowMode(context, mode) }
                                             )
                                             Spacer(modifier = Modifier.width(8.dp))
-                                            Column(modifier = Modifier.weight(1f)) {
-                                                Text(
-                                                    text = mode.title,
-                                                    style = MaterialTheme.typography.bodyMedium,
-                                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
-                                                    color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-                                                )
-                                                Spacer(modifier = Modifier.height(2.dp))
-                                                Text(
-                                                    text = mode.description,
-                                                    style = MaterialTheme.typography.bodySmall,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                )
-                                            }
+                                            Text(
+                                                text = mode.title,
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
+                                                color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                                maxLines = 1,
+                                                modifier = Modifier.weight(1f)
+                                            )
                                         }
                                     }
                                 }
                             }
 
                             PixelCategoryCard(
-                                title = "Editors, Previewers & Handlers",
+                                title = "Editors & Handlers",
                                 icon = Icons.Default.Apps
                             ) {
                                 Row(
@@ -508,7 +534,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
-                                    Text("Default File Handlers (PDF, Image, Text, Media)", style = MaterialTheme.typography.bodyMedium)
+                                    Text("Default File Handlers", style = MaterialTheme.typography.bodyMedium)
                                     Icon(Icons.Default.ChevronRight, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                             }
@@ -639,7 +665,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                     }
                     4 -> {
                         PixelCategoryCard(
-                            title = "Network & FTP Server Hub",
+                            title = "Server Hub",
                             icon = Icons.Default.Router
                         ) {
                             Row(
@@ -657,10 +683,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text("Launch FTP & HTTP Web Server Hub", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-                                    Text("Share device files over Wi-Fi via browser or FTP client", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
+                                Text("Open Server Hub", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
                                 Icon(Icons.Default.ChevronRight, contentDescription = null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
@@ -837,7 +860,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(16.dp),
+                                        .padding(horizontal = 16.dp, vertical = 14.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Icon(
@@ -847,22 +870,14 @@ fun SettingsScreen(onBack: () -> Unit) {
                                         modifier = Modifier.size(24.dp)
                                     )
                                     Spacer(modifier = Modifier.width(14.dp))
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = cat.title,
-                                            style = MaterialTheme.typography.titleMedium,
-                                            fontWeight = FontWeight.Bold,
-                                            maxLines = 1,
-                                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                                        )
-                                        Text(
-                                            text = cat.subtitle,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            maxLines = 1,
-                                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                                        )
-                                    }
+                                    Text(
+                                        text = cat.title,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f)
+                                    )
                                     Icon(
                                         Icons.Default.ChevronRight,
                                         contentDescription = null,
@@ -991,6 +1006,14 @@ fun SettingsScreen(onBack: () -> Unit) {
                                 selected = themeMode == ThemeMode.DARK,
                                 onClick = {
                                     SettingsManager.setThemeMode(context, ThemeMode.DARK)
+                                    showThemeDialog = false
+                                }
+                            )
+                            OptionItem(
+                                label = "Material UI",
+                                selected = themeMode == ThemeMode.MATERIAL_UI,
+                                onClick = {
+                                    SettingsManager.setThemeMode(context, ThemeMode.MATERIAL_UI)
                                     showThemeDialog = false
                                 }
                             )
@@ -1734,9 +1757,9 @@ fun DiagnosticsMemoryPanel(context: Context) {
                     },
                     modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(8.dp),
-                    contentPadding = PaddingValues(vertical = 6.dp, horizontal = 8.dp)
+                    contentPadding = PaddingValues(vertical = 8.dp, horizontal = 8.dp)
                 ) {
-                    Text("Clear Explorer Cache", style = MaterialTheme.typography.labelSmall)
+                    Text("Clear Cache", style = MaterialTheme.typography.labelSmall, maxLines = 1)
                 }
 
                 OutlinedButton(
@@ -1750,9 +1773,9 @@ fun DiagnosticsMemoryPanel(context: Context) {
                     },
                     modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(8.dp),
-                    contentPadding = PaddingValues(vertical = 6.dp, horizontal = 8.dp)
+                    contentPadding = PaddingValues(vertical = 8.dp, horizontal = 8.dp)
                 ) {
-                    Text("Apps Settings (Other Apps)", style = MaterialTheme.typography.labelSmall)
+                    Text("System Apps", style = MaterialTheme.typography.labelSmall, maxLines = 1)
                 }
             }
         }

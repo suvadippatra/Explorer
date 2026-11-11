@@ -555,7 +555,7 @@ fun ExternalFtpViewerPanel(
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = activeConnectedServer?.name ?: "Add FTP / HTTP Server",
+                        text = activeConnectedServer?.name ?: "Remote Server",
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface,
@@ -603,22 +603,17 @@ fun ExternalFtpViewerPanel(
                             verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             Text(
-                                "Connect to Remote FTP or HTTP Portal",
+                                "Connect Server",
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.primary
-                            )
-                            Text(
-                                "Browses files natively first (Explorer HTTP API or standard FTP socket), with a 1-tap Built-in Web Browser toggle for live screen streams and custom portals.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
 
                             OutlinedTextField(
                                 value = serverName,
                                 onValueChange = { serverName = it },
-                                label = { Text("Server Label (optional)", style = MaterialTheme.typography.bodySmall) },
-                                placeholder = { Text("e.g. Tablet Host, Office NAS") },
+                                label = { Text("Server Label", style = MaterialTheme.typography.bodySmall) },
+                                placeholder = { Text("Office NAS") },
                                 leadingIcon = { Icon(Icons.Default.Label, contentDescription = null, modifier = Modifier.size(18.dp)) },
                                 singleLine = true,
                                 shape = inputShape,
@@ -820,7 +815,7 @@ fun ExternalFtpViewerPanel(
                         shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
                         icon = { Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(16.dp)) }
                     ) {
-                        Text("Native File Browser", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+                        Text("File Browser", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, maxLines = 1)
                     }
                     SegmentedButton(
                         selected = useBuiltInWebBrowser,
@@ -831,7 +826,7 @@ fun ExternalFtpViewerPanel(
                         shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
                         icon = { Icon(Icons.Default.Language, contentDescription = null, modifier = Modifier.size(16.dp)) }
                     ) {
-                        Text("Open in Built-in Web Browser", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+                        Text("Web Portal", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, maxLines = 1)
                     }
                 }
 

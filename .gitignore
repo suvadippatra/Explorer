@@ -42,7 +42,8 @@ debug.keystore.base64
 *.dex
 Paste *.txt
 
-# Upstream reference source bundles (case-insensitive)
-*[Cc]ontinuum-[Ee]xplorer*
-*[Mm]arkor*
-*[Pp]hoto[Ee]ditor*
+# Root-only upstream reference directories (never match source files inside app/src/)
+/continuum-explorer-ref/
+/markor-ref/
+/photoeditor-ref/
+

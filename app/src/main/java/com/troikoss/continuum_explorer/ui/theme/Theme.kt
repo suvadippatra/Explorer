@@ -5,13 +5,16 @@ import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Shapes
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.troikoss.continuum_explorer.managers.SettingsManager
@@ -29,28 +32,90 @@ private val LightColorScheme = lightColorScheme(
     tertiary = Pink40
 )
 
+private val MaterialUiDarkColorScheme = darkColorScheme(
+    primary = MuiPrimaryDark,
+    onPrimary = MuiOnPrimaryDark,
+    primaryContainer = MuiPrimaryContainerDark,
+    onPrimaryContainer = MuiOnPrimaryContainerDark,
+    secondary = MuiSecondaryDark,
+    secondaryContainer = MuiSecondaryContainerDark,
+    tertiary = MuiTertiaryDark,
+    background = MuiBackgroundDark,
+    surface = MuiSurfaceDark,
+    surfaceContainerLow = MuiSurfaceContainerLowDark,
+    surfaceContainer = MuiSurfaceContainerDark,
+    surfaceContainerHigh = MuiSurfaceContainerHighDark,
+    outline = MuiOutlineDark,
+    outlineVariant = MuiOutlineVariantDark
+)
+
+private val MaterialUiLightColorScheme = lightColorScheme(
+    primary = MuiPrimaryLight,
+    onPrimary = MuiOnPrimaryLight,
+    primaryContainer = MuiPrimaryContainerLight,
+    onPrimaryContainer = MuiOnPrimaryContainerLight,
+    secondary = MuiSecondaryLight,
+    secondaryContainer = MuiSecondaryContainerLight,
+    tertiary = MuiTertiaryLight,
+    background = MuiBackgroundLight,
+    surface = MuiSurfaceLight,
+    surfaceContainerLow = MuiSurfaceContainerLowLight,
+    surfaceContainer = MuiSurfaceContainerLight,
+    surfaceContainerHigh = MuiSurfaceContainerHighLight,
+    outline = MuiOutlineLight,
+    outlineVariant = MuiOutlineVariantLight
+)
+
 @Composable
 fun FileExplorerTheme(
-    // Dynamic color is available on Android 12+
     dynamicColor: Boolean = true,
     content: @Composable () -> Unit
 ) {
     val themeMode = SettingsManager.themeMode.value
+    val selectedFont = SettingsManager.appFontFamily.value
     val isSystemDark = isSystemInDarkTheme()
+
     val darkTheme = when (themeMode) {
         ThemeMode.SYSTEM -> isSystemDark
         ThemeMode.DARK -> true
         ThemeMode.LIGHT -> false
+        ThemeMode.MATERIAL_UI -> isSystemDark
     }
 
     val colorScheme = when {
+        themeMode == ThemeMode.MATERIAL_UI -> {
+            if (darkTheme) MaterialUiDarkColorScheme else MaterialUiLightColorScheme
+        }
         dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
             val context = LocalContext.current
             if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
         }
-
         darkTheme -> DarkColorScheme
         else -> LightColorScheme
+    }
+
+    val activeTypography = remember(selectedFont) {
+        buildAppTypography(selectedFont)
+    }
+
+    val activeShapes = remember(themeMode) {
+        if (themeMode == ThemeMode.MATERIAL_UI) {
+            Shapes(
+                extraSmall = RoundedCornerShape(6.dp),
+                small = RoundedCornerShape(10.dp),
+                medium = RoundedCornerShape(12.dp),
+                large = RoundedCornerShape(16.dp),
+                extraLarge = RoundedCornerShape(20.dp)
+            )
+        } else {
+            Shapes(
+                extraSmall = RoundedCornerShape(8.dp),
+                small = RoundedCornerShape(12.dp),
+                medium = RoundedCornerShape(16.dp),
+                large = RoundedCornerShape(20.dp),
+                extraLarge = RoundedCornerShape(24.dp)
+            )
+        }
     }
 
     val context = LocalContext.current
@@ -74,14 +139,8 @@ fun FileExplorerTheme(
 
     MaterialTheme(
         colorScheme = colorScheme,
-        typography = Typography,
-        shapes = androidx.compose.material3.Shapes(
-            extraSmall = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
-            small = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
-            medium = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
-            large = androidx.compose.foundation.shape.RoundedCornerShape(20.dp),
-            extraLarge = androidx.compose.foundation.shape.RoundedCornerShape(24.dp)
-        ),
+        typography = activeTypography,
+        shapes = activeShapes,
         content = content
     )
 }

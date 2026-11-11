@@ -318,7 +318,7 @@ fun FtpServerSettingsPanel(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = if (isWebsiteMode) "Self-Hosted Web Server" else "Unified HTTP, FTP & SyncPlay Hub",
+                            text = if (isWebsiteMode) "Web Host" else "Server Hub",
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Bold,
                             maxLines = 1,
@@ -382,7 +382,7 @@ fun FtpServerSettingsPanel(
                         }
                     ) {
                         Text(
-                            text = "FTP, Portal & SyncPlay",
+                            text = "Server & Sync",
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.SemiBold,
                             maxLines = 1,
@@ -409,7 +409,7 @@ fun FtpServerSettingsPanel(
                         }
                     ) {
                         Text(
-                            text = "Self-Hosted Website",
+                            text = "Web Host",
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.SemiBold,
                             maxLines = 1,
@@ -1028,41 +1028,34 @@ private fun ServerMasterStatusCard(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(9.dp)
-                                .clip(CircleShape)
-                                .background(
-                                    when {
-                                        unifiedState.isTransitioning -> Color(0xFFF59E0B)
-                                        isServerRunning -> Color(0xFF10B981)
-                                        else -> MaterialTheme.colorScheme.outline
-                                    }
-                                )
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = when {
-                                unifiedState.isTransitioning -> "Server Transitioning..."
-                                isServerRunning -> "ServerManager Online ($uptimeFormatted)"
-                                else -> "ServerManager Standby"
-                            },
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = if (isServerRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(2.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(9.dp)
+                            .clip(CircleShape)
+                            .background(
+                                when {
+                                    unifiedState.isTransitioning -> Color(0xFFF59E0B)
+                                    isServerRunning -> Color(0xFF10B981)
+                                    else -> MaterialTheme.colorScheme.outline
+                                }
+                            )
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = if (isWebsiteMode) {
-                            "Serving static website & assets over local Wi-Fi HTTP"
-                        } else {
-                            "Coordinated & independent lifecycle control for Ktor HTTP/WS and Apache FTP"
+                        text = when {
+                            unifiedState.isTransitioning -> "Server Transitioning..."
+                            isServerRunning -> "Server Online ($uptimeFormatted)"
+                            else -> "Server Standby"
                         },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        color = if (isServerRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
                     )
                 }
 
@@ -1091,7 +1084,7 @@ private fun ServerMasterStatusCard(
 
             // Independent Protocol Control Row 1: Ktor HTTP & WebSocket Server
             ProtocolInstanceControlRow(
-                title = if (isWebsiteMode) "HTTP Website Server" else "HTTP Portal, SyncPlay & Mini-Apps",
+                title = if (isWebsiteMode) "Web Server" else "HTTP Server",
                 port = unifiedState.http.port,
                 state = unifiedState.http.state,
                 activeConnections = unifiedState.http.activeConnections,
@@ -1112,7 +1105,7 @@ private fun ServerMasterStatusCard(
             // Independent Protocol Control Row 2: Apache FTP Server
             if (!isWebsiteMode) {
                 ProtocolInstanceControlRow(
-                    title = "Apache FTP Daemon",
+                    title = "FTP Server",
                     port = unifiedState.ftp.port,
                     state = unifiedState.ftp.state,
                     activeConnections = unifiedState.ftp.activeConnections,
@@ -1167,7 +1160,7 @@ private fun ProtocolInstanceControlRow(
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.weight(1f)
                 ) {
                     Box(
@@ -1181,7 +1174,8 @@ private fun ProtocolInstanceControlRow(
                         style = MaterialTheme.typography.bodySmall,
                         fontWeight = FontWeight.Bold,
                         maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
                     )
                     Surface(
                         shape = RoundedCornerShape(6.dp),
@@ -1189,13 +1183,15 @@ private fun ProtocolInstanceControlRow(
                     ) {
                         Text(
                             text = if (state == ProtocolLifecycleState.RUNNING && activeConnections > 0) {
-                                "RUNNING • $activeConnections active"
+                                "RUNNING ($activeConnections)"
                             } else {
                                 state.name
                             },
                             style = MaterialTheme.typography.labelSmall,
                             color = badgeColor,
                             fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            softWrap = false,
                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                         )
                     }
@@ -1312,26 +1308,26 @@ private fun SyncPlayPartyCard(
                     )
                     Column {
                         Text(
-                            text = "SyncPlay Watch & Listen Party (Beatsync Engine)",
+                            text = "SyncPlay Party",
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                             color = MaterialTheme.colorScheme.primary
                         )
-                        Text(
-                            text = if (syncState.isActive) {
-                                "${syncState.mediaFileName} • ${syncState.connectedPeers.size} peer(s) • Lead ${syncState.scheduleLeadTimeMs}ms"
-                            } else {
-                                "Pre-buffered video/audio with NTP clock sync & millisecond-scheduled group controls"
-                            },
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
+                        if (syncState.isActive) {
+                            Text(
+                                text = "${syncState.mediaFileName} • ${syncState.connectedPeers.size} peer(s)",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     }
                 }
 
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                     IconButton(
                         onClick = { showSecurityConfig = !showSecurityConfig },
                         modifier = Modifier.size(32.dp)
@@ -1351,7 +1347,12 @@ private fun SyncPlayPartyCard(
                     ) {
                         Icon(Icons.Default.VideoLibrary, contentDescription = null, modifier = Modifier.size(15.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text(if (syncState.isActive) "Change Media" else "Pick Audio/Video", style = MaterialTheme.typography.labelMedium)
+                        Text(
+                            text = if (syncState.isActive) "Change" else "Select Media",
+                            style = MaterialTheme.typography.labelMedium,
+                            maxLines = 1,
+                            softWrap = false
+                        )
                     }
                 }
             }
@@ -1383,7 +1384,7 @@ private fun SyncPlayPartyCard(
                                         syncHostAudioPlayer = syncHostAudio
                                     )
                                 },
-                                label = { Text("Room Passcode (empty = open)") },
+                                label = { Text("Room Passcode (optional)") },
                                 singleLine = true,
                                 shape = inputShape,
                                 modifier = Modifier.weight(1f)
@@ -1395,10 +1396,7 @@ private fun SyncPlayPartyCard(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text("Allow Connected Friends to Control Playback", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
-                                Text("Anyone with passcode (if set) can Play, Pause, Seek & change Speed for everyone", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
+                            Text("Guest Playback Control", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
                             Switch(
                                 checked = allowGuestControl,
                                 onCheckedChange = {
@@ -1413,10 +1411,7 @@ private fun SyncPlayPartyCard(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text("Sync Host Device Audio Player", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
-                                Text("Plays audio tracks in lockstep on this phone/tablet alongside remote peers", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
+                            Text("Sync Host Audio", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
                             Switch(
                                 checked = syncHostAudio,
                                 onCheckedChange = {
@@ -1605,7 +1600,7 @@ private fun FtpSharedContentCard(
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Text(
-                text = "Shared Files & Folders Scope",
+                text = "Shared Scope",
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.primary
@@ -1618,7 +1613,7 @@ private fun FtpSharedContentCard(
                 FilterChip(
                     selected = isSelectedBucketMode,
                     onClick = { onScopeChange(FtpHostedMode.BATCH_FILES) },
-                    label = { Text("Selected Items (${bucketItems.size})", style = MaterialTheme.typography.labelSmall) },
+                    label = { Text("Selected (${bucketItems.size})", style = MaterialTheme.typography.labelSmall) },
                     leadingIcon = {
                         Icon(Icons.Default.Checklist, contentDescription = null, modifier = Modifier.size(15.dp))
                     },
@@ -1627,7 +1622,7 @@ private fun FtpSharedContentCard(
                 FilterChip(
                     selected = hostedMode == FtpHostedMode.FULL_STORAGE,
                     onClick = { onScopeChange(FtpHostedMode.FULL_STORAGE) },
-                    label = { Text("Full Device Storage", style = MaterialTheme.typography.labelSmall) },
+                    label = { Text("Full Storage", style = MaterialTheme.typography.labelSmall) },
                     leadingIcon = {
                         Icon(Icons.Default.Storage, contentDescription = null, modifier = Modifier.size(15.dp))
                     },
@@ -1641,17 +1636,12 @@ private fun FtpSharedContentCard(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = if (bucketItems.isEmpty()) {
-                                "0 items selected (Files tab is empty; SyncPlay, Screen & Mini-Apps still work)"
-                            } else {
-                                "${bucketItems.size} file(s) / folder(s) shared"
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+                    Text(
+                        text = "${bucketItems.size} item(s) shared",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f)
+                    )
 
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         if (bucketItems.isNotEmpty()) {
@@ -1721,12 +1711,6 @@ private fun FtpSharedContentCard(
                         }
                     }
                 }
-            } else {
-                Text(
-                    text = "Sharing entire Internal Storage over FTP and the Web Portal.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
             }
         }
     }
@@ -1755,7 +1739,7 @@ private fun PortalCapabilitiesAndUploadsCard(
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Text(
-                "Uploads & Remote Browser Mini-Apps Studio",
+                "Uploads & Web Apps",
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.primary
@@ -1766,14 +1750,7 @@ private fun PortalCapabilitiesAndUploadsCard(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("Allow Browser & FTP Uploads", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-                    Text(
-                        "Unifies Web Portal multipart uploads and FTP client write access",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+                Text("Allow Uploads", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
                 Switch(checked = allowUnifiedUploads, onCheckedChange = onAllowUploadChange)
             }
 
@@ -1839,14 +1816,7 @@ private fun PortalCapabilitiesAndUploadsCard(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("Allow DeX Mini-Apps Studio in Browser", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-                    Text(
-                        "Enables remote Markor Split Studio, Code Studio, Interactive CSV Grid & KB Photo/Format Converter",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+                Text("Browser Mini-Apps", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
                 Switch(checked = allowRemoteMiniApps, onCheckedChange = onAllowMiniAppsChange)
             }
         }
@@ -1896,15 +1866,10 @@ private fun SelfHostedWebsiteTargetCard(
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Text(
-                text = "Self-Hosted Website Source",
+                text = "Website Source",
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.primary
-            )
-            Text(
-                text = "Host a local web repository (e.g. from GitHub) or an .html file with CSS/JS assets.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
             Surface(
@@ -1919,11 +1884,6 @@ private fun SelfHostedWebsiteTargetCard(
                     if (selectedTarget == null) {
                         Text(
                             text = "No website folder or HTML file selected",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Text(
-                            text = "Tap 'Choose Folder / HTML' to pick a folder containing index.html or any standalone .html file.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -2151,16 +2111,18 @@ private fun ScreenCastCard(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        "Live Screen Sharing (Optional)",
+                        "Screen Mirroring",
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.primary
                     )
-                    Text(
-                        text = if (isScreenCasting) "Streaming live to Web Portal (/screencast.mjpeg)" else "Allow browser visitors to view live device screen",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    if (isScreenCasting) {
+                        Text(
+                            text = "Streaming live (/screencast.mjpeg)",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color(0xFF10B981)
+                        )
+                    }
                 }
 
                 Switch(
