@@ -103,6 +103,8 @@ object AudioPlayerManager {
         private set
     var sleepTimerRemainingSec by mutableIntStateOf(0)
         private set
+    var sleepTrackCountRemaining by mutableIntStateOf(0)
+        private set
     var isVinylArtworkStyle by mutableStateOf(false)
 
     private val AUDIO_EXTENSIONS = setOf("mp3", "wav", "flac", "m4a", "aac", "ogg", "opus", "wma", "amr")
@@ -192,6 +194,7 @@ object AudioPlayerManager {
             sleepTimerRemainingSec = 0
             return
         }
+        sleepTrackCountRemaining = 0
         sleepTimerRemainingSec = minutes * 60
         sleepTimerJob = scope.launch {
             while (isActive && sleepTimerRemainingSec > 0) {
@@ -203,6 +206,21 @@ object AudioPlayerManager {
                 isPlaying = false
             }
         }
+    }
+
+    fun setSleepTrackCount(tracks: Int) {
+        val clean = tracks.coerceAtLeast(0)
+        sleepTrackCountRemaining = clean
+        if (clean > 0) {
+            sleepTimerJob?.cancel()
+            sleepTimerRemainingSec = 0
+        }
+    }
+
+    fun cancelAllSleepTimers() {
+        sleepTimerJob?.cancel()
+        sleepTimerRemainingSec = 0
+        sleepTrackCountRemaining = 0
     }
 
     private fun startProgressPolling() {
@@ -369,6 +387,14 @@ object AudioPlayerManager {
     }
 
     private fun handleTrackEnded(context: Context) {
+        if (sleepTrackCountRemaining > 0) {
+            sleepTrackCountRemaining--
+            if (sleepTrackCountRemaining <= 0) {
+                exoPlayer?.pause()
+                isPlaying = false
+                return
+            }
+        }
         when (repeatMode) {
             Player.REPEAT_MODE_ONE -> {
                 exoPlayer?.seekTo(0)
@@ -457,6 +483,7 @@ object AudioPlayerManager {
         stopProgressPolling()
         sleepTimerJob?.cancel()
         sleepTimerRemainingSec = 0
+        sleepTrackCountRemaining = 0
         runCatching { equalizer?.release() }
         runCatching { bassBoost?.release() }
         equalizer = null

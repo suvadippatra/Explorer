@@ -391,24 +391,7 @@ fun MiniAppLandingScreen(
                         )
                     }
 
-                    Spacer(modifier = Modifier.width(4.dp))
-
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = descriptor.accentColor.copy(alpha = 0.15f),
-                        modifier = Modifier.size(28.dp)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = descriptor.icon,
-                                contentDescription = null,
-                                tint = descriptor.accentColor,
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
 
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
@@ -523,7 +506,7 @@ fun MiniAppLandingScreen(
                 contentPadding = PaddingValues(vertical = 14.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // Hero Action Cards: Create New vs Open File to Edit
+                // Hero Action Cards: Open File to Edit vs Create Blank Canvas / New File
                 item {
                     if (isDesktopLayout) {
                         Row(
@@ -531,50 +514,58 @@ fun MiniAppLandingScreen(
                             horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
                             StudioLandingActionCard(
-                                title = if (toolId == "image_studio") "Create Blank Canvas" else "Create New File",
+                                title = if (toolId == "image_studio") "Open Image to Edit" else "Open File to Edit",
                                 subtitle = if (toolId == "image_studio") {
-                                    "Start a fresh 1080p PNG/JPG/WEBP canvas in PhotoEditor Studio"
+                                    "Pick an existing photo to crop, filter, frame on a canvas, or annotate"
+                                } else {
+                                    "Browse storage for ${descriptor.supportedExtensions.take(8).joinToString(", ") { ".$it" }} files"
+                                },
+                                icon = Icons.Default.FolderOpen,
+                                accentColor = MaterialTheme.colorScheme.primary,
+                                buttonLabel = "Browse Files",
+                                onClick = { showFilePicker = true },
+                                modifier = Modifier.weight(1f)
+                            )
+                            StudioLandingActionCard(
+                                title = if (toolId == "image_studio") "New Blank / Layer Canvas" else "Create New File",
+                                subtitle = if (toolId == "image_studio") {
+                                    "Start a blank 1080p sketchpad or composite multiple images onto a canvas"
                                 } else {
                                     "Create a new ${studioExtensions.joinToString(", ")} document and edit immediately"
                                 },
                                 icon = Icons.Default.NoteAdd,
                                 accentColor = descriptor.accentColor,
-                                buttonLabel = "Create New",
+                                buttonLabel = if (toolId == "image_studio") "New Canvas" else "Create New",
                                 onClick = { showCreateDialog = true },
-                                modifier = Modifier.weight(1f)
-                            )
-                            StudioLandingActionCard(
-                                title = "Open File to Edit",
-                                subtitle = "Browse storage for ${descriptor.supportedExtensions.take(8).joinToString(", ") { ".$it" }} files",
-                                icon = Icons.Default.FolderOpen,
-                                accentColor = MaterialTheme.colorScheme.primary,
-                                buttonLabel = "Browse Files",
-                                onClick = { showFilePicker = true },
                                 modifier = Modifier.weight(1f)
                             )
                         }
                     } else {
                         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             StudioLandingActionCard(
-                                title = if (toolId == "image_studio") "Create Blank Canvas" else "Create New File",
+                                title = if (toolId == "image_studio") "Open Image to Edit" else "Open File to Edit",
                                 subtitle = if (toolId == "image_studio") {
-                                    "Start a fresh 1080p PNG/JPG/WEBP canvas in PhotoEditor Studio"
+                                    "Pick an existing photo to crop, filter, frame on a canvas, or annotate"
+                                } else {
+                                    "Browse storage for ${descriptor.supportedExtensions.take(8).joinToString(", ") { ".$it" }} files"
+                                },
+                                icon = Icons.Default.FolderOpen,
+                                accentColor = MaterialTheme.colorScheme.primary,
+                                buttonLabel = "Browse Files",
+                                onClick = { showFilePicker = true },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            StudioLandingActionCard(
+                                title = if (toolId == "image_studio") "New Blank / Layer Canvas" else "Create New File",
+                                subtitle = if (toolId == "image_studio") {
+                                    "Start a blank 1080p sketchpad or composite multiple images onto a canvas"
                                 } else {
                                     "Create a new ${studioExtensions.joinToString(", ")} document and edit immediately"
                                 },
                                 icon = Icons.Default.NoteAdd,
                                 accentColor = descriptor.accentColor,
-                                buttonLabel = "Create New",
+                                buttonLabel = if (toolId == "image_studio") "New Canvas" else "Create New",
                                 onClick = { showCreateDialog = true },
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                            StudioLandingActionCard(
-                                title = "Open File to Edit",
-                                subtitle = "Browse storage for ${descriptor.supportedExtensions.take(8).joinToString(", ") { ".$it" }} files",
-                                icon = Icons.Default.FolderOpen,
-                                accentColor = MaterialTheme.colorScheme.primary,
-                                buttonLabel = "Browse Files",
-                                onClick = { showFilePicker = true },
                                 modifier = Modifier.fillMaxWidth()
                             )
                         }

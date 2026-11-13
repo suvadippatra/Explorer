@@ -264,16 +264,7 @@ fun FileConverterScreen(
                     )
                 }
 
-                Spacer(modifier = Modifier.width(4.dp))
-
-                Icon(
-                    imageVector = Icons.Default.Transform,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(20.dp)
-                )
-
-                Spacer(modifier = Modifier.width(8.dp))
+                Spacer(modifier = Modifier.width(6.dp))
 
                 Column(modifier = Modifier.weight(1f)) {
                     Text(

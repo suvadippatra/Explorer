@@ -95,7 +95,7 @@ object SettingsManager {
     private val _isFullScreenTabBarHidden = mutableStateOf(false)
     val isFullScreenTabBarHidden: State<Boolean> = _isFullScreenTabBarHidden
 
-    private val _isWideSidebarCollapsed = mutableStateOf(true)
+    private val _isWideSidebarCollapsed = mutableStateOf(false)
     val isWideSidebarCollapsed: State<Boolean> = _isWideSidebarCollapsed
 
     private val _isSubpageHeaderPinned = mutableStateOf(true)

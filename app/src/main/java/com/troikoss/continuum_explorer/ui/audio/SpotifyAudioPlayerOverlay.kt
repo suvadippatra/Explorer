@@ -75,6 +75,201 @@ fun SpotifyAudioPlayerOverlay(
     var pipOffsetY by remember { mutableFloatStateOf(120f) }
     var isPipExpanded by remember { mutableStateOf(true) }
     var showQueueSheet by remember { mutableStateOf(false) }
+    var showSleepDialog by remember { mutableStateOf(false) }
+
+    val sleepSec = AudioPlayerManager.sleepTimerRemainingSec
+    val sleepTracks = AudioPlayerManager.sleepTrackCountRemaining
+    val sleepStatusBadgeText = remember(sleepSec, sleepTracks) {
+        when {
+            sleepSec > 0 -> {
+                val m = sleepSec / 60
+                val s = sleepSec % 60
+                String.format(java.util.Locale.US, "%02d:%02d", m, s)
+            }
+            sleepTracks > 0 -> "$sleepTracks trk"
+            else -> ""
+        }
+    }
+
+    if (showSleepDialog) {
+        var customMinutesInput by remember { mutableStateOf("") }
+        var customTracksInput by remember { mutableStateOf("") }
+
+        AlertDialog(
+            onDismissRequest = { showSleepDialog = false },
+            title = {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(Icons.Default.Bedtime, contentDescription = null, tint = Color(0xFF1DB954))
+                    Text("Sleep Timer & Queue Stop", fontWeight = FontWeight.Bold)
+                }
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    if (sleepSec > 0 || sleepTracks > 0) {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = Color(0xFF1DB954).copy(alpha = 0.16f),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = if (sleepSec > 0) {
+                                        "Stopping in ${sleepSec / 60}m ${sleepSec % 60}s"
+                                    } else {
+                                        "Stopping after $sleepTracks track(s)"
+                                    },
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF1DB954)
+                                )
+                                TextButton(
+                                    onClick = { AudioPlayerManager.cancelAllSleepTimers() },
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                                ) {
+                                    Text("Turn Off", style = MaterialTheme.typography.labelSmall)
+                                }
+                            }
+                        }
+                    }
+
+                    // 1. Stop After Custom Time
+                    Text(
+                        text = "Stop Playback After Time",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        listOf(5, 10, 15, 30, 45, 60, 90).forEach { mins ->
+                            FilterChip(
+                                selected = sleepSec in ((mins - 1) * 60 + 1)..(mins * 60),
+                                onClick = {
+                                    AudioPlayerManager.setSleepTimerMinutes(mins)
+                                    showSleepDialog = false
+                                },
+                                label = { Text("${mins}m", style = MaterialTheme.typography.labelSmall) }
+                            )
+                        }
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = customMinutesInput,
+                            onValueChange = { customMinutesInput = it.filter { ch -> ch.isDigit() } },
+                            label = { Text("Custom Minutes") },
+                            placeholder = { Text("e.g. 25") },
+                            singleLine = true,
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.weight(1f)
+                        )
+                        FilledTonalButton(
+                            onClick = {
+                                val mins = customMinutesInput.toIntOrNull() ?: 0
+                                if (mins > 0) {
+                                    AudioPlayerManager.setSleepTimerMinutes(mins)
+                                    showSleepDialog = false
+                                }
+                            },
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Text("Set Time")
+                        }
+                    }
+
+                    HorizontalDivider(thickness = 0.5.dp)
+
+                    // 2. Stop After N Queue Tracks
+                    Text(
+                        text = "Stop After N Queue Tracks",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        listOf(1, 2, 3, 5, 10, 15).forEach { nTracks ->
+                            FilterChip(
+                                selected = sleepTracks == nTracks,
+                                onClick = {
+                                    AudioPlayerManager.setSleepTrackCount(nTracks)
+                                    showSleepDialog = false
+                                },
+                                label = {
+                                    Text(
+                                        if (nTracks == 1) "1 Track" else "$nTracks Tracks",
+                                        style = MaterialTheme.typography.labelSmall
+                                    )
+                                }
+                            )
+                        }
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = customTracksInput,
+                            onValueChange = { customTracksInput = it.filter { ch -> ch.isDigit() } },
+                            label = { Text("Custom Queue Tracks (N)") },
+                            placeholder = { Text("e.g. 4") },
+                            singleLine = true,
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.weight(1f)
+                        )
+                        FilledTonalButton(
+                            onClick = {
+                                val count = customTracksInput.toIntOrNull() ?: 0
+                                if (count > 0) {
+                                    AudioPlayerManager.setSleepTrackCount(count)
+                                    showSleepDialog = false
+                                }
+                            },
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Text("Set Tracks")
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showSleepDialog = false }) {
+                    Text("Close")
+                }
+            },
+            dismissButton = {
+                if (sleepSec > 0 || sleepTracks > 0) {
+                    TextButton(
+                        onClick = {
+                            AudioPlayerManager.cancelAllSleepTimers()
+                            showSleepDialog = false
+                        }
+                    ) {
+                        Text("Disable Timer", color = MaterialTheme.colorScheme.error)
+                    }
+                }
+            }
+        )
+    }
 
     Box(modifier = modifier.fillMaxSize()) {
         // =====================================================================
@@ -317,6 +512,18 @@ fun SpotifyAudioPlayerOverlay(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(2.dp)
                         ) {
+                            // Sleep Timer / Track Stop Button in Pop-Up Header
+                            IconButton(
+                                onClick = { showSleepDialog = true },
+                                modifier = Modifier.size(26.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Bedtime,
+                                    contentDescription = "Sleep Timer & Track Limit",
+                                    tint = if (sleepSec > 0 || sleepTracks > 0) Color(0xFF1DB954) else Color.White.copy(alpha = 0.8f),
+                                    modifier = Modifier.size(15.dp)
+                                )
+                            }
                             // Collapse/Expand Pop-up Details
                             IconButton(
                                 onClick = { isPipExpanded = !isPipExpanded },
@@ -441,6 +648,21 @@ fun SpotifyAudioPlayerOverlay(
                                             fontWeight = FontWeight.SemiBold,
                                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                         )
+                                    }
+                                    if (sleepStatusBadgeText.isNotEmpty()) {
+                                        Surface(
+                                            shape = RoundedCornerShape(6.dp),
+                                            color = Color(0xFF1DB954).copy(alpha = 0.22f),
+                                            modifier = Modifier.clickable { showSleepDialog = true }
+                                        ) {
+                                            Text(
+                                                text = "⏱ $sleepStatusBadgeText",
+                                                color = Color(0xFF1DB954),
+                                                fontSize = 9.5.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -668,6 +890,14 @@ fun SpotifyAudioPlayerOverlay(
                         }
 
                         Row(verticalAlignment = Alignment.CenterVertically) {
+                            // Sleep Timer / Queue Limit Button in Top Bar
+                            IconButton(onClick = { showSleepDialog = true }) {
+                                Icon(
+                                    Icons.Default.Bedtime,
+                                    contentDescription = "Sleep Timer & Track Limit",
+                                    tint = if (sleepSec > 0 || sleepTracks > 0) Color(0xFF1DB954) else Color.White.copy(alpha = 0.8f)
+                                )
+                            }
                             // Toggle Rotating Vinyl vs Square Artwork
                             IconButton(
                                 onClick = {
@@ -733,6 +963,7 @@ fun SpotifyAudioPlayerOverlay(
                                     posMs = posMs,
                                     durMs = durMs,
                                     isPlaying = isPlaying,
+                                    onOpenSleepDialog = { showSleepDialog = true },
                                     onToggleQueue = { showQueueSheet = !showQueueSheet }
                                 )
                             }
@@ -800,6 +1031,7 @@ fun SpotifyAudioPlayerOverlay(
                             posMs = posMs,
                             durMs = durMs,
                             isPlaying = isPlaying,
+                            onOpenSleepDialog = { showSleepDialog = true },
                             onToggleQueue = { showQueueSheet = !showQueueSheet }
                         )
                     }
@@ -815,6 +1047,7 @@ private fun SpotifyControlsBlock(
     posMs: Long,
     durMs: Long,
     isPlaying: Boolean,
+    onOpenSleepDialog: () -> Unit,
     onToggleQueue: () -> Unit
 ) {
     val context = LocalContext.current
@@ -823,7 +1056,7 @@ private fun SpotifyControlsBlock(
     val speed = AudioPlayerManager.playbackSpeed
     val eqPreset = AudioPlayerManager.eqPreset
     val sleepSec = AudioPlayerManager.sleepTimerRemainingSec
-    var showSleepMenu by remember { mutableStateOf(false) }
+    val sleepTracks = AudioPlayerManager.sleepTrackCountRemaining
 
     Column(
         modifier = Modifier
@@ -886,7 +1119,7 @@ private fun SpotifyControlsBlock(
 
         Spacer(Modifier.height(10.dp))
 
-        // Audio Enhancer / Equalizer Preset Row + Sleep Timer
+        // Audio Enhancer / Equalizer Preset Row + Sleep Timer & N-Track Stop Pill
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -917,48 +1150,36 @@ private fun SpotifyControlsBlock(
                 )
             }
 
-            // Sleep Timer Pill
-            Box {
-                FilterChip(
-                    selected = sleepSec > 0,
-                    onClick = { showSleepMenu = true },
-                    leadingIcon = {
-                        Icon(
-                            Icons.Default.Bedtime,
-                            contentDescription = null,
-                            modifier = Modifier.size(14.dp)
-                        )
-                    },
-                    label = {
-                        Text(
-                            if (sleepSec > 0) "Sleep ${sleepSec / 60}m" else "Sleep Timer",
-                            fontSize = 11.sp
-                        )
-                    },
-                    colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = Color(0xFF1DB954).copy(alpha = 0.24f),
-                        selectedLabelColor = Color(0xFF1DB954),
-                        containerColor = Color.White.copy(alpha = 0.08f),
-                        labelColor = Color.White.copy(alpha = 0.8f)
-                    ),
-                    border = null,
-                    modifier = Modifier.height(28.dp)
-                )
-                DropdownMenu(
-                    expanded = showSleepMenu,
-                    onDismissRequest = { showSleepMenu = false }
-                ) {
-                    listOf(0 to "Off", 15 to "15 Minutes", 30 to "30 Minutes", 60 to "60 Minutes").forEach { (mins, label) ->
-                        DropdownMenuItem(
-                            text = { Text(label) },
-                            onClick = {
-                                AudioPlayerManager.setSleepTimerMinutes(mins)
-                                showSleepMenu = false
-                            }
-                        )
-                    }
-                }
-            }
+            // Sleep Timer & Queue Track Limit Pill
+            FilterChip(
+                selected = sleepSec > 0 || sleepTracks > 0,
+                onClick = onOpenSleepDialog,
+                leadingIcon = {
+                    Icon(
+                        Icons.Default.Bedtime,
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp)
+                    )
+                },
+                label = {
+                    Text(
+                        text = when {
+                            sleepSec > 0 -> "Sleep ${sleepSec / 60}m ${sleepSec % 60}s"
+                            sleepTracks > 0 -> "Stop in $sleepTracks Track(s)"
+                            else -> "Sleep / Queue Limit"
+                        },
+                        fontSize = 11.sp
+                    )
+                },
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = Color(0xFF1DB954).copy(alpha = 0.24f),
+                    selectedLabelColor = Color(0xFF1DB954),
+                    containerColor = Color.White.copy(alpha = 0.08f),
+                    labelColor = Color.White.copy(alpha = 0.8f)
+                ),
+                border = null,
+                modifier = Modifier.height(28.dp)
+            )
         }
 
         Spacer(Modifier.height(10.dp))

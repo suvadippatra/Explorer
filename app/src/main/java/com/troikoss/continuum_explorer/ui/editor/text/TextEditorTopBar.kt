@@ -1,9 +1,7 @@
 package com.troikoss.continuum_explorer.ui.editor.text
 
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.*
@@ -12,8 +10,15 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
+/**
+ * Minimalist 50.dp Top Bar for Markor Text & Markdown Studio in Create/Edit mode:
+ * - Uses Triple-Line Menu button (`Icons.Default.Menu`) to toggle the navigation sidebar
+ *   (no Back arrow button and no decorative icon before the title).
+ * - Closing the editor is handled via system Back gesture or closing the tab.
+ */
 @Composable
 fun TextEditorTopBar(
     fileName: String,
@@ -30,6 +35,7 @@ fun TextEditorTopBar(
     onViewPath: (() -> Unit)? = null,
     onChangePath: (() -> Unit)? = null,
     onToggleToc: (() -> Unit)? = null,
+    onCloseEditor: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     var showMoreMenu by remember { mutableStateOf(false) }
@@ -37,7 +43,9 @@ fun TextEditorTopBar(
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         tonalElevation = 2.dp,
-        modifier = modifier.fillMaxWidth().height(50.dp)
+        modifier = modifier
+            .fillMaxWidth()
+            .height(50.dp)
     ) {
         Row(
             modifier = Modifier
@@ -53,26 +61,20 @@ fun TextEditorTopBar(
             ) {
                 IconButton(onClick = onMenuClick, modifier = Modifier.size(36.dp)) {
                     Icon(
-                        Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Back",
+                        Icons.Default.Menu,
+                        contentDescription = "Toggle Sidebar",
                         tint = MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.size(20.dp)
                     )
                 }
-
-                Icon(
-                    imageVector = if (isMarkdown) Icons.Default.Article else Icons.Default.Description,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(18.dp)
-                )
 
                 Text(
                     text = fileName,
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
 
@@ -80,7 +82,6 @@ fun TextEditorTopBar(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(2.dp)
             ) {
-                // Dedicated Markdown Preview button (only active for Markdown documents)
                 if (isMarkdown) {
                     IconButton(
                         onClick = {
@@ -145,7 +146,6 @@ fun TextEditorTopBar(
                     )
                 }
 
-                // Checkmark to save
                 IconButton(onClick = onSave, modifier = Modifier.size(36.dp)) {
                     Icon(
                         Icons.Default.Check,
@@ -155,7 +155,6 @@ fun TextEditorTopBar(
                     )
                 }
 
-                // Full-Screen Toggle (Hides/Shows Top TabBar)
                 val isFullScreen by com.troikoss.continuum_explorer.managers.SettingsManager.isFullScreenTabBarHidden
                 IconButton(
                     onClick = { com.troikoss.continuum_explorer.managers.SettingsManager.toggleFullScreenTabBar() },
@@ -228,6 +227,17 @@ fun TextEditorTopBar(
                                 onClick = {
                                     showMoreMenu = false
                                     onOpenExternal()
+                                }
+                            )
+                        }
+                        if (onCloseEditor != null) {
+                            HorizontalDivider()
+                            DropdownMenuItem(
+                                text = { Text("Close Editor", color = MaterialTheme.colorScheme.error) },
+                                leadingIcon = { Icon(Icons.Default.Close, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+                                onClick = {
+                                    showMoreMenu = false
+                                    onCloseEditor()
                                 }
                             )
                         }

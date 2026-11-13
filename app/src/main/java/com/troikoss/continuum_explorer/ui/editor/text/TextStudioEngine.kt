@@ -3,6 +3,8 @@ package com.troikoss.continuum_explorer.ui.editor.text
 import android.content.Intent
 import android.os.Environment
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -16,12 +18,17 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.troikoss.continuum_explorer.data.db.SuiteActivityType
@@ -39,6 +46,8 @@ import java.io.File
 
 /**
  * Markor-powered Document, Markdown, Todo.txt, Org-Mode, AsciiDoc & CSV Editor Engine.
+ * Features 1:1 TextLayoutResult-synchronized line numbers that stay aligned even when long lines soft-wrap,
+ * Triple-Line Menu sidebar toggle in the header, and gesture/tab-close exit.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -132,6 +141,18 @@ fun MarkorTextEngine(
     var showPathInfoDialog by remember { mutableStateOf(false) }
     var showMoveFilePicker by remember { mutableStateOf(false) }
     var jumpLineInput by remember { mutableStateOf("") }
+    var lastBackPressMs by remember { mutableLongStateOf(0L) }
+
+    // Allow system Back gesture to close the editing page cleanly
+    BackHandler(enabled = onExitEditor != null) {
+        val now = System.currentTimeMillis()
+        if (now - lastBackPressMs < 2000L) {
+            onExitEditor?.invoke()
+        } else {
+            lastBackPressMs = now
+            Toast.makeText(context, "Swipe/press back again or close tab to exit editor", Toast.LENGTH_SHORT).show()
+        }
+    }
 
     fun saveDocument() {
         if (onCustomSave != null) {
@@ -273,9 +294,7 @@ fun MarkorTextEngine(
             isMarkdown = isMarkdownLike,
             displayMode = stateController.displayMode,
             isLargeScreen = isLargeScreen,
-            onMenuClick = {
-                if (onExitEditor != null) onExitEditor() else onMenuClick()
-            },
+            onMenuClick = onMenuClick,
             onModeChange = { stateController.displayMode = it },
             onUndo = { stateController.undo() },
             onRedo = { stateController.redo() },
@@ -286,7 +305,8 @@ fun MarkorTextEngine(
             onChangePath = { showMoveFilePicker = true },
             onToggleToc = if (isMarkdownLike) {
                 { stateController.showTocDrawer = !stateController.showTocDrawer }
-            } else null
+            } else null,
+            onCloseEditor = onExitEditor
         )
 
         // Search & Replace Bar
@@ -392,27 +412,17 @@ fun MarkorTextEngine(
                 }
                 stateController.displayMode == TextDisplayMode.SPLIT -> {
                     Row(modifier = Modifier.fillMaxSize()) {
-                        Box(
+                        SynchronizedLineNumberTextEditor(
+                            textFieldValue = stateController.textFieldValue,
+                            onValueChange = { stateController.updateText(it) },
+                            fontSizeSp = stateController.fontSizeSp,
+                            fontFamily = FontFamily.Monospace,
+                            syntaxHighlighter = syntaxHighlighter,
+                            currentCursorLine = stateController.stats.currentLine,
                             modifier = Modifier
                                 .weight(1f)
                                 .fillMaxHeight()
-                                .padding(12.dp)
-                                .verticalScroll(rememberScrollState())
-                        ) {
-                            BasicTextField(
-                                value = stateController.textFieldValue,
-                                onValueChange = { stateController.updateText(it) },
-                                textStyle = TextStyle(
-                                    fontFamily = FontFamily.Monospace,
-                                    fontSize = stateController.fontSizeSp.sp,
-                                    lineHeight = (stateController.fontSizeSp * 1.4f).sp,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                ),
-                                visualTransformation = syntaxHighlighter,
-                                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        }
+                        )
                         VerticalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outlineVariant)
                         DocumentPreviewEngine(
                             rawText = stateController.textContent,
@@ -423,26 +433,15 @@ fun MarkorTextEngine(
                     }
                 }
                 else -> {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(14.dp)
-                            .verticalScroll(rememberScrollState())
-                    ) {
-                        BasicTextField(
-                            value = stateController.textFieldValue,
-                            onValueChange = { stateController.updateText(it) },
-                            textStyle = TextStyle(
-                                fontFamily = if (stateController.formatType == TextFormatType.PLAIN_TEXT) FontFamily.Default else FontFamily.Monospace,
-                                fontSize = stateController.fontSizeSp.sp,
-                                lineHeight = (stateController.fontSizeSp * 1.45f).sp,
-                                color = MaterialTheme.colorScheme.onSurface
-                            ),
-                            visualTransformation = syntaxHighlighter,
-                            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    }
+                    SynchronizedLineNumberTextEditor(
+                        textFieldValue = stateController.textFieldValue,
+                        onValueChange = { stateController.updateText(it) },
+                        fontSizeSp = stateController.fontSizeSp,
+                        fontFamily = if (stateController.formatType == TextFormatType.PLAIN_TEXT) FontFamily.Default else FontFamily.Monospace,
+                        syntaxHighlighter = syntaxHighlighter,
+                        currentCursorLine = stateController.stats.currentLine,
+                        modifier = Modifier.fillMaxSize()
+                    )
                 }
             }
 
@@ -473,5 +472,133 @@ fun MarkorTextEngine(
                 if (stateController.fontSizeSp < 30f) stateController.fontSizeSp += 1f
             }
         )
+    }
+}
+
+/**
+ * Synchronized Line-Number + BasicTextField Pane.
+ * Uses [TextLayoutResult] (`onTextLayout`) to measure the exact Y-coordinate (`getLineTop`) and baseline
+ * of every logical line's first visual line. Even when long paragraphs soft-wrap across multiple rows,
+ * each line number is rendered at the exact vertical offset of its corresponding text line.
+ */
+@Composable
+private fun SynchronizedLineNumberTextEditor(
+    textFieldValue: TextFieldValue,
+    onValueChange: (TextFieldValue) -> Unit,
+    fontSizeSp: Float,
+    fontFamily: FontFamily,
+    syntaxHighlighter: SyntaxHighlighter,
+    currentCursorLine: Int,
+    modifier: Modifier = Modifier
+) {
+    val verticalScroll = rememberScrollState()
+    var textLayoutResult by remember { mutableStateOf<TextLayoutResult?>(null) }
+    val density = LocalDensity.current
+
+    val logicalLineStartOffsets = remember(textFieldValue.text) {
+        val offsets = mutableListOf(0)
+        val raw = textFieldValue.text
+        for (i in raw.indices) {
+            if (raw[i] == '\n') {
+                offsets.add(i + 1)
+            }
+        }
+        offsets
+    }
+
+    val gutterDigits = remember(logicalLineStartOffsets.size) {
+        logicalLineStartOffsets.size.toString().length.coerceAtLeast(2)
+    }
+    val gutterWidthDp = remember(gutterDigits, fontSizeSp) {
+        ((gutterDigits * (fontSizeSp * 0.65f)) + 20f).dp
+    }
+
+    val numberColorArgb = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f).toArgb()
+    val activeNumberColorArgb = MaterialTheme.colorScheme.primary.toArgb()
+    val gutterBgColor = MaterialTheme.colorScheme.surfaceContainerLow
+
+    Row(
+        modifier = modifier
+            .fillMaxSize()
+            .verticalScroll(verticalScroll)
+    ) {
+        // 1:1 TextLayoutResult-Synchronized Line Number Gutter
+        val totalTextHeightDp = with(density) {
+            (textLayoutResult?.size?.height ?: 0).toDp().coerceAtLeast(240.dp)
+        }
+        Box(
+            modifier = Modifier
+                .width(gutterWidthDp)
+                .heightIn(min = totalTextHeightDp + 28.dp)
+                .background(gutterBgColor)
+                .padding(top = 14.dp, bottom = 14.dp)
+        ) {
+            val textSizePx = with(density) { (fontSizeSp * 0.88f).sp.toPx() }
+            val rightPadPx = with(density) { 8.dp.toPx() }
+            Canvas(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(totalTextHeightDp)
+            ) {
+                val layout = textLayoutResult ?: return@Canvas
+                val textLen = textFieldValue.text.length
+                val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                    textAlign = android.graphics.Paint.Align.RIGHT
+                    textSize = textSizePx
+                    typeface = android.graphics.Typeface.MONOSPACE
+                }
+                logicalLineStartOffsets.forEachIndexed { index, startOffset ->
+                    val lineNum = index + 1
+                    val safeOffset = startOffset.coerceIn(0, textLen)
+                    val visualLine = try {
+                        layout.getLineForOffset(safeOffset)
+                    } catch (_: Exception) {
+                        0
+                    }
+                    val baselineY = try {
+                        layout.getLineBaseline(visualLine)
+                    } catch (_: Exception) {
+                        visualLine * textSizePx * 1.45f + textSizePx
+                    }
+                    paint.color = if (lineNum == currentCursorLine) activeNumberColorArgb else numberColorArgb
+                    paint.isFakeBoldText = (lineNum == currentCursorLine)
+                    drawContext.canvas.nativeCanvas.drawText(
+                        lineNum.toString(),
+                        size.width - rightPadPx,
+                        baselineY,
+                        paint
+                    )
+                }
+            }
+        }
+
+        VerticalDivider(
+            thickness = 0.5.dp,
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
+        )
+
+        // Editor Text Field
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .padding(horizontal = 12.dp, vertical = 14.dp)
+        ) {
+            BasicTextField(
+                value = textFieldValue,
+                onValueChange = onValueChange,
+                onTextLayout = { result -> textLayoutResult = result },
+                textStyle = TextStyle(
+                    fontFamily = fontFamily,
+                    fontSize = fontSizeSp.sp,
+                    lineHeight = (fontSizeSp * 1.45f).sp,
+                    color = MaterialTheme.colorScheme.onSurface
+                ),
+                visualTransformation = syntaxHighlighter,
+                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 240.dp)
+            )
+        }
     }
 }

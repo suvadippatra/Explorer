@@ -409,7 +409,7 @@ fun FileExplorer(
         }
     }
 
-    // Ensure ModalNavigationDrawer and permanent sidebar never pop open automatically when resizing window
+    // Close mobile modal drawer if screen transitions to wide layout, but keep wide sidebar open
     val previousScreenSizeState = remember { androidx.compose.runtime.mutableStateOf(screenSize) }
     LaunchedEffect(screenSize) {
         val prev = previousScreenSizeState.value
@@ -417,10 +417,17 @@ fun FileExplorer(
             if (drawerState.isOpen) {
                 drawerState.close()
             }
-            if (prev == ScreenSize.SMALL && screenSize != ScreenSize.SMALL) {
-                SettingsManager.setWideSidebarCollapsed(true)
-            }
             previousScreenSizeState.value = screenSize
+        }
+    }
+
+    // Hide sidebar by default ONLY when a Mini-App enters Create or Edit mode; keep it visible otherwise
+    val isMiniAppInCreateOrEdit = appState.viewingFile != null && appState.openInEditMode
+    LaunchedEffect(isMiniAppInCreateOrEdit) {
+        if (isMiniAppInCreateOrEdit) {
+            SettingsManager.setWideSidebarCollapsed(true)
+        } else {
+            SettingsManager.setWideSidebarCollapsed(false)
         }
     }
 
@@ -702,10 +709,10 @@ private fun ExplorerBody(
     val navPaneWidth = appState.appConfigs.navPaneWidth
     val detailsPaneWidth = appState.appConfigs.detailsPaneWidth
 
-    // Show permanent collapsible sidebar on Tablet & DeX when not collapsed and not in full-page file viewer
+    // Show permanent collapsible sidebar on Tablet & DeX when not collapsed and not in video fullscreen
     val showPermanentSidebar = screenSize != ScreenSize.SMALL &&
         !isWideSidebarCollapsed &&
-        appState.viewingFile == null
+        !appState.isVideoFullScreen
 
     Column(modifier = modifier.fillMaxSize()) {
         Row(
@@ -746,7 +753,7 @@ private fun ExplorerBody(
                                 onAddStorageClick = onAddStorage,
                                 onAddNetworkClick = onAddNetwork,
                                 onEditNetworkClick = onEditNetwork,
-                                onNavigate = onCollapseWideSidebar
+                                onNavigate = {}
                             )
                         }
                     }

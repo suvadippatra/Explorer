@@ -1,215 +1,162 @@
 package com.troikoss.continuum_explorer.ui.activities
 
 import android.content.Intent
-import android.content.pm.PackageManager
-import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.Settings
+import android.widget.Toast
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.core.content.ContextCompat
+import androidx.appcompat.app.AppCompatActivity
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.ui.Modifier
+import androidx.core.net.toUri
 import androidx.lifecycle.lifecycleScope
+import coil.Coil
 import coil.ImageLoader
+import coil.decode.GifDecoder
+import coil.decode.ImageDecoderDecoder
+import coil.decode.SvgDecoder
 import coil.decode.VideoFrameDecoder
-import com.troikoss.continuum_explorer.providers.UniversalFileFetcher
-import com.troikoss.continuum_explorer.model.LibraryItem
+import coil.disk.DiskCache
+import coil.memory.MemoryCache
+import coil.request.CachePolicy
+import com.troikoss.continuum_explorer.R
+import com.troikoss.continuum_explorer.managers.SettingsManager
 import com.troikoss.continuum_explorer.ui.FileExplorer
 import com.troikoss.continuum_explorer.ui.theme.FileExplorerTheme
-import com.troikoss.continuum_explorer.managers.SettingsManager
-import com.troikoss.continuum_explorer.providers.StorageProviders
+import com.troikoss.continuum_explorer.utils.GlobalEvents
+import com.troikoss.continuum_explorer.utils.PermissionCoordinator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import java.io.File
-import android.Manifest
-import androidx.appcompat.app.AppCompatActivity
-import coil.Coil
-import java.util.UUID
 
+/**
+ * Primary entry point for the Continuum Explorer application.
+ * Handles lifecycle, serialized runtime permissions, high-speed Coil thumbnail caching,
+ * and sets up the Compose UI.
+ */
 class MainActivity : AppCompatActivity() {
 
-    private val requestPermissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { isGranted: Boolean ->
-        if (isGranted) {
-            // The user granted the permission. Notifications will work!
-        } else {
-            // The user denied the permission.
-            // Optional: You could show a message here explaining why you need it later.
+    private lateinit var permissionCoordinator: PermissionCoordinator
+
+    private val manageAllFilesLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+            GlobalEvents.triggerRefresh()
         }
-    }
 
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
 
-    private val storagePermissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) {
-        // Permissions updated
-    }
+        // Initialize SettingsManager quickly
+        SettingsManager.init(this)
 
-    private fun requestStoragePermissions() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            if (!Environment.isExternalStorageManager()) {
-                try {
-                    val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
-                        data = Uri.parse("package:$packageName")
-                    }
-                    startActivity(intent)
-                } catch (e: Exception) {
-                    try {
-                        val fallback = Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
-                        startActivity(fallback)
-                    } catch (_: Exception) {}
+        // Register serialized PermissionCoordinator BEFORE activity reaches STARTED state
+        permissionCoordinator = PermissionCoordinator(this) {
+            GlobalEvents.triggerRefresh()
+        }
+
+        // Configure global high-performance Coil ImageLoader on background IO thread
+        lifecycleScope.launch(Dispatchers.IO) {
+            configureHighPerformanceCoilLoader()
+        }
+
+        val initialZipUri = if (intent?.action == Intent.ACTION_VIEW) intent.data else null
+        val rawPath = intent?.getStringExtra("shortcut_path")
+        val shortcutPath = if (rawPath != null && !File(rawPath).exists()) {
+            Toast.makeText(this, "Folder does not exist: $rawPath", Toast.LENGTH_SHORT).show()
+            null
+        } else {
+            rawPath
+        }
+        val shortcutSafUri = intent?.getStringExtra("shortcut_saf_uri")
+        val shortcutNetworkId = intent?.getStringExtra("shortcut_network_id")
+
+        enableEdgeToEdge()
+
+        setContent {
+            FileExplorerTheme {
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background
+                ) {
+                    FileExplorer(
+                        initialPath = shortcutPath,
+                        initialUri = shortcutSafUri,
+                        initialArchiveUri = initialZipUri,
+                        initialNetworkConnectionId = shortcutNetworkId
+                    )
                 }
             }
         }
-        
-        val needed = mutableListOf<String>()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_IMAGES) != PackageManager.PERMISSION_GRANTED) {
-                needed.add(Manifest.permission.READ_MEDIA_IMAGES)
-            }
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_VIDEO) != PackageManager.PERMISSION_GRANTED) {
-                needed.add(Manifest.permission.READ_MEDIA_VIDEO)
-            }
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-                needed.add(Manifest.permission.READ_MEDIA_AUDIO)
-            }
-        } else {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
-                needed.add(Manifest.permission.READ_EXTERNAL_STORAGE)
-            }
-            if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.Q && ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
-                needed.add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
-            }
-        }
-        if (needed.isNotEmpty()) {
-            storagePermissionLauncher.launch(needed.toTypedArray())
+
+        // Defer runtime permission check until after the first UI frame renders to prevent
+        // main-thread frame drops (`Skipped 35 frames!`) and overlapping permission requests.
+        window.decorView.post {
+            requestStorageAndNotificationPermissions()
         }
     }
 
     override fun onResume() {
         super.onResume()
-        val hasStorageAccess = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            Environment.isExternalStorageManager()
-        } else {
-            ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
-        }
-        if (hasStorageAccess) {
-            lifecycleScope.launch(Dispatchers.IO) {
-                StorageProviders.init(applicationContext)
-            }
-        }
+        GlobalEvents.triggerRefresh()
     }
 
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-
-        // Dismiss system splash screen immediately on Android 12+
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            splashScreen.setOnExitAnimationListener { splashScreenView ->
-                splashScreenView.remove()
-            }
-        }
-
-        // Request storage permissions immediately on initial launch
-        requestStoragePermissions()
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (ContextCompat.checkSelfPermission(
-                    this,
-                    Manifest.permission.POST_NOTIFICATIONS
-                ) != PackageManager.PERMISSION_GRANTED
-            ) {
-                requestPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-            }
-        }
-
-        // Initialize settings and warm up storage providers off the UI thread
-        SettingsManager.init(applicationContext)
-        lifecycleScope.launch(Dispatchers.IO) {
-            com.troikoss.continuum_explorer.ui.theme.preloadAppFonts(applicationContext)
-            StorageProviders.init(applicationContext)
-        }
-
-        if (intent.action == "com.troikoss.continuum_explorer.OPEN_NEW_WINDOW") {
-            val freshIntent = Intent(this, MainActivity::class.java).apply {
-                action = Intent.ACTION_MAIN
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or
-                        Intent.FLAG_ACTIVITY_MULTIPLE_TASK or
-                        Intent.FLAG_ACTIVITY_NEW_DOCUMENT
-                data = Uri.fromParts("window", UUID.randomUUID().toString(), null)
-            }
-            startActivity(freshIntent)
-            finish()
-            return
-        }
-
-        val initialPath = intent.getStringExtra("path")
-        val initialUri = intent.getStringExtra("uri")
-        val initialArchive = run {
-            val path = intent.getStringExtra("archivePath")
-            if (path != null) File(path) else null
-        }
-        val initialLibraryItem = when {
-            intent.getBooleanExtra("isRecent", false) -> LibraryItem.Recent
-            intent.getBooleanExtra("isGallery", false) -> LibraryItem.Gallery
-            intent.getBooleanExtra("isRecycleBin", false) -> LibraryItem.RecycleBin
-            intent.getBooleanExtra("isVibeArea", false) -> LibraryItem.VibeArea
-            intent.getBooleanExtra("isFtpServer", false) -> LibraryItem.FtpServer
-            intent.getBooleanExtra("isExternalFtp", false) -> LibraryItem.ExternalFtp
-            else -> LibraryItem.None
-        }
-        val initialNetworkConnectionId = intent.getStringExtra("networkConnectionId")
-        val initialOpenFilePath = intent.getStringExtra("openFilePath")
-        val initialOpenInEditMode = intent.getBooleanExtra("openInEditMode", false)
-        val initialEditorToolId = intent.getStringExtra("editorToolId")
-        val initialConverterFilePaths = intent.getStringArrayListExtra("converterFilePaths")?.toList().orEmpty()
-        val isSingleAppWindow = intent.getBooleanExtra("isSingleAppWindow", false)
-
-        setContent {
-            FileExplorerTheme {
-                FileExplorer(
-                    initialPath = initialPath,
-                    initialUri = initialUri,
-                    initialArchive = initialArchive,
-                    initialLibraryItem = initialLibraryItem,
-                    initialNetworkConnectionId = initialNetworkConnectionId,
-                    initialOpenFilePath = initialOpenFilePath,
-                    initialOpenInEditMode = initialOpenInEditMode,
-                    initialEditorToolId = initialEditorToolId,
-                    initialConverterFilePaths = initialConverterFilePaths,
-                    isSingleAppWindow = isSingleAppWindow
-                )
-            }
-        }
+    private fun configureHighPerformanceCoilLoader() {
+        try {
+            val imageLoader = ImageLoader.Builder(applicationContext)
+                .memoryCache {
+                    MemoryCache.Builder(applicationContext)
+                        .maxSizePercent(0.25)
+                        .build()
+                }
+                .diskCache {
+                    DiskCache.Builder()
+                        .directory(File(applicationContext.cacheDir, "coil_media_thumbs"))
+                        .maxSizeBytes(120L * 1024L * 1024L) // 120 MB fast SSD thumbnail cache
+                        .build()
+                }
+                .components {
+                    add(VideoFrameDecoder.Factory())
+                    add(SvgDecoder.Factory())
+                    if (Build.VERSION.SDK_INT >= 28) {
+                        add(ImageDecoderDecoder.Factory())
+                    } else {
+                        add(GifDecoder.Factory())
+                    }
+                }
+                .memoryCachePolicy(CachePolicy.ENABLED)
+                .diskCachePolicy(CachePolicy.ENABLED)
+                .allowHardware(true)
+                .crossfade(false)
+                .build()
+            Coil.setImageLoader(imageLoader)
+        } catch (_: Exception) {}
     }
 
-    override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(intent)
-        setIntent(intent)
-        if (intent.action == "com.troikoss.continuum_explorer.OPEN_NEW_WINDOW") {
-            val newWindowIntent = Intent(this, MainActivity::class.java).apply {
-                action = Intent.ACTION_MAIN
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or
-                        Intent.FLAG_ACTIVITY_MULTIPLE_TASK or
-                        Intent.FLAG_ACTIVITY_NEW_DOCUMENT
-                data = Uri.fromParts("window", UUID.randomUUID().toString(), null)
+    /**
+     * Requests storage and notification permissions without ever launching two permission dialogs simultaneously.
+     */
+    private fun requestStorageAndNotificationPermissions() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            if (!Environment.isExternalStorageManager()) {
+                try {
+                    val intent = Intent(
+                        Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                        "package:$packageName".toUri()
+                    )
+                    manageAllFilesLauncher.launch(intent)
+                } catch (_: Exception) {
+                    val intent = Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
+                    manageAllFilesLauncher.launch(intent)
+                }
             }
-            startActivity(newWindowIntent)
-            return
         }
-        val targetLibraryItem = when {
-            intent.getBooleanExtra("isRecent", false) -> LibraryItem.Recent
-            intent.getBooleanExtra("isGallery", false) -> LibraryItem.Gallery
-            intent.getBooleanExtra("isRecycleBin", false) -> LibraryItem.RecycleBin
-            intent.getBooleanExtra("isVibeArea", false) -> LibraryItem.VibeArea
-            intent.getBooleanExtra("isFtpServer", false) -> LibraryItem.FtpServer
-            intent.getBooleanExtra("isExternalFtp", false) -> LibraryItem.ExternalFtp
-            else -> null
-        }
-        if (targetLibraryItem != null) {
-            com.troikoss.continuum_explorer.utils.GlobalEvents.requestOpenLibraryItem(targetLibraryItem)
-        }
+        // Single serialized batch request for READ_MEDIA_* and POST_NOTIFICATIONS
+        permissionCoordinator.requestStartupPermissionsIfNeeded()
     }
 }

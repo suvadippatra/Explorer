@@ -701,6 +701,20 @@ fun TopBar(
             val activeViewMode = appState.folderConfigs.viewMode
             val currentStorageKey = appState.getCurrentStorageKey()
 
+            if (appState.libraryItem == LibraryItem.Gallery || activeViewMode == com.troikoss.continuum_explorer.model.ViewMode.GALLERY) {
+                IconButton(
+                    onClick = { appState.is3dGalleryWallEnabled = !appState.is3dGalleryWallEnabled },
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.ViewInAr,
+                        contentDescription = "Toggle 3D Picture Wall",
+                        modifier = Modifier.size(20.dp),
+                        tint = if (appState.is3dGalleryWallEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
             Box {
                 IconButton(
                     onClick = { viewMenuExpanded = true },
@@ -741,7 +755,7 @@ fun TopBar(
                     )
 
                     viewModes.forEach { (mode, label, icon) ->
-                        val isSelected = activeViewMode == mode
+                        val isSelected = activeViewMode == mode && !appState.is3dGalleryWallEnabled
                         DropdownMenuItem(
                             text = {
                                 Text(
@@ -769,10 +783,44 @@ fun TopBar(
                                 }
                             },
                             onClick = {
+                                appState.is3dGalleryWallEnabled = false
                                 appState.folderConfigs.updateViewMode(mode, currentStorageKey)
                             }
                         )
                     }
+
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                text = "3D Picture Wall (Touch)",
+                                fontWeight = if (appState.is3dGalleryWallEnabled) FontWeight.Bold else FontWeight.Normal,
+                                color = if (appState.is3dGalleryWallEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                            )
+                        },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = Icons.Default.ViewInAr,
+                                contentDescription = null,
+                                tint = if (appState.is3dGalleryWallEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        },
+                        trailingIcon = {
+                            if (appState.is3dGalleryWallEnabled) {
+                                Icon(
+                                    imageVector = Icons.Default.Check,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        },
+                        onClick = {
+                            appState.folderConfigs.updateViewMode(com.troikoss.continuum_explorer.model.ViewMode.GALLERY, currentStorageKey)
+                            appState.is3dGalleryWallEnabled = !appState.is3dGalleryWallEnabled
+                            viewMenuExpanded = false
+                        }
+                    )
 
                     if (activeViewMode == com.troikoss.continuum_explorer.model.ViewMode.GRID ||
                         activeViewMode == com.troikoss.continuum_explorer.model.ViewMode.GALLERY

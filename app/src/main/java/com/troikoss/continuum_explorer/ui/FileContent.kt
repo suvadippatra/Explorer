@@ -487,39 +487,47 @@ private fun FileLayout(
                     }
                 }
         ) {
-            FileGrid(
-                appState = appState,
-                gridState = gridState,
-                itemPositions = itemPositions,
-                containerCoordinates = containerCoordinates,
-                mousePosition = mousePosition,
-                focusRequester = focusRequester,
-                dragActive = dragStart != null,
-                hScrollState = hScrollState,
-                detailsContentWidthPx = detailsContentWidthPx
-            )
-
-            MarqueeRenderer(
-                dragStart = dragStart?.let { Offset(it.x, it.y - headerHeightPx) },
-                dragEnd = dragEnd?.let { Offset(it.x, it.y - headerHeightPx) },
-                marquee = marquee
-            )
-
-            VerticalScrollbar(
-                gridState = gridState,
-                isNearEdge = showVertical,
-                modifier = Modifier.align(Alignment.CenterEnd).padding(end = 4.dp)
-            )
-
-            if (viewMode == ViewMode.DETAILS) {
-                HorizontalScrollbar(
-                    scrollState = hScrollState,
-                    isNearEdge = showHorizontal,
-                    isRecentlyScrolled = isHScrollActive,
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(horizontal = 8.dp, vertical = 8.dp)
+            if (appState.is3dGalleryWallEnabled && (appState.libraryItem == com.troikoss.continuum_explorer.model.LibraryItem.Gallery || viewMode == ViewMode.GALLERY)) {
+                com.troikoss.continuum_explorer.ui.components.Media3dGalleryWall(
+                    files = appState.files,
+                    appState = appState,
+                    modifier = Modifier.fillMaxSize()
                 )
+            } else {
+                FileGrid(
+                    appState = appState,
+                    gridState = gridState,
+                    itemPositions = itemPositions,
+                    containerCoordinates = containerCoordinates,
+                    mousePosition = mousePosition,
+                    focusRequester = focusRequester,
+                    dragActive = dragStart != null,
+                    hScrollState = hScrollState,
+                    detailsContentWidthPx = detailsContentWidthPx
+                )
+
+                MarqueeRenderer(
+                    dragStart = dragStart?.let { Offset(it.x, it.y - headerHeightPx) },
+                    dragEnd = dragEnd?.let { Offset(it.x, it.y - headerHeightPx) },
+                    marquee = marquee
+                )
+
+                VerticalScrollbar(
+                    gridState = gridState,
+                    isNearEdge = showVertical,
+                    modifier = Modifier.align(Alignment.CenterEnd).padding(end = 4.dp)
+                )
+
+                if (viewMode == ViewMode.DETAILS) {
+                    HorizontalScrollbar(
+                        scrollState = hScrollState,
+                        isNearEdge = showHorizontal,
+                        isRecentlyScrolled = isHScrollActive,
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(horizontal = 8.dp, vertical = 8.dp)
+                    )
+                }
             }
         }
     }

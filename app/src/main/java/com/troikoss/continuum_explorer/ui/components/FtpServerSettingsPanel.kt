@@ -334,21 +334,8 @@ fun FtpServerSettingsPanel(
                 Row(
                     modifier = Modifier.weight(1f),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
+                    horizontalArrangement = Arrangement.Start
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(8.dp)
-                            .clip(CircleShape)
-                            .background(
-                                when {
-                                    unifiedState.isTransitioning -> Color(0xFFF59E0B)
-                                    isServerRunning -> Color(0xFF10B981)
-                                    else -> MaterialTheme.colorScheme.outline
-                                }
-                            )
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
                     Text(
                         text = if (isWebsiteMode) "HTTP Website Host" else "FTP & SyncPlay Hub",
                         style = MaterialTheme.typography.titleSmall,
@@ -1074,7 +1061,8 @@ private fun FtpDedicatedServerCard(
     onToggleShowPass: () -> Unit,
     onApplyNetwork: () -> Unit
 ) {
-    val isFtpRunning = unifiedState.isFtpRunning
+    val syncRoomState by SyncPlayManager.roomState.collectAsState()
+    val isFtpRunning = unifiedState.isFtpRunning || (syncRoomState.isActive && unifiedState.isHttpRunning)
     val bucketItems = FtpBucketManager.bucketItems
     val isSelectedBucketMode = hostedMode == FtpHostedMode.BATCH_FILES
     var showAuthOptions by remember { mutableStateOf(false) }
@@ -1105,14 +1093,21 @@ private fun FtpDedicatedServerCard(
                     )
                     Column {
                         Text(
-                            text = "FTP Server (:${unifiedState.ftp.port})",
+                            text = "FTP & SyncPlay Server (:${unifiedState.ftp.port})",
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Bold,
                             color = if (isFtpRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
                         )
                         Text(
-                            text = if (isFtpRunning) "Online • ${unifiedState.ftp.activeConnections} session(s)"
-                            else "Host with or without files/folders",
+                            text = when {
+                                unifiedState.isFtpRunning && syncRoomState.isActive ->
+                                    "FTP + SyncPlay Online • ${unifiedState.ftp.activeConnections} FTP / ${syncRoomState.connectedPeers.size} Sync"
+                                unifiedState.isFtpRunning ->
+                                    "Online • ${unifiedState.ftp.activeConnections} session(s)"
+                                syncRoomState.isActive ->
+                                    "SyncPlay Host Active • Tap switch to stop server"
+                                else -> "Host with or without files, folders, or SyncPlay"
+                            },
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -1127,7 +1122,13 @@ private fun FtpDedicatedServerCard(
                     }
                     Switch(
                         checked = isFtpRunning,
-                        onCheckedChange = onToggleFtp
+                        onCheckedChange = { enable ->
+                            if (!enable) {
+                                SyncPlayManager.stopSyncPlayAndServer(context)
+                            } else {
+                                onToggleFtp(true)
+                            }
+                        }
                     )
                 }
             }
@@ -2019,23 +2020,29 @@ private fun SyncPlayPartyCard(
                                 color = if (syncState.isPlaying) Color(0xFF10B981) else MaterialTheme.colorScheme.onSurface
                             )
 
-                            TextButton(
-                                onClick = { SyncPlayManager.stopSession(clearMediaHistory = true) },
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                            FilledTonalButton(
+                                onClick = { SyncPlayManager.stopSyncPlayAndServer(context) },
+                                colors = ButtonDefaults.filledTonalButtonColors(
+                                    containerColor = MaterialTheme.colorScheme.errorContainer,
+                                    contentColor = MaterialTheme.colorScheme.onErrorContainer
+                                ),
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                modifier = Modifier.height(30.dp)
                             ) {
-                                Text("Stop & Clear", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+                                Icon(Icons.Default.Stop, contentDescription = null, modifier = Modifier.size(14.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("Stop Server", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                             }
                         }
 
-                        // Host Synchronized Transport Bar
+                        // Host Synchronized Transport Bar — Row 1: Play/Pause, -10s, +10s, Clear Media (No horizontal scrolling)
                         Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState()),
+                            modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            FilledTonalButton(
+                            Button(
                                 onClick = {
                                     SyncPlayManager.triggerScheduledCommand(
                                         context = context,
@@ -2044,7 +2051,10 @@ private fun SyncPlayPartyCard(
                                     )
                                 },
                                 shape = RoundedCornerShape(8.dp),
-                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                                modifier = Modifier
+                                    .weight(1.4f)
+                                    .height(36.dp)
                             ) {
                                 Icon(
                                     imageVector = if (syncState.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
@@ -2052,40 +2062,85 @@ private fun SyncPlayPartyCard(
                                     modifier = Modifier.size(16.dp)
                                 )
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text(if (syncState.isPlaying) "Sync Pause" else "Sync Play", style = MaterialTheme.typography.labelMedium)
+                                Text(
+                                    text = if (syncState.isPlaying) "Pause" else "Play",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    maxLines = 1
+                                )
                             }
 
-                            OutlinedButton(
+                            FilledTonalButton(
                                 onClick = {
                                     val target = (syncState.currentPositionMs() - 10_000L).coerceAtLeast(0L)
                                     SyncPlayManager.triggerScheduledCommand(context, "SEEK", targetPositionMs = target, actorName = "Host")
                                 },
                                 shape = RoundedCornerShape(8.dp),
-                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(36.dp)
                             ) {
-                                Text("-10s", style = MaterialTheme.typography.labelSmall)
+                                Icon(Icons.Default.Replay10, contentDescription = "-10s", modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(2.dp))
+                                Text("-10s", style = MaterialTheme.typography.labelSmall, maxLines = 1)
                             }
 
-                            OutlinedButton(
+                            FilledTonalButton(
                                 onClick = {
                                     val target = syncState.currentPositionMs() + 10_000L
                                     SyncPlayManager.triggerScheduledCommand(context, "SEEK", targetPositionMs = target, actorName = "Host")
                                 },
                                 shape = RoundedCornerShape(8.dp),
-                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(36.dp)
                             ) {
-                                Text("+10s", style = MaterialTheme.typography.labelSmall)
+                                Icon(Icons.Default.Forward10, contentDescription = "+10s", modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(2.dp))
+                                Text("+10s", style = MaterialTheme.typography.labelSmall, maxLines = 1)
                             }
 
+                            OutlinedButton(
+                                onClick = { SyncPlayManager.stopSession(clearMediaHistory = true) },
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(36.dp)
+                            ) {
+                                Text("Unload", style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                            }
+                        }
+
+                        // Row 2: Compact Speed Buttons (No horizontal scrolling)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
                             listOf(0.75f, 1.0f, 1.25f, 1.5f, 2.0f).forEach { spd ->
-                                FilterChip(
-                                    selected = syncState.playbackSpeed == spd,
+                                val isSel = syncState.playbackSpeed == spd
+                                Surface(
                                     onClick = {
                                         SyncPlayManager.triggerScheduledCommand(context, "SPEED", speed = spd, actorName = "Host")
                                     },
-                                    label = { Text("${spd}x", style = MaterialTheme.typography.labelSmall) },
-                                    shape = RoundedCornerShape(8.dp)
-                                )
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = if (isSel) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(30.dp)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Text(
+                                            text = "${spd}x",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
+                                            color = if (isSel) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1
+                                        )
+                                    }
+                                }
                             }
                         }
 

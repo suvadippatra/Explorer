@@ -153,24 +153,18 @@ fun CsvEditorView(
                     modifier = Modifier.weight(1f)
                 ) {
                     IconButton(
-                        onClick = handleExit,
+                        onClick = onMenuClick,
                         modifier = Modifier
                             .size(36.dp)
-                            .testTag("csv_editor_back_button")
+                            .testTag("csv_editor_menu_button")
                     ) {
                         Icon(
-                            Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back",
+                            Icons.Default.Menu,
+                            contentDescription = "Toggle Sidebar",
                             tint = MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.size(20.dp)
                         )
                     }
-                    Icon(
-                        Icons.Default.TableChart,
-                        contentDescription = "CSV & Table Studio",
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(18.dp)
-                    )
                     Text(
                         text = if (isModified) "${file.name} •" else file.name,
                         style = MaterialTheme.typography.titleSmall,

@@ -63,25 +63,24 @@ fun HelpDocumentationSection(
                 badge = "Server Hub",
                 icon = Icons.Default.Sync,
                 items = listOf(
-                    HelpTopicItem("Independent Service Switches", "FTP (:2121), HTTP Website Host (:8080), SyncPlay Party, and Screen Mirroring each have independent switches — never activated all at once."),
-                    HelpTopicItem("Mode 1: FTP, SyncPlay & Cast", "Host FTP with Upload Dropzone Only (0 host files exposed), Selected Items, or Full Storage, plus optional Screen Share or SyncPlay."),
+                    HelpTopicItem("Coordinated FTP & SyncPlay", "Starting SyncPlay from any video/audio file automatically launches both FTP (:2121) and HTTP (:8080) and stages the file in the FTP bucket; toggling FTP Off or tapping Stop Server cleanly stops both."),
+                    HelpTopicItem("Compact 2-Row SyncPlay Controls", "Host transport buttons (Play/Pause, -10s, +10s, Unload, Stop Server) and speed buttons (0.75x–2.0x) fit without horizontal scrolling."),
                     HelpTopicItem("Mode 2: HTTP Website Host", "Host an unzipped website directory (HTML/CSS/JS/assets) or a single HTML file as a live web server with in-app WebView preview."),
-                    HelpTopicItem("SyncPlay Party & Mandatory PIN", "Host-controlled watch/listen space with mandatory 6-digit Room Passcode, smooth ±3% playbackRate drift micro-nudging (zero periodic freeze), and auto history wipe on stop."),
+                    HelpTopicItem("SyncPlay Party & Mandatory PIN", "Host-controlled watch/listen space with mandatory 6-digit Room Passcode, smooth ±3% playbackRate drift micro-nudging, and auto history wipe on stop."),
                     HelpTopicItem("Network Firewall & Sandbox", "Canonical path traversal protection, executable upload blocker, Untrusted Wi-Fi PIN gate, and isolated ContinuumSuite/MiniAppsSandbox workspace.")
                 )
             ),
             HelpGuideSection(
                 id = "desktop_and_ui",
                 category = "Desktop & UI",
-                title = "Android Desktop/DeX & Gallery",
-                badge = "DeX + M3",
+                title = "Android Desktop/DeX & 3D Gallery",
+                badge = "DeX + 3D",
                 icon = Icons.Default.DesktopWindows,
                 items = listOf(
-                    HelpTopicItem("Default Window Mode (Option 2)", "Animated In-App Tabs across DeX, Tablet & Mobile is set as the default workspace mode."),
-                    HelpTopicItem("Split-Pane Desktop File Pickers", "File selection dialogs and full-page pickers render a Left Places Sidebar + Multi-Column Compact Tiles on Desktop/DeX."),
-                    HelpTopicItem("My Suite Desktop Grid", "Multi-column Studio and Recent File cards on Desktop/DeX; narrow windows (<560dp) collapse New File & Open into icon-only header buttons."),
-                    HelpTopicItem("Lockable Top Heading Bars", "All subpages include a Pin/Lock button to keep the 50dp heading bar frozen on top while scrolling."),
-                    HelpTopicItem("Instant Gallery & Adaptive Grid", "Zero-syscall indexed MediaStore query with warm cache + full-bleed adaptive grid tiles without gaps.")
+                    HelpTopicItem("Persistent Sidebar on New Windows", "Sidebar stays visible on new windows and folder navigation; auto-hides by default only inside Mini-App Create/Edit mode (toggleable via Triple-Line Menu button)."),
+                    HelpTopicItem("Interactive 3D Picture Wall", "Tap the 3D Wall icon in Gallery to switch between the 3D Perspective Matrix Wall and 360° 3D Cylinder Ring with touch pan, tilt, pinch-zoom, and frustum culling."),
+                    HelpTopicItem("Zero-Lag Hardware Thumbnails", "220x220 downsampled hardware-bitmap Coil requests + O(1) concurrent album preview cache + O(N) grouping pass."),
+                    HelpTopicItem("Clean Minimalist Headers", "Decorative leading title icons removed; Mini-App editors use the Triple-Line Menu icon to toggle the sidebar and system Back gesture to exit.")
                 )
             ),
             HelpGuideSection(
@@ -91,10 +90,10 @@ fun HelpDocumentationSection(
                 badge = "Media3",
                 icon = Icons.Default.OndemandVideo,
                 items = listOf(
-                    HelpTopicItem("3D Video Modes", "Normal 2D, Red-Cyan Anaglyph, Red-Green 3D (Dubois matrix) & Side-by-Side VR."),
+                    HelpTopicItem("Single Video Header & 3D Modes", "Dedicated single video title bar with Normal 2D, Red-Cyan Anaglyph, Red-Green 3D (Dubois matrix) & Side-by-Side VR."),
                     HelpTopicItem("Tracks & Speed", "Switch multi-language audio tracks, subtitles/CC, and playback speed (0.25x–3.0x)."),
                     HelpTopicItem("Swipe Gestures", "Left vertical = Brightness, Right vertical = Volume, Horizontal = Scrub."),
-                    HelpTopicItem("Music Player", "Full Studio Deck, Floating Pop-Up Mini-Window, or Minimized Pill with 5-Band EQ.")
+                    HelpTopicItem("Music Sleep Timer & N-Track Stop", "Stop playback automatically after a custom number of minutes OR after N queue tracks in both Pop-Up Window and Fullscreen Studio modes.")
                 )
             ),
             HelpGuideSection(
@@ -104,10 +103,10 @@ fun HelpDocumentationSection(
                 badge = "Studios",
                 icon = Icons.Default.Html,
                 items = listOf(
+                    HelpTopicItem("1:1 Synchronized Line Numbers", "Markdown Studio and Code Studio use TextLayoutResult baseline coordinates so soft-wrapped lines never desynchronize line numbers."),
+                    HelpTopicItem("Photo Studio + Canvas Layering", "Edit existing photos or frame/composite multiple images on White, Dark, Black, or Cream 1:1 / 16:9 canvases (`ImageStudioCanvasView.kt`)."),
                     HelpTopicItem("HTML5 Previewer", "Rendered WebView + Raw HTML source inspector with DOM Console Overlay."),
-                    HelpTopicItem("Markdown Studio", "Markor engine (`TextStudioEngine.kt`) for Markdown, Todo.txt, Org & AsciiDoc."),
-                    HelpTopicItem("Code & Table Studios", "Syntax code editor with line numbers and interactive CSV/TSV cell grid."),
-                    HelpTopicItem("Photo Studio", "Non-destructive filters, crop, brush, shapes, text & stickers (`ImageStudioCanvasView.kt`).")
+                    HelpTopicItem("Table Studio", "Interactive CSV/TSV spreadsheet grid with column/row insertion and Triple-Line Menu sidebar toggle.")
                 )
             ),
             HelpGuideSection(
@@ -131,11 +130,10 @@ fun HelpDocumentationSection(
                 items = listOf(
                     HelpTopicItem("Continuum Explorer (GPLv3)", "Core multi-pane file explorer architecture by troikoss."),
                     HelpTopicItem("Markor (Apache 2.0)", "Markdown, Todo.txt, Org-Mode & AsciiDoc text engine by Gregor Santner."),
-                    HelpTopicItem("PhotoEditor (MIT)", "Canvas brush, filter matrix & sticker layers by Burhanuddin Rashid."),
-                    HelpTopicItem("Google Fonts (SIL OFL 1.1)", "Bundled Plus Jakarta Sans & JetBrains Mono offline typography."),
+                    HelpTopicItem("PhotoEditor (MIT)", "Canvas brush, filter matrix, canvas framing & sticker layers by Burhanuddin Rashid."),
+                    HelpTopicItem("CoilCompose & Media3 (Apache 2.0)", "Downsampled hardware-bitmap loader, 3D Gallery Wall textures & ExoPlayer DSP."),
                     HelpTopicItem("Ktor & Apache FtpServer (Apache 2.0)", "Embedded HTTP Website/SyncPlay server & RFC-959 FTP daemon."),
-                    HelpTopicItem("AndroidX Media3 & Compose M3 (Apache 2.0)", "Hardware media engine, Adaptive Grid & Material UI theme system."),
-                    HelpTopicItem("PDFBox, POI, Commons Compress & ZXing", "Offline PDF, Office, archive & QR engines (Apache 2.0).")
+                    HelpTopicItem("Google Fonts, PDFBox, POI & ZXing", "Offline typography, PDF/Office engines & QR generator (Apache 2.0 / OFL 1.1).")
                 )
             )
         )

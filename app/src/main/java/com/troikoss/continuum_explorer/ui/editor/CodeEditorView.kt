@@ -3,6 +3,7 @@ package com.troikoss.continuum_explorer.ui.editor
 import android.annotation.SuppressLint
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -11,7 +12,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -19,7 +19,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -32,8 +36,11 @@ import com.troikoss.continuum_explorer.ui.editor.text.SyntaxHighlighter
 import java.io.File
 
 /**
- * Code Studio Editor with syntax highlighting, line numbers, Material 3 Find & Replace,
- * unsaved-changes guard, and built-in Live HTML5 Preview / Split View for .html & .htm files.
+ * Code Studio Editor with syntax highlighting, 1:1 TextLayoutResult-synchronized line numbers,
+ * Material 3 Find & Replace, unsaved-changes guard, and built-in Live HTML5 Preview / Split View.
+ * In Create/Edit mode:
+ * - Shows Triple-Line Menu button (`Icons.Default.Menu`) to toggle the sidebar (no Back button or decorative icon before title).
+ * - Closing the editor is handled via system Back gesture or closing the tab.
  */
 @SuppressLint("SetJavaScriptEnabled")
 @OptIn(ExperimentalMaterial3Api::class)
@@ -56,14 +63,23 @@ fun CodeEditorView(
     var replaceQuery by remember { mutableStateOf("") }
     var showSearch by remember { mutableStateOf(false) }
     var fontSizeSp by remember { mutableIntStateOf(13) }
+    var wordWrapEnabled by remember { mutableStateOf(true) }
 
     val ext = remember(file.name) { file.extension.lowercase() }
     val isHtmlFile = remember(ext) { ext in listOf("html", "htm", "xhtml") }
     // 0 = Code Only, 1 = Split Code + HTML Preview, 2 = Full HTML Preview
     var htmlPreviewMode by remember(file.absolutePath) { mutableIntStateOf(0) }
 
-    val lines = remember(textValue) { textValue.split("\n") }
-    val lineCount = lines.size
+    val logicalLineStartOffsets = remember(textValue) {
+        val offsets = mutableListOf(0)
+        for (i in textValue.indices) {
+            if (textValue[i] == '\n') {
+                offsets.add(i + 1)
+            }
+        }
+        offsets
+    }
+    val lineCount = logicalLineStartOffsets.size
     val charCount = textValue.length
     val matchCount = remember(textValue, searchQuery) {
         if (searchQuery.isBlank()) 0
@@ -75,6 +91,8 @@ fun CodeEditorView(
 
     val verticalScrollState = rememberScrollState()
     val horizontalScrollState = rememberScrollState()
+    var textLayoutResult by remember { mutableStateOf<TextLayoutResult?>(null) }
+    val density = LocalDensity.current
 
     val handleExit = {
         if (isModified) {
@@ -129,7 +147,7 @@ fun CodeEditorView(
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.surface)
     ) {
-        // Unified 50.dp Toolbar with Single Clean Back Button on Left
+        // Unified 50.dp Toolbar with Triple-Line Menu Button on Left (no Back button or decorative icon before title)
         Surface(
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
             tonalElevation = 2.dp,
@@ -150,24 +168,18 @@ fun CodeEditorView(
                     modifier = Modifier.weight(1f)
                 ) {
                     IconButton(
-                        onClick = handleExit,
+                        onClick = onMenuClick,
                         modifier = Modifier
                             .size(36.dp)
-                            .testTag("code_editor_back_button")
+                            .testTag("code_editor_menu_button")
                     ) {
                         Icon(
-                            Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back",
+                            Icons.Default.Menu,
+                            contentDescription = "Toggle Sidebar",
                             tint = MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.size(20.dp)
                         )
                     }
-                    Icon(
-                        if (isHtmlFile) Icons.Default.Html else Icons.Default.Code,
-                        contentDescription = "Code Studio",
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(18.dp)
-                    )
                     Text(
                         text = if (isModified) "${file.name} •" else file.name,
                         style = MaterialTheme.typography.titleSmall,
@@ -208,6 +220,17 @@ fun CodeEditorView(
                             label = { Text("Preview", style = MaterialTheme.typography.labelSmall) },
                             leadingIcon = { Icon(Icons.Default.Web, contentDescription = null, modifier = Modifier.size(14.dp)) },
                             modifier = Modifier.height(30.dp)
+                        )
+                    }
+                    IconButton(
+                        onClick = { wordWrapEnabled = !wordWrapEnabled },
+                        modifier = Modifier.size(34.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.WrapText,
+                            contentDescription = "Toggle Word Wrap",
+                            tint = if (wordWrapEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
                         )
                     }
                     IconButton(
@@ -343,6 +366,15 @@ fun CodeEditorView(
 
         @Composable
         fun CodePane(modifier: Modifier = Modifier) {
+            val gutterDigits = lineCount.toString().length.coerceAtLeast(2)
+            val gutterWidthDp = ((gutterDigits * (fontSizeSp * 0.65f)) + 22f).dp
+            val totalHeightDp = with(density) {
+                (textLayoutResult?.size?.height ?: 0).toDp().coerceAtLeast(240.dp)
+            }
+            val textSizePx = with(density) { fontSizeSp.sp.toPx() }
+            val rightPadPx = with(density) { 10.dp.toPx() }
+            val lineNumArgb = Color(0xFF858585).toArgb()
+
             Box(
                 modifier = modifier
                     .background(Color(0xFF1E1E1E))
@@ -352,39 +384,69 @@ fun CodeEditorView(
                         .fillMaxSize()
                         .verticalScroll(verticalScrollState)
                 ) {
-                    // Line Number Column
-                    Column(
+                    // 1:1 TextLayoutResult-Synchronized Line Number Gutter
+                    Box(
                         modifier = Modifier
+                            .width(gutterWidthDp)
+                            .heightIn(min = totalHeightDp + 20.dp)
                             .background(Color(0xFF252526))
-                            .padding(horizontal = 10.dp, vertical = 10.dp),
-                        horizontalAlignment = Alignment.End
+                            .padding(vertical = 10.dp)
                     ) {
-                        for (i in 1..lineCount.coerceAtLeast(1)) {
-                            Text(
-                                text = "$i",
-                                style = TextStyle(
-                                    fontFamily = FontFamily.Monospace,
-                                    fontSize = fontSizeSp.sp,
-                                    lineHeight = (fontSizeSp + 5).sp,
-                                    color = Color(0xFF858585)
+                        Canvas(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(totalHeightDp)
+                        ) {
+                            val layout = textLayoutResult ?: return@Canvas
+                            val textLen = textValue.length
+                            val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                                color = lineNumArgb
+                                textAlign = android.graphics.Paint.Align.RIGHT
+                                textSize = textSizePx
+                                typeface = android.graphics.Typeface.MONOSPACE
+                            }
+                            logicalLineStartOffsets.forEachIndexed { idx, startOffset ->
+                                val safeOffset = startOffset.coerceIn(0, textLen)
+                                val visualLine = try {
+                                    layout.getLineForOffset(safeOffset)
+                                } catch (_: Exception) {
+                                    0
+                                }
+                                val baselineY = try {
+                                    layout.getLineBaseline(visualLine)
+                                } catch (_: Exception) {
+                                    visualLine * (textSizePx + 10f) + textSizePx
+                                }
+                                drawContext.canvas.nativeCanvas.drawText(
+                                    (idx + 1).toString(),
+                                    size.width - rightPadPx,
+                                    baselineY,
+                                    paint
                                 )
-                            )
+                            }
                         }
                     }
 
                     // Code Input Field with Live Syntax Highlighting
-                    Box(
-                        modifier = Modifier
+                    val codeBoxMod = if (wordWrapEnabled) {
+                        Modifier
+                            .weight(1f)
+                            .padding(10.dp)
+                    } else {
+                        Modifier
                             .weight(1f)
                             .horizontalScroll(horizontalScrollState)
                             .padding(10.dp)
-                    ) {
+                    }
+
+                    Box(modifier = codeBoxMod) {
                         BasicTextField(
                             value = textValue,
                             onValueChange = {
                                 textValue = it
                                 onContentChange(it)
                             },
+                            onTextLayout = { result -> textLayoutResult = result },
                             visualTransformation = syntaxHighlighter,
                             textStyle = TextStyle(
                                 fontFamily = FontFamily.Monospace,
@@ -395,6 +457,7 @@ fun CodeEditorView(
                             cursorBrush = SolidColor(Color(0xFF00E676)),
                             modifier = Modifier
                                 .fillMaxWidth()
+                                .heightIn(min = 240.dp)
                                 .testTag("code_editor_text_field")
                         )
                     }

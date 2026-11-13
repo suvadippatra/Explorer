@@ -250,12 +250,13 @@ private enum class PhotoToolTab(val label: String) {
     FILTER("Filters"),
     ADJUST("Adjust"),
     CROP("Crop"),
+    CANVAS("Canvas"),
     DRAW("Draw"),
     TEXT("Text & Emoji")
 }
 
 /**
- * Full Interactive Photo Studio View integrating FilterEngine, CropOverlay, DrawingView, and GraphicManager.
+ * Full Interactive Photo Studio View integrating FilterEngine, CropOverlay, Canvas Frame/Layering, DrawingView, and GraphicManager.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -265,15 +266,22 @@ fun PhotoEditorView(
     targetSaveFile: File?,
     onExit: () -> Unit,
     onSaveSuccess: (File) -> Unit,
+    onMenuClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
+    androidx.activity.compose.BackHandler(enabled = true) {
+        onExit()
+    }
+
     var workingBitmap by remember(baseBitmap) { mutableStateOf(baseBitmap) }
     var activeTab by remember { mutableStateOf(PhotoToolTab.FILTER) }
     var selectedPreset by remember { mutableStateOf(FilterPreset.ORIGINAL) }
     var colorAdjustments by remember { mutableStateOf(ColorAdjustments()) }
+    var canvasBgColor by remember { mutableStateOf(Color.White) }
+    var showImportImagePicker by remember { mutableStateOf(false) }
 
     val drawingState = rememberDrawingState()
     val cropState = rememberCropTransformState()
@@ -282,6 +290,68 @@ fun PhotoEditorView(
     var showSaveDialog by remember { mutableStateOf(false) }
     var showAddTextDialog by remember { mutableStateOf(false) }
     var textDialogInput by remember { mutableStateOf("") }
+
+    fun applyCanvasFrame(aspectW: Int, aspectH: Int, padRatio: Float, bgColor: Color) {
+        val src = workingBitmap
+        val baseW = (src.width * (1f + padRatio)).toInt().coerceAtLeast(320)
+        val baseH = (src.height * (1f + padRatio)).toInt().coerceAtLeast(320)
+        val targetW: Int
+        val targetH: Int
+        if (aspectW > 0 && aspectH > 0) {
+            val targetRatio = aspectW.toFloat() / aspectH.toFloat()
+            val currentRatio = baseW.toFloat() / baseH.toFloat()
+            if (currentRatio > targetRatio) {
+                targetW = baseW
+                targetH = (baseW / targetRatio).toInt()
+            } else {
+                targetH = baseH
+                targetW = (baseH * targetRatio).toInt()
+            }
+        } else {
+            targetW = baseW
+            targetH = baseH
+        }
+        val out = Bitmap.createBitmap(targetW.coerceAtMost(3840), targetH.coerceAtMost(3840), Bitmap.Config.ARGB_8888)
+        val c = AndroidCanvas(out)
+        c.drawColor(bgColor.toArgb())
+        val left = ((out.width - src.width) / 2f)
+        val top = ((out.height - src.height) / 2f)
+        c.drawBitmap(src, left, top, AndroidPaint(AndroidPaint.FILTER_BITMAP_FLAG))
+        workingBitmap = out
+    }
+
+    if (showImportImagePicker) {
+        com.troikoss.continuum_explorer.ui.components.InAppFilePickerDialog(
+            title = "Select Image to Composite onto Canvas",
+            selectFolders = false,
+            allowedExtensions = setOf("jpg", "jpeg", "png", "webp", "bmp"),
+            onDismiss = { showImportImagePicker = false },
+            onSelected = { pickedFile ->
+                showImportImagePicker = false
+                scope.launch(Dispatchers.IO) {
+                    runCatching {
+                        val overlayBmp = android.graphics.BitmapFactory.decodeFile(pickedFile.absolutePath)
+                        if (overlayBmp != null) {
+                            val baseCopy = workingBitmap.copy(Bitmap.Config.ARGB_8888, true)
+                            val c = AndroidCanvas(baseCopy)
+                            val maxOverlayW = (baseCopy.width * 0.65f).toInt().coerceAtLeast(160)
+                            val scale = (maxOverlayW.toFloat() / overlayBmp.width.toFloat()).coerceAtMost(1f)
+                            val scaledW = (overlayBmp.width * scale).toInt().coerceAtLeast(1)
+                            val scaledH = (overlayBmp.height * scale).toInt().coerceAtLeast(1)
+                            val scaledOverlay = Bitmap.createScaledBitmap(overlayBmp, scaledW, scaledH, true)
+                            val left = (baseCopy.width - scaledW) / 2f
+                            val top = (baseCopy.height - scaledH) / 2f
+                            c.drawBitmap(scaledOverlay, left, top, AndroidPaint(AndroidPaint.FILTER_BITMAP_FLAG))
+                            withContext(Dispatchers.Main) {
+                                workingBitmap = baseCopy
+                                Toast.makeText(context, "Composited ${pickedFile.name} onto canvas", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    }
+                }
+            }
+        )
+    }
 
     val filteredPreviewBitmap by remember(workingBitmap, selectedPreset, colorAdjustments) {
         derivedStateOf {
@@ -432,14 +502,15 @@ fun PhotoEditorView(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    IconButton(onClick = onExit, modifier = Modifier.size(36.dp)) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    IconButton(onClick = onMenuClick, modifier = Modifier.size(36.dp)) {
+                        Icon(Icons.Default.Menu, contentDescription = "Toggle Sidebar")
                     }
                     Text(
-                        text = "Photo Studio",
+                        text = fileName.ifBlank { "Photo Studio" },
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold,
-                        maxLines = 1
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
 
@@ -642,6 +713,55 @@ fun PhotoEditorView(
                                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
                             ) {
                                 Text("Apply Crop", style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
+                    }
+                    PhotoToolTab.CANVAS -> {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            listOf(
+                                Color.White to "White",
+                                Color(0xFF181A20) to "Dark",
+                                Color.Black to "Black",
+                                Color(0xFFF5F0E6) to "Cream"
+                            ).forEach { (bgCol, label) ->
+                                FilterChip(
+                                    selected = canvasBgColor == bgCol,
+                                    onClick = { canvasBgColor = bgCol },
+                                    label = { Text(label, style = MaterialTheme.typography.labelSmall) }
+                                )
+                            }
+                            AssistChip(
+                                onClick = { applyCanvasFrame(0, 0, 0.14f, canvasBgColor) },
+                                label = { Text("+Matte Border", style = MaterialTheme.typography.labelSmall) }
+                            )
+                            AssistChip(
+                                onClick = { applyCanvasFrame(1, 1, 0.08f, canvasBgColor) },
+                                label = { Text("1:1 Canvas", style = MaterialTheme.typography.labelSmall) }
+                            )
+                            AssistChip(
+                                onClick = { applyCanvasFrame(16, 9, 0.08f, canvasBgColor) },
+                                label = { Text("16:9 Canvas", style = MaterialTheme.typography.labelSmall) }
+                            )
+                            FilledTonalButton(
+                                onClick = { showImportImagePicker = true },
+                                modifier = Modifier.height(32.dp),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp)
+                            ) {
+                                Icon(Icons.Default.AddPhotoAlternate, contentDescription = null, modifier = Modifier.size(15.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("Add Image Layer", style = MaterialTheme.typography.labelSmall)
+                            }
+                            TextButton(
+                                onClick = { workingBitmap = baseBitmap },
+                                modifier = Modifier.height(32.dp)
+                            ) {
+                                Text("Reset", style = MaterialTheme.typography.labelSmall)
                             }
                         }
                     }

@@ -187,8 +187,8 @@ object SyncPlayManager {
             FtpBucketManager.addItem(context, file)
         } catch (_: Exception) {}
 
-        if (autoStartServer && !ServerManager.state.value.isHttpRunning) {
-            ServerManager.startHttpServer(context)
+        if (autoStartServer && (!ServerManager.state.value.isHttpRunning || !ServerManager.state.value.isFtpRunning)) {
+            ServerManager.startCoordinated(context, startHttp = true, startFtp = true)
         }
 
         val eventMsg = "${timeStamp()} Host loaded \"${file.name}\" (${formatBytes(file.length())}) • PIN Protected"
@@ -231,6 +231,14 @@ object SyncPlayManager {
         scope.launch {
             broadcastStateFrame("LOAD")
         }
+    }
+
+    /**
+     * Stops the active SyncPlay session and cleanly shuts down both the FTP and HTTP servers.
+     */
+    fun stopSyncPlayAndServer(context: Context) {
+        stopSession(clearMediaHistory = true)
+        ServerManager.stopCoordinated(context, graceful = true)
     }
 
     fun updateRoomSecurity(

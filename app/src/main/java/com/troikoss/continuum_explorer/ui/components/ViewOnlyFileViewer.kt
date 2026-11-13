@@ -145,17 +145,24 @@ fun ViewOnlyFileViewer(
         }
         when {
             ext in listOf("csv", "tsv") && localEditFile != null -> {
-                var csvContent by remember(localEditFile.absolutePath) {
-                    mutableStateOf(runCatching { localEditFile.readText() }.getOrDefault(""))
+                var csvContent by remember(localEditFile.absolutePath) { mutableStateOf("") }
+                LaunchedEffect(localEditFile.absolutePath) {
+                    csvContent = withContext(Dispatchers.IO) {
+                        runCatching { localEditFile.readText() }.getOrDefault("")
+                    }
                 }
                 com.troikoss.continuum_explorer.ui.editor.CsvEditorView(
                     file = localEditFile,
                     content = csvContent,
                     onContentChange = { csvContent = it },
                     onSave = {
-                        runCatching {
-                            localEditFile.writeText(csvContent)
-                            Toast.makeText(context, "Saved ${localEditFile.name}", Toast.LENGTH_SHORT).show()
+                        scope.launch(Dispatchers.IO) {
+                            runCatching {
+                                localEditFile.writeText(csvContent)
+                                withContext(Dispatchers.Main) {
+                                    Toast.makeText(context, "Saved ${localEditFile.name}", Toast.LENGTH_SHORT).show()
+                                }
+                            }
                         }
                     },
                     onMenuClick = onMenuClick,
@@ -169,17 +176,24 @@ fun ViewOnlyFileViewer(
                 "json", "xml", "yaml", "yml", "toml", "ini", "conf", "sh", "bash", "c", "cpp", "h",
                 "hpp", "sql", "gradle", "properties", "go", "rs", "dart", "php", "rb", "lua"
             ) && localEditFile != null -> {
-                var codeContent by remember(localEditFile.absolutePath) {
-                    mutableStateOf(runCatching { localEditFile.readText() }.getOrDefault(""))
+                var codeContent by remember(localEditFile.absolutePath) { mutableStateOf("") }
+                LaunchedEffect(localEditFile.absolutePath) {
+                    codeContent = withContext(Dispatchers.IO) {
+                        runCatching { localEditFile.readText() }.getOrDefault("")
+                    }
                 }
                 com.troikoss.continuum_explorer.ui.editor.CodeEditorView(
                     file = localEditFile,
                     content = codeContent,
                     onContentChange = { codeContent = it },
                     onSave = {
-                        runCatching {
-                            localEditFile.writeText(codeContent)
-                            Toast.makeText(context, "Saved ${localEditFile.name}", Toast.LENGTH_SHORT).show()
+                        scope.launch(Dispatchers.IO) {
+                            runCatching {
+                                localEditFile.writeText(codeContent)
+                                withContext(Dispatchers.Main) {
+                                    Toast.makeText(context, "Saved ${localEditFile.name}", Toast.LENGTH_SHORT).show()
+                                }
+                            }
                         }
                     },
                     onMenuClick = onMenuClick,
@@ -221,7 +235,8 @@ fun ViewOnlyFileViewer(
             .background(MaterialTheme.colorScheme.surface)
     ) {
         // Logical Action Bar directly beneath Title Bar (Tab Bar)
-        if (!(isVideo && appState.isVideoFullScreen)) {
+        // Video files render their own dedicated top control bar inside DedicatedVideoPlayerView, so we do not duplicate the title here.
+        if (!isVideo) {
             Surface(
                 color = MaterialTheme.colorScheme.surfaceContainer,
                 tonalElevation = 2.dp,

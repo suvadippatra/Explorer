@@ -423,6 +423,7 @@ fun NativeImageViewerEditor(
                         isEditMode = false
                     }
                 },
+                onMenuClick = onMenuClick,
                 modifier = Modifier.fillMaxSize()
             )
         }

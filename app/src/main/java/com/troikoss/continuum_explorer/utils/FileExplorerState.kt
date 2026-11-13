@@ -696,22 +696,45 @@ class FileExplorerState(
         }
     }
 
+    // Interactive 3D Picture Wall toggle for Gallery / Media folders
+    var is3dGalleryWallEnabled by mutableStateOf(false)
+
     private fun groupFiles(files: List<UniversalFile>): List<DisplayItem> {
+        if (files.isEmpty()) return emptyList()
         val params = folderConfigs.sortParams
-        val result = mutableListOf<DisplayItem>()
+        val result = ArrayList<DisplayItem>(files.size + 16)
+        val nowMs = System.currentTimeMillis()
+        val nowCal = Calendar.getInstance()
+        val nowMonth = nowCal.get(Calendar.MONTH)
+        val nowYear = nowCal.get(Calendar.YEAR)
+        val scratchCal = Calendar.getInstance()
+
         var i = 0
         var groupId = 0
         while (i < files.size) {
-            val label = getGroupLabel(files[i], params)
-            val groupItems = files.drop(i).takeWhile { getGroupLabel(it, params) == label }
-            result.add(DisplayItem.Group(label, groupItems.size, groupId++))
-            groupItems.forEach { result.add(DisplayItem.File(it)) }
-            i += groupItems.size
+            val label = getGroupLabelFast(files[i], params, nowMs, nowMonth, nowYear, scratchCal)
+            var j = i + 1
+            while (j < files.size && getGroupLabelFast(files[j], params, nowMs, nowMonth, nowYear, scratchCal) == label) {
+                j++
+            }
+            val count = j - i
+            result.add(DisplayItem.Group(label, count, groupId++))
+            for (k in i until j) {
+                result.add(DisplayItem.File(files[k]))
+            }
+            i = j
         }
         return result
     }
 
-    private fun getGroupLabel(file: UniversalFile, params: SortParams): String {
+    private fun getGroupLabelFast(
+        file: UniversalFile,
+        params: SortParams,
+        nowMs: Long,
+        nowMonth: Int,
+        nowYear: Int,
+        scratchCal: Calendar
+    ): String {
         return when (params.columnType) {
             FileColumnType.NAME -> {
                 val c = file.name.firstOrNull() ?: return context.getString(R.string.group_name_symbols)
@@ -723,16 +746,19 @@ class FileExplorerState(
                 }
             }
             FileColumnType.DATE -> {
-                val now = Calendar.getInstance()
-                val fileCal = Calendar.getInstance().apply { timeInMillis = file.lastModified }
-                val diffDays = ((now.timeInMillis - file.lastModified) / (1000 * 60 * 60 * 24)).toInt()
+                val diffDays = ((nowMs - file.lastModified) / (1000L * 60 * 60 * 24)).toInt()
                 when {
-                    diffDays == 0 -> context.getString(R.string.today)
+                    diffDays <= 0 -> context.getString(R.string.today)
                     diffDays == 1 -> context.getString(R.string.yesterday)
                     diffDays <= 7 -> context.getString(R.string.this_week)
-                    now.get(Calendar.MONTH) == fileCal.get(Calendar.MONTH) &&
-                        now.get(Calendar.YEAR) == fileCal.get(Calendar.YEAR) -> context.getString(R.string.this_month)
-                    else -> context.getString(R.string.older)
+                    else -> {
+                        scratchCal.timeInMillis = file.lastModified
+                        if (nowMonth == scratchCal.get(Calendar.MONTH) && nowYear == scratchCal.get(Calendar.YEAR)) {
+                            context.getString(R.string.this_month)
+                        } else {
+                            context.getString(R.string.older)
+                        }
+                    }
                 }
             }
             FileColumnType.SIZE -> {

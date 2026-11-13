@@ -89,8 +89,25 @@ object IconHelper {
                 name.endsWith(".pdf") -> PdfThumbnail(file, fallbackIcon, modifier, iconSize, tint)
                 name.endsWith(".apk") -> ApkThumbnail(file, fallbackIcon, modifier, iconSize, tint)
                 else -> {
+                    val context = LocalContext.current
+                    val modelData = if (file.provider.capabilities.isRemote) {
+                        file
+                    } else {
+                        file.documentFileRef?.uri ?: file.providerId
+                    }
+                    val imageRequest = remember(modelData) {
+                        ImageRequest.Builder(context)
+                            .data(modelData)
+                            .size(220, 220)
+                            .precision(coil.size.Precision.INEXACT)
+                            .crossfade(false)
+                            .allowHardware(true)
+                            .memoryCachePolicy(coil.request.CachePolicy.ENABLED)
+                            .diskCachePolicy(coil.request.CachePolicy.ENABLED)
+                            .build()
+                    }
                     AsyncImage(
-                        model = if (file.provider.capabilities.isRemote) file else (file.documentFileRef?.uri ?: file.fileRef?.absolutePath),
+                        model = imageRequest,
                         contentDescription = null,
                         modifier = if (fillBounds) modifier.fillMaxSize() else modifier.size(iconSize),
                         contentScale = contentScale,
@@ -229,21 +246,48 @@ object IconHelper {
         if (!folder.isDirectory) return
         val cacheKey = "${folder.provider.kind}:${folder.absolutePath}"
         var previewFile by remember(folder) {
-            mutableStateOf(folderPreviewCache[cacheKey]?.orElse(null))
+            mutableStateOf(
+                folderPreviewCache[cacheKey]?.orElse(null)
+                    ?: com.troikoss.continuum_explorer.managers.GalleryManager.getCachedAlbumPreview(folder.absolutePath)
+            )
         }
 
         LaunchedEffect(folder) {
-            if (folderPreviewCache[cacheKey] != null) return@LaunchedEffect
+            if (previewFile != null || folderPreviewCache[cacheKey] != null) return@LaunchedEffect
             withContext(Dispatchers.IO) {
+                val fastAlbumThumb = com.troikoss.continuum_explorer.managers.GalleryManager.getCachedAlbumPreview(folder.absolutePath)
+                if (fastAlbumThumb != null) {
+                    folderPreviewCache.put(cacheKey, java.util.Optional.of(fastAlbumThumb))
+                    previewFile = fastAlbumThumb
+                    return@withContext
+                }
                 val found = when {
-                    folder.fileRef != null ->
-                        folder.fileRef!!.listFiles()?.asSequence()?.map { it.toUniversal() }
-                            ?.find { !it.isDirectory && isMimeTypePreviewable(it) && !it.name.lowercase().endsWith(".txt") }
+                    folder.fileRef != null -> {
+                        // Inspect at most 30 directory entries via NIO stream to avoid allocating huge File[] arrays
+                        runCatching {
+                            java.nio.file.Files.newDirectoryStream(folder.fileRef!!.toPath()).use { stream ->
+                                var candidate: UniversalFile? = null
+                                var inspected = 0
+                                for (entry in stream) {
+                                    if (++inspected > 30) break
+                                    val f = entry.toFile()
+                                    if (f.isFile) {
+                                        val u = f.toUniversal()
+                                        if (isMimeTypePreviewable(u) && !u.name.lowercase().endsWith(".txt")) {
+                                            candidate = u
+                                            break
+                                        }
+                                    }
+                                }
+                                candidate
+                            }
+                        }.getOrNull()
+                    }
                     folder.documentFileRef != null ->
-                        folder.documentFileRef!!.listFiles().asSequence().map { it.toUniversal() }
+                        folder.documentFileRef!!.listFiles().asSequence().take(25).map { it.toUniversal() }
                             .find { !it.isDirectory && isMimeTypePreviewable(it) && !it.name.lowercase().endsWith(".txt") }
                     else -> try {
-                        folder.provider.listChildren(folder.providerId)
+                        folder.provider.listChildren(folder.providerId).asSequence().take(25)
                             .find { !it.isDirectory && isMimeTypePreviewable(it) && !it.name.lowercase().endsWith(".txt") }
                     } catch (_: Exception) { null }
                 }

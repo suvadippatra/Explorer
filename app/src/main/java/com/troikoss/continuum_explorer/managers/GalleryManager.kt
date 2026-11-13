@@ -23,15 +23,29 @@ object GalleryManager {
     @Volatile
     private var cachedAlbumsTimestamp: Long = 0L
 
+    private val albumPreviewMap = java.util.concurrent.ConcurrentHashMap<String, UniversalFile>()
+
+    fun getCachedAlbumPreview(dirPath: String): UniversalFile? {
+        return albumPreviewMap[dirPath.trimEnd('/')]
+    }
+
     fun invalidateCache() {
         cachedGalleryFiles = null
         cachedGalleryTimestamp = 0L
         cachedGalleryAlbums = null
         cachedAlbumsTimestamp = 0L
+        albumPreviewMap.clear()
     }
 
     // Returns only the media files directly in dirPath (no subdirectories).
     fun getAlbumContents(context: Context, dirPath: String): List<UniversalFile> {
+        val normalizedDir = dirPath.trimEnd('/')
+        val cachedAll = cachedGalleryFiles
+        if (cachedAll != null && (System.currentTimeMillis() - cachedGalleryTimestamp) < CACHE_TTL_MS) {
+            val fastFiltered = cachedAll.filter { it.parentId?.trimEnd('/') == normalizedDir }
+            if (fastFiltered.isNotEmpty()) return fastFiltered
+        }
+
         val mediaFiles = mutableListOf<UniversalFile>()
 
         val projection = arrayOf(
@@ -40,8 +54,6 @@ object GalleryManager {
             MediaStore.Files.FileColumns.DATE_MODIFIED,
             MediaStore.Files.FileColumns.SIZE
         )
-
-        val normalizedDir = dirPath.trimEnd('/')
 
         val selection = "(${MediaStore.Files.FileColumns.MEDIA_TYPE} = ? OR ${MediaStore.Files.FileColumns.MEDIA_TYPE} = ?) AND " +
             "${MediaStore.Files.FileColumns.DATA} LIKE ? AND " +
@@ -76,17 +88,19 @@ object GalleryManager {
                     if (size <= 0L) continue
                     val fileName = c.getString(nameIndex) ?: path.substringAfterLast('/')
                     val parentPath = path.substringBeforeLast('/', "").ifEmpty { null }
-                    mediaFiles.add(
-                        UniversalFile(
-                            name = fileName,
-                            isDirectory = false,
-                            lastModified = c.getLong(dateIndex) * 1000L,
-                            length = size,
-                            provider = LocalProvider,
-                            providerId = path,
-                            parentId = parentPath,
-                        )
+                    val uFile = UniversalFile(
+                        name = fileName,
+                        isDirectory = false,
+                        lastModified = c.getLong(dateIndex) * 1000L,
+                        length = size,
+                        provider = LocalProvider,
+                        providerId = path,
+                        parentId = parentPath,
                     )
+                    mediaFiles.add(uFile)
+                    if (parentPath != null) {
+                        albumPreviewMap.putIfAbsent(parentPath.trimEnd('/'), uFile)
+                    }
                 }
             }
         } catch (e: Exception) {
@@ -151,17 +165,19 @@ object GalleryManager {
                     val fileName = c.getString(nameIndex) ?: path.substringAfterLast('/')
                     if (fileName.startsWith(".")) continue
                     val parentPath = path.substringBeforeLast('/', "").ifEmpty { null }
-                    files.add(
-                        UniversalFile(
-                            name = fileName,
-                            isDirectory = false,
-                            lastModified = c.getLong(dateIndex) * 1000L,
-                            length = size,
-                            provider = LocalProvider,
-                            providerId = path,
-                            parentId = parentPath,
-                        )
+                    val uFile = UniversalFile(
+                        name = fileName,
+                        isDirectory = false,
+                        lastModified = c.getLong(dateIndex) * 1000L,
+                        length = size,
+                        provider = LocalProvider,
+                        providerId = path,
+                        parentId = parentPath,
                     )
+                    files.add(uFile)
+                    if (parentPath != null) {
+                        albumPreviewMap.putIfAbsent(parentPath.trimEnd('/'), uFile)
+                    }
                 }
             }
         } catch (e: Exception) {
@@ -185,8 +201,10 @@ object GalleryManager {
 
         val projection = arrayOf(
             MediaStore.Files.FileColumns.DATA,
+            MediaStore.Files.FileColumns.DISPLAY_NAME,
             MediaStore.Images.Media.BUCKET_DISPLAY_NAME,
-            MediaStore.Files.FileColumns.DATE_MODIFIED
+            MediaStore.Files.FileColumns.DATE_MODIFIED,
+            MediaStore.Files.FileColumns.SIZE
         )
 
         val selection = "(${MediaStore.Files.FileColumns.MEDIA_TYPE} = ? OR ${MediaStore.Files.FileColumns.MEDIA_TYPE} = ?) AND " +
@@ -211,8 +229,10 @@ object GalleryManager {
 
             context.contentResolver.query(queryUri, projection, queryArgs, null)?.use { c ->
                 val dataIndex = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DATA)
+                val nameIndex = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DISPLAY_NAME)
                 val bucketIndex = c.getColumnIndexOrThrow(MediaStore.Images.Media.BUCKET_DISPLAY_NAME)
                 val dateIndex = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DATE_MODIFIED)
+                val sizeIndex = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.SIZE)
 
                 while (c.moveToNext()) {
                     val path = c.getString(dataIndex) ?: continue
@@ -220,7 +240,21 @@ object GalleryManager {
                     if (bucketName !in albums) {
                         val parentDirPath = path.substringBeforeLast('/', "")
                         if (parentDirPath.isNotEmpty()) {
-                            albums[bucketName] = parentDirPath to (c.getLong(dateIndex) * 1000L)
+                            val modMs = c.getLong(dateIndex) * 1000L
+                            albums[bucketName] = parentDirPath to modMs
+                            val fName = c.getString(nameIndex) ?: path.substringAfterLast('/')
+                            albumPreviewMap.putIfAbsent(
+                                parentDirPath.trimEnd('/'),
+                                UniversalFile(
+                                    name = fName,
+                                    isDirectory = false,
+                                    lastModified = modMs,
+                                    length = c.getLong(sizeIndex),
+                                    provider = LocalProvider,
+                                    providerId = path,
+                                    parentId = parentDirPath
+                                )
+                            )
                         }
                     }
                 }
