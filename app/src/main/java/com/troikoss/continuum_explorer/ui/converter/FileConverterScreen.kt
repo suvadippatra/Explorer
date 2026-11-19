@@ -1,16 +1,9 @@
 package com.troikoss.continuum_explorer.ui.converter
 
 import android.os.Environment
-import android.text.format.Formatter
 import android.widget.Toast
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -19,37 +12,31 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.troikoss.continuum_explorer.managers.SettingsManager
 import com.troikoss.continuum_explorer.ui.components.InAppFilePickerDialog
+import com.troikoss.continuum_explorer.ui.components.suite.SingleRowCommandBar
 import com.troikoss.continuum_explorer.utils.FileExplorerState
-import com.troikoss.continuum_explorer.utils.IconHelper
 import com.troikoss.continuum_explorer.utils.open
 import com.troikoss.continuum_explorer.utils.toUniversal
 import kotlinx.coroutines.launch
 import java.io.File
 import kotlin.math.roundToInt
 
-private enum class ConverterTopTab(val title: String, val badge: String) {
-    QUICK_PRESETS("1. Quick Presets", "Photo / Sign / PDF KB"),
-    SINGLE_FILE("2. Single File", "VERT Dynamic"),
-    BATCH_CONVERT("3. Batch & Combine", "Multi-File Queue")
+private enum class ConverterTopTab(val label: String) {
+    QUICK_PRESETS("Presets"),
+    SINGLE_FILE("Convert"),
+    BATCH_CONVERT("Batch")
 }
 
 /**
- * Redesigned Minimalist File Converter Screen combining:
- * 1. Quick Presets Tab (Squoosh-inspired Student Exam Photo 20–50 KB, Signature 10–20 KB with white-paper contrast cleanup,
- *    Custom Target KB Slider, and Native PDF Size Compressor).
- * 2. Single File Tab (VERT-inspired dynamic file type detector that shows all compatible target formats for any picked file).
- * 3. Batch Convert & Combine Images to PDF Tab.
+ * Desktop-First Ultra-Clean Tonal Flat File Converter.
+ * - Single 48.dp Command Bar with M3 SingleChoiceSegmentedButtonRow (`Presets` | `Convert` | `Batch`).
+ * - True 2-Pane Desktop Workbenches across all 3 modes via `ConverterDesktopPanes.kt` (zero OutlinedCards).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -66,7 +53,7 @@ fun FileConverterScreen(
 
     var activeTab by remember { mutableStateOf(ConverterTopTab.QUICK_PRESETS) }
 
-    // Shared Output Destination
+    // Output Destination
     var destinationMode by remember { mutableStateOf(OutputDestinationMode.CONVERTED_SUBFOLDER) }
     var customOutputFolder by remember {
         mutableStateOf(
@@ -78,8 +65,8 @@ fun FileConverterScreen(
     }
     var showCustomFolderPicker by remember { mutableStateOf(false) }
 
-    // --- TAB 1: QUICK PRESETS STATE (Student Photo / Signature KB + PDF Compressor) ---
-    var presetSubMode by remember { mutableIntStateOf(0) } // 0 = Photo/Signature KB, 1 = PDF Size Compressor
+    // Presets State
+    var presetSubMode by remember { mutableIntStateOf(0) }
     var selectedStudentPreset by remember { mutableStateOf(StudentPresetType.PASSPORT_PHOTO_STANDARD) }
     var studentSourceFile by remember { mutableStateOf<File?>(null) }
     var customMinKb by remember { mutableFloatStateOf(15f) }
@@ -94,30 +81,28 @@ fun FileConverterScreen(
 
     var pdfSourceFile by remember { mutableStateOf<File?>(null) }
     var selectedPdfCompression by remember { mutableStateOf(PdfCompressionLevel.RECOMMENDED) }
-    var pdfTargetMaxKb by remember { mutableFloatStateOf(0f) } // 0 = automatic by level
+    var pdfTargetMaxKb by remember { mutableFloatStateOf(0f) }
     var showStudentImagePicker by remember { mutableStateOf(false) }
     var showPdfFilePicker by remember { mutableStateOf(false) }
 
-    // --- TAB 2: SINGLE FILE (VERT DYNAMIC) STATE ---
+    // Single File State
     var singleItem by remember { mutableStateOf<ConverterQueueItem?>(null) }
     var showSingleFilePicker by remember { mutableStateOf(false) }
     var singleConverting by remember { mutableStateOf(false) }
 
-    // --- TAB 3: BATCH & IMAGE-TO-PDF QUEUE STATE ---
+    // Batch Queue State
     val batchQueue = remember { mutableStateListOf<ConverterQueueItem>() }
     var showBatchFilePicker by remember { mutableStateOf(false) }
     var isBatchRunning by remember { mutableStateOf(false) }
     var globalTargetFormat by remember { mutableStateOf<String?>(null) }
 
-    // Preload initial files passed from Explorer context menu or FloatingMiniAppHost
     LaunchedEffect(appState?.converterInitialFiles?.size, initialFiles.size) {
         val initFiles = (appState?.converterInitialFiles?.toList().orEmpty() + initialFiles).distinctBy { it.absolutePath }
         if (initFiles.isNotEmpty()) {
             if (initFiles.size == 1) {
                 val first = initFiles.first()
-                val item = FileConverterDispatcher.createQueueItem(first)
-                if (item != null) {
-                    singleItem = item
+                FileConverterDispatcher.createQueueItem(first)?.let {
+                    singleItem = it
                     activeTab = ConverterTopTab.SINGLE_FILE
                 }
             } else {
@@ -132,7 +117,6 @@ fun FileConverterScreen(
         }
     }
 
-    // Sync student preset defaults when preset selection changes
     LaunchedEffect(selectedStudentPreset) {
         customMinKb = selectedStudentPreset.minKb.toFloat()
         customMaxKb = selectedStudentPreset.maxKb.toFloat()
@@ -146,10 +130,10 @@ fun FileConverterScreen(
         enhanceSignatureInk = selectedStudentPreset.highContrastSignature
     }
 
-    // File Picker Dialogs
+    // File Pickers
     if (showStudentImagePicker) {
         InAppFilePickerDialog(
-            title = "Select Photo or Signature Image",
+            title = "Select Photo or Signature",
             selectFolders = false,
             allowedExtensions = setOf("jpg", "jpeg", "png", "webp", "bmp"),
             onDismiss = { showStudentImagePicker = false },
@@ -164,7 +148,7 @@ fun FileConverterScreen(
 
     if (showPdfFilePicker) {
         InAppFilePickerDialog(
-            title = "Select PDF Document to Compress",
+            title = "Select PDF Document",
             selectFolders = false,
             allowedExtensions = setOf("pdf"),
             onDismiss = { showPdfFilePicker = false },
@@ -179,33 +163,28 @@ fun FileConverterScreen(
 
     if (showSingleFilePicker) {
         InAppFilePickerDialog(
-            title = "Select Any File to Convert (VERT Engine)",
+            title = "Select File to Convert",
             selectFolders = false,
             onDismiss = { showSingleFilePicker = false },
             onSelected = { file ->
                 showSingleFilePicker = false
                 val item = FileConverterDispatcher.createQueueItem(file)
-                if (item != null) {
-                    singleItem = item
-                } else {
-                    Toast.makeText(context, "Format .${file.extension} is not supported for conversion", Toast.LENGTH_SHORT).show()
-                }
+                if (item != null) singleItem = item
+                else Toast.makeText(context, ".${file.extension} is not supported", Toast.LENGTH_SHORT).show()
             }
         )
     }
 
     if (showBatchFilePicker) {
         InAppFilePickerDialog(
-            title = "Add Files to Batch Queue",
+            title = "Add Files to Queue",
             selectFolders = false,
             allowMultiSelect = true,
             onDismiss = { showBatchFilePicker = false },
             onSelected = { file ->
                 showBatchFilePicker = false
                 FileConverterDispatcher.createQueueItem(file)?.let { item ->
-                    if (batchQueue.none { it.sourceFile.absolutePath == file.absolutePath }) {
-                        batchQueue.add(item)
-                    }
+                    if (batchQueue.none { it.sourceFile.absolutePath == file.absolutePath }) batchQueue.add(item)
                 }
             },
             onMultipleSelected = { files ->
@@ -221,7 +200,7 @@ fun FileConverterScreen(
 
     if (showCustomFolderPicker) {
         InAppFilePickerDialog(
-            title = "Select Output Folder",
+            title = "Output Folder",
             selectFolders = true,
             initialDirectory = customOutputFolder,
             onDismiss = { showCustomFolderPicker = false },
@@ -235,1215 +214,312 @@ fun FileConverterScreen(
         )
     }
 
-    Column(
+    BoxWithConstraints(
         modifier = modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.surface)
     ) {
-        // Unified 50.dp Flush Top Heading Bar with Triple-Line Menu Button on Left
-        val isHeaderPinned by SettingsManager.isSubpageHeaderPinned
-        Surface(
-            color = MaterialTheme.colorScheme.surfaceContainer,
-            tonalElevation = if (isHeaderPinned) 2.dp else 0.dp,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(50.dp)
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(onClick = onBack, modifier = Modifier.size(36.dp)) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Back",
-                        tint = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
+        val isWide = maxWidth >= 740.dp
 
-                Spacer(modifier = Modifier.width(6.dp))
-
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "File Converter",
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1
-                    )
-                    Text(
-                        text = "100% On-Device • Squoosh KB + VERT Engine",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
-                        maxLines = 1
-                    )
-                }
-
-                // Output Folder Pill
-                AssistChip(
-                    onClick = { showCustomFolderPicker = true },
-                    label = {
+        Column(modifier = Modifier.fillMaxSize()) {
+            // Strict Single 48.dp Command Bar
+            SingleRowCommandBar(
+                navigationContent = {
+                    IconButton(
+                        onClick = onBack,
+                        modifier = Modifier
+                            .size(36.dp)
+                            .testTag("converter_back_button")
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", modifier = Modifier.size(20.dp))
+                    }
+                },
+                titleContent = {
+                    if (isWide) {
                         Text(
-                            text = when (destinationMode) {
-                                OutputDestinationMode.CONVERTED_SUBFOLDER -> "Out: /Converted/"
-                                OutputDestinationMode.SAME_AS_SOURCE -> "Out: Same Folder"
-                                OutputDestinationMode.CUSTOM_FOLDER -> "Out: ${customOutputFolder.name}"
-                            },
-                            fontSize = 11.sp
+                            text = "Converter",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1
                         )
-                    },
-                    leadingIcon = {
-                        Icon(Icons.Default.FolderSpecial, contentDescription = null, modifier = Modifier.size(14.dp))
-                    },
-                    modifier = Modifier.height(30.dp)
-                )
-
-                Spacer(modifier = Modifier.width(4.dp))
-
-                IconButton(
-                    onClick = { SettingsManager.toggleSubpageHeaderPinned(context) },
-                    modifier = Modifier.size(36.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.PushPin,
-                        contentDescription = if (isHeaderPinned) "Header Locked on Top" else "Lock Header on Top",
-                        tint = if (isHeaderPinned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-
-                IconButton(
-                    onClick = { SettingsManager.toggleFullScreenTabBar() },
-                    modifier = Modifier.size(36.dp)
-                ) {
-                    Icon(
-                        imageVector = if (isFullScreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
-                        contentDescription = "Fullscreen",
-                        tint = if (isFullScreen) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(19.dp)
-                    )
-                }
-            }
-        }
-
-        // Minimalist 3-Tab Switcher
-        Surface(
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                ConverterTopTab.entries.forEach { tab ->
-                    val selected = activeTab == tab
-                    Surface(
-                        shape = RoundedCornerShape(10.dp),
-                        color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHigh,
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(10.dp))
-                            .clickable { activeTab = tab }
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
+                    }
+                },
+                centerContent = {
+                    SingleChoiceSegmentedButtonRow(modifier = Modifier.height(32.dp)) {
+                        ConverterTopTab.entries.forEachIndexed { idx, tab ->
+                            SegmentedButton(
+                                selected = activeTab == tab,
+                                onClick = { activeTab = tab },
+                                shape = SegmentedButtonDefaults.itemShape(index = idx, count = ConverterTopTab.entries.size),
+                                icon = {},
+                                colors = SegmentedButtonDefaults.colors(
+                                    activeContainerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                    activeContentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                                    inactiveContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                    inactiveContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    activeBorderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
+                                    inactiveBorderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)
+                                ),
+                                modifier = Modifier.testTag("converter_tab_${tab.name.lowercase()}")
+                            ) {
+                                Text(
+                                    text = tab.label,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = if (activeTab == tab) FontWeight.SemiBold else FontWeight.Medium
+                                )
+                            }
+                        }
+                    }
+                },
+                actionsContent = {
+                    if (isWide) {
+                        Surface(
+                            onClick = { showCustomFolderPicker = true },
+                            shape = RoundedCornerShape(50),
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            modifier = Modifier.height(30.dp)
                         ) {
-                            Text(
-                                text = tab.title,
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                text = tab.badge,
-                                style = MaterialTheme.typography.labelSmall,
-                                fontSize = 10.sp,
-                                color = if (selected) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.85f)
-                                else MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
-
-        // Body Content per Active Tab
-        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-            val isWide = maxWidth >= 700.dp
-
-            when (activeTab) {
-                ConverterTopTab.QUICK_PRESETS -> {
-                    LazyColumn(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(horizontal = 14.dp),
-                        contentPadding = PaddingValues(vertical = 14.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        // Sub-mode switcher: Student Exam Photo/Signature KB vs PDF Size Compressor
-                        item {
                             Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                modifier = Modifier.padding(horizontal = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
                             ) {
-                                FilterChip(
-                                    selected = presetSubMode == 0,
-                                    onClick = {
-                                        presetSubMode = 0
-                                        presetOutputResult = null
-                                        presetErrorText = null
-                                    },
-                                    label = { Text("Student Photo & Signature KB Resizer", fontWeight = FontWeight.SemiBold) },
-                                    leadingIcon = { Icon(Icons.Default.Badge, contentDescription = null, modifier = Modifier.size(16.dp)) },
-                                    modifier = Modifier.weight(1f)
-                                )
-                                FilterChip(
-                                    selected = presetSubMode == 1,
-                                    onClick = {
-                                        presetSubMode = 1
-                                        presetOutputResult = null
-                                        presetErrorText = null
-                                    },
-                                    label = { Text("PDF Size Compressor", fontWeight = FontWeight.SemiBold) },
-                                    leadingIcon = { Icon(Icons.Default.PictureAsPdf, contentDescription = null, modifier = Modifier.size(16.dp)) },
-                                    modifier = Modifier.weight(1f)
+                                Icon(Icons.Default.Folder, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(14.dp))
+                                Text(
+                                    text = if (destinationMode == OutputDestinationMode.CUSTOM_FOLDER) customOutputFolder.name else "Converted/",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
                         }
-
-                        if (presetSubMode == 0) {
-                            // STUDENT PHOTO & SIGNATURE EXACT KB RESIZER
-                            item {
-                                OutlinedCard(
-                                    shape = RoundedCornerShape(14.dp),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Column(
-                                        modifier = Modifier.padding(14.dp),
-                                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Column(modifier = Modifier.weight(1f)) {
-                                                Text(
-                                                    text = "1. Select Photo or Signature Image",
-                                                    style = MaterialTheme.typography.titleSmall,
-                                                    fontWeight = FontWeight.Bold
-                                                )
-                                                Text(
-                                                    text = studentSourceFile?.let {
-                                                        "${it.name} • Original: ${Formatter.formatFileSize(context, it.length())}"
-                                                    } ?: "Supports JPG, PNG, WEBP, BMP for online exam portals (SSC, UPSC, JEE, NEET, IBPS, State Portals)",
-                                                    style = MaterialTheme.typography.bodySmall,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                )
-                                            }
-                                            Button(
-                                                onClick = { showStudentImagePicker = true },
-                                                shape = RoundedCornerShape(10.dp)
-                                            ) {
-                                                Icon(Icons.Default.ImageSearch, contentDescription = null, modifier = Modifier.size(16.dp))
-                                                Spacer(modifier = Modifier.width(6.dp))
-                                                Text(if (studentSourceFile == null) "Pick Image" else "Change")
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            item {
-                                OutlinedCard(
-                                    shape = RoundedCornerShape(14.dp),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Column(
-                                        modifier = Modifier.padding(14.dp),
-                                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                                    ) {
-                                        Text(
-                                            text = "2. Choose Exam Preset or Custom KB Target",
-                                            style = MaterialTheme.typography.titleSmall,
-                                            fontWeight = FontWeight.Bold
-                                        )
-
-                                        StudentPresetType.entries.forEach { preset ->
-                                            val isSelected = selectedStudentPreset == preset
-                                            Surface(
-                                                shape = RoundedCornerShape(10.dp),
-                                                color = if (isSelected) MaterialTheme.colorScheme.primaryContainer
-                                                else MaterialTheme.colorScheme.surfaceContainerLow,
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .clip(RoundedCornerShape(10.dp))
-                                                    .clickable { selectedStudentPreset = preset }
-                                            ) {
-                                                Row(
-                                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                                                    verticalAlignment = Alignment.CenterVertically,
-                                                    horizontalArrangement = Arrangement.SpaceBetween
-                                                ) {
-                                                    Row(
-                                                        verticalAlignment = Alignment.CenterVertically,
-                                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                                        modifier = Modifier.weight(1f)
-                                                    ) {
-                                                        RadioButton(
-                                                            selected = isSelected,
-                                                            onClick = { selectedStudentPreset = preset }
-                                                        )
-                                                        Column {
-                                                            Text(
-                                                                text = preset.title,
-                                                                style = MaterialTheme.typography.bodyMedium,
-                                                                fontWeight = FontWeight.Bold
-                                                            )
-                                                            Text(
-                                                                text = preset.subtitle,
-                                                                style = MaterialTheme.typography.labelSmall,
-                                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                            )
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-
-                                        HorizontalDivider()
-
-                                        // Fine-tune Target KB Range & Dimensions
-                                        Text(
-                                            text = "Target File Size Range: ${customMinKb.roundToInt()} KB – ${customMaxKb.roundToInt()} KB",
-                                            style = MaterialTheme.typography.labelLarge,
-                                            fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.primary
-                                        )
-
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                        ) {
-                                            Text("Max KB:", style = MaterialTheme.typography.labelSmall, modifier = Modifier.width(56.dp))
-                                            Slider(
-                                                value = customMaxKb,
-                                                onValueChange = {
-                                                    customMaxKb = it
-                                                    if (customMinKb >= it) customMinKb = (it - 5f).coerceAtLeast(0f)
-                                                },
-                                                valueRange = 8f..300f,
-                                                modifier = Modifier.weight(1f)
-                                            )
-                                            Text("${customMaxKb.roundToInt()} KB", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-                                        }
-
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                        ) {
-                                            OutlinedTextField(
-                                                value = customWidthInput,
-                                                onValueChange = { customWidthInput = it.filter { c -> c.isDigit() } },
-                                                label = { Text("Width (px, auto)") },
-                                                placeholder = { Text("e.g. 600") },
-                                                leadingIcon = { Icon(Icons.Default.AspectRatio, contentDescription = null, modifier = Modifier.size(18.dp)) },
-                                                trailingIcon = {
-                                                    if (customWidthInput.isNotEmpty()) {
-                                                        IconButton(onClick = { customWidthInput = "" }) {
-                                                            Icon(Icons.Default.Clear, contentDescription = "Clear Width", modifier = Modifier.size(16.dp))
-                                                        }
-                                                    }
-                                                },
-                                                shape = RoundedCornerShape(12.dp),
-                                                singleLine = true,
-                                                modifier = Modifier.weight(1f)
-                                            )
-                                            OutlinedTextField(
-                                                value = customHeightInput,
-                                                onValueChange = { customHeightInput = it.filter { c -> c.isDigit() } },
-                                                label = { Text("Height (px, auto)") },
-                                                placeholder = { Text("e.g. 600") },
-                                                leadingIcon = { Icon(Icons.Default.AspectRatio, contentDescription = null, modifier = Modifier.size(18.dp)) },
-                                                trailingIcon = {
-                                                    if (customHeightInput.isNotEmpty()) {
-                                                        IconButton(onClick = { customHeightInput = "" }) {
-                                                            Icon(Icons.Default.Clear, contentDescription = "Clear Height", modifier = Modifier.size(16.dp))
-                                                        }
-                                                    }
-                                                },
-                                                shape = RoundedCornerShape(12.dp),
-                                                singleLine = true,
-                                                modifier = Modifier.weight(1f)
-                                            )
-                                        }
-
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            modifier = Modifier.fillMaxWidth()
-                                        ) {
-                                            Column(modifier = Modifier.weight(1f)) {
-                                                Text("High-Contrast Signature Ink Cleanup", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
-                                                Text("Turns gray paper background pure white & sharpens dark pen ink", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                            }
-                                            Switch(
-                                                checked = enhanceSignatureInk,
-                                                onCheckedChange = { enhanceSignatureInk = it }
-                                            )
-                                        }
-
-                                        Button(
-                                            onClick = {
-                                                val src = studentSourceFile
-                                                if (src == null || !src.exists()) {
-                                                    Toast.makeText(context, "Please pick an image first", Toast.LENGTH_SHORT).show()
-                                                    return@Button
-                                                }
-                                                presetProcessing = true
-                                                presetErrorText = null
-                                                presetOutputResult = null
-                                                scope.launch {
-                                                    val outFile = FileConverterDispatcher.resolveUniqueOutputFile(
-                                                        sourceFile = src,
-                                                        targetFormat = "jpg",
-                                                        destinationMode = destinationMode,
-                                                        customFolder = customOutputFolder
-                                                    )
-                                                    val wPx = customWidthInput.toIntOrNull() ?: 0
-                                                    val hPx = customHeightInput.toIntOrNull() ?: 0
-                                                    val res = SquooshImageCompressor.compressImageToTargetKb(
-                                                        context = context,
-                                                        sourceFile = src,
-                                                        outputFile = outFile,
-                                                        minTargetKb = customMinKb.roundToInt(),
-                                                        maxTargetKb = customMaxKb.roundToInt(),
-                                                        exactWidthPx = wPx,
-                                                        exactHeightPx = hPx,
-                                                        enhanceSignatureContrast = enhanceSignatureInk,
-                                                        onProgress = { _, msg -> presetProgressText = msg }
-                                                    )
-                                                    presetProcessing = false
-                                                    res.onSuccess { generated ->
-                                                        presetOutputResult = generated
-                                                    }.onFailure { err ->
-                                                        presetErrorText = err.message ?: "Compression failed"
-                                                    }
-                                                }
-                                            },
-                                            enabled = !presetProcessing && studentSourceFile != null,
-                                            modifier = Modifier.fillMaxWidth(),
-                                            shape = RoundedCornerShape(12.dp)
-                                        ) {
-                                            Icon(Icons.Default.Compress, contentDescription = null, modifier = Modifier.size(18.dp))
-                                            Spacer(modifier = Modifier.width(8.dp))
-                                            Text(
-                                                if (presetProcessing) presetProgressText.ifBlank { "Compressing..." }
-                                                else "Generate Exact ${customMinKb.roundToInt()}–${customMaxKb.roundToInt()} KB JPG Now",
-                                                fontWeight = FontWeight.Bold
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        } else {
-                            // PDF SIZE COMPRESSOR
-                            item {
-                                OutlinedCard(
-                                    shape = RoundedCornerShape(14.dp),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Column(
-                                        modifier = Modifier.padding(14.dp),
-                                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Column(modifier = Modifier.weight(1f)) {
-                                                Text(
-                                                    text = "1. Select PDF Document to Compress",
-                                                    style = MaterialTheme.typography.titleSmall,
-                                                    fontWeight = FontWeight.Bold
-                                                )
-                                                Text(
-                                                    text = pdfSourceFile?.let {
-                                                        "${it.name} • Original Size: ${Formatter.formatFileSize(context, it.length())}"
-                                                    } ?: "Shrink scanned PDFs, certificates & forms for portal uploads",
-                                                    style = MaterialTheme.typography.bodySmall,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                )
-                                            }
-                                            Button(
-                                                onClick = { showPdfFilePicker = true },
-                                                shape = RoundedCornerShape(10.dp)
-                                            ) {
-                                                Icon(Icons.Default.PictureAsPdf, contentDescription = null, modifier = Modifier.size(16.dp))
-                                                Spacer(modifier = Modifier.width(6.dp))
-                                                Text(if (pdfSourceFile == null) "Pick PDF" else "Change")
-                                            }
-                                        }
-
-                                        HorizontalDivider()
-
-                                        Text(
-                                            text = "2. Select PDF Compression Level",
-                                            style = MaterialTheme.typography.titleSmall,
-                                            fontWeight = FontWeight.Bold
-                                        )
-
-                                        PdfCompressionLevel.entries.forEach { level ->
-                                            val isSelected = selectedPdfCompression == level
-                                            Surface(
-                                                shape = RoundedCornerShape(10.dp),
-                                                color = if (isSelected) MaterialTheme.colorScheme.primaryContainer
-                                                else MaterialTheme.colorScheme.surfaceContainerLow,
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .clip(RoundedCornerShape(10.dp))
-                                                    .clickable { selectedPdfCompression = level }
-                                            ) {
-                                                Row(
-                                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                                                    verticalAlignment = Alignment.CenterVertically
-                                                ) {
-                                                    RadioButton(
-                                                        selected = isSelected,
-                                                        onClick = { selectedPdfCompression = level }
-                                                    )
-                                                    Column {
-                                                        Text(level.label, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
-                                                        Text(level.description, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                                    }
-                                                }
-                                            }
-                                        }
-
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                        ) {
-                                            Text(
-                                                text = if (pdfTargetMaxKb <= 0f) "Max PDF Size: Auto"
-                                                else "Max PDF Budget: ${pdfTargetMaxKb.roundToInt()} KB",
-                                                style = MaterialTheme.typography.labelMedium,
-                                                fontWeight = FontWeight.SemiBold,
-                                                modifier = Modifier.width(150.dp)
-                                            )
-                                            Slider(
-                                                value = pdfTargetMaxKb,
-                                                onValueChange = { pdfTargetMaxKb = it },
-                                                valueRange = 0f..2000f,
-                                                modifier = Modifier.weight(1f)
-                                            )
-                                        }
-
-                                        Button(
-                                            onClick = {
-                                                val src = pdfSourceFile
-                                                if (src == null || !src.exists()) {
-                                                    Toast.makeText(context, "Please select a PDF file first", Toast.LENGTH_SHORT).show()
-                                                    return@Button
-                                                }
-                                                presetProcessing = true
-                                                presetErrorText = null
-                                                presetOutputResult = null
-                                                scope.launch {
-                                                    val outFile = FileConverterDispatcher.resolveUniqueOutputFile(
-                                                        sourceFile = src,
-                                                        targetFormat = "pdf",
-                                                        destinationMode = destinationMode,
-                                                        customFolder = customOutputFolder
-                                                    )
-                                                    val res = SquooshImageCompressor.compressPdfToTarget(
-                                                        context = context,
-                                                        sourcePdf = src,
-                                                        outputFile = outFile,
-                                                        level = selectedPdfCompression,
-                                                        targetMaxKb = pdfTargetMaxKb.roundToInt(),
-                                                        onProgress = { _, msg -> presetProgressText = msg }
-                                                    )
-                                                    presetProcessing = false
-                                                    res.onSuccess { generated ->
-                                                        presetOutputResult = generated
-                                                    }.onFailure { err ->
-                                                        presetErrorText = err.message ?: "PDF compression failed"
-                                                    }
-                                                }
-                                            },
-                                            enabled = !presetProcessing && pdfSourceFile != null,
-                                            modifier = Modifier.fillMaxWidth(),
-                                            shape = RoundedCornerShape(12.dp)
-                                        ) {
-                                            Icon(Icons.Default.Compress, contentDescription = null, modifier = Modifier.size(18.dp))
-                                            Spacer(modifier = Modifier.width(8.dp))
-                                            Text(
-                                                if (presetProcessing) presetProgressText.ifBlank { "Compressing PDF..." }
-                                                else "Compress PDF Now",
-                                                fontWeight = FontWeight.Bold
-                                            )
-                                        }
-                                    }
-                                }
-                            }
+                    } else {
+                        IconButton(onClick = { showCustomFolderPicker = true }, modifier = Modifier.size(34.dp)) {
+                            Icon(Icons.Default.Folder, contentDescription = "Output Folder", modifier = Modifier.size(18.dp))
                         }
+                    }
 
-                        // Live Before vs. After Size & Dimensions Preview Card for Tab 1
-                        val activeSource = if (presetSubMode == 0) studentSourceFile else pdfSourceFile
-                        if (activeSource != null && activeSource.exists()) {
-                            item {
-                                val srcDims = remember(activeSource) {
-                                    if (presetSubMode == 0) {
-                                        val opts = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                                        android.graphics.BitmapFactory.decodeFile(activeSource.absolutePath, opts)
-                                        if (opts.outWidth > 0 && opts.outHeight > 0) "${opts.outWidth}×${opts.outHeight} px" else "Image"
-                                    } else "PDF Document"
-                                }
-                                val outFile = presetOutputResult
-                                val outDims = remember(outFile) {
-                                    if (outFile != null && outFile.exists() && presetSubMode == 0) {
-                                        val opts = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                                        android.graphics.BitmapFactory.decodeFile(outFile.absolutePath, opts)
-                                        if (opts.outWidth > 0 && opts.outHeight > 0) "${opts.outWidth}×${opts.outHeight} px" else "JPG"
-                                    } else if (outFile != null) "Compressed PDF" else null
-                                }
-                                val srcKb = (activeSource.length() / 1024.0).coerceAtLeast(0.1)
-                                val outKb = outFile?.let { (it.length() / 1024.0).coerceAtLeast(0.1) }
-                                val savedPct = if (outKb != null && srcKb > 0) {
-                                    (((srcKb - outKb) / srcKb) * 100.0).roundToInt()
-                                } else null
-
-                                Surface(
-                                    shape = RoundedCornerShape(14.dp),
-                                    color = if (outFile != null) MaterialTheme.colorScheme.secondaryContainer
-                                    else MaterialTheme.colorScheme.surfaceContainerHigh,
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Column(
-                                        modifier = Modifier.padding(14.dp),
-                                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Text(
-                                                text = "Before vs. After Size & Dimensions Preview",
-                                                style = MaterialTheme.typography.titleSmall,
-                                                fontWeight = FontWeight.Bold
-                                            )
-                                            if (savedPct != null) {
-                                                Surface(
-                                                    shape = RoundedCornerShape(50),
-                                                    color = MaterialTheme.colorScheme.primary
-                                                ) {
-                                                    Text(
-                                                        text = if (savedPct >= 0) "-$savedPct% Saved" else "+${-savedPct}%",
-                                                        style = MaterialTheme.typography.labelSmall,
-                                                        fontWeight = FontWeight.Bold,
-                                                        color = MaterialTheme.colorScheme.onPrimary,
-                                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                                                    )
-                                                }
-                                            }
-                                        }
-
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            // BEFORE Box
-                                            Surface(
-                                                shape = RoundedCornerShape(10.dp),
-                                                color = MaterialTheme.colorScheme.surface,
-                                                modifier = Modifier.weight(1f)
-                                            ) {
-                                                Row(
-                                                    modifier = Modifier.padding(10.dp),
-                                                    verticalAlignment = Alignment.CenterVertically,
-                                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                                ) {
-                                                    Box(modifier = Modifier.size(48.dp)) {
-                                                        IconHelper.FileThumbnail(
-                                                            file = activeSource.toUniversal(),
-                                                            modifier = Modifier.fillMaxSize()
-                                                        )
-                                                    }
-                                                    Column(modifier = Modifier.weight(1f)) {
-                                                        Text("BEFORE (Original)", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                                        Text(
-                                                            text = Formatter.formatFileSize(context, activeSource.length()),
-                                                            style = MaterialTheme.typography.bodyMedium,
-                                                            fontWeight = FontWeight.Bold
-                                                        )
-                                                        Text(
-                                                            text = srcDims,
-                                                            style = MaterialTheme.typography.labelSmall,
-                                                            fontFamily = FontFamily.Monospace,
-                                                            color = MaterialTheme.colorScheme.primary
-                                                        )
-                                                    }
-                                                }
-                                            }
-
-                                            Icon(
-                                                imageVector = Icons.Default.ArrowForward,
-                                                contentDescription = null,
-                                                tint = MaterialTheme.colorScheme.primary
-                                            )
-
-                                            // AFTER Box
-                                            Surface(
-                                                shape = RoundedCornerShape(10.dp),
-                                                color = MaterialTheme.colorScheme.surface,
-                                                modifier = Modifier.weight(1f)
-                                            ) {
-                                                Row(
-                                                    modifier = Modifier.padding(10.dp),
-                                                    verticalAlignment = Alignment.CenterVertically,
-                                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                                ) {
-                                                    if (outFile != null && outFile.exists()) {
-                                                        Box(modifier = Modifier.size(48.dp)) {
-                                                            IconHelper.FileThumbnail(
-                                                                file = outFile.toUniversal(),
-                                                                modifier = Modifier.fillMaxSize()
-                                                            )
-                                                        }
-                                                        Column(modifier = Modifier.weight(1f)) {
-                                                            Text("AFTER (Output)", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-                                                            Text(
-                                                                text = Formatter.formatFileSize(context, outFile.length()),
-                                                                style = MaterialTheme.typography.bodyMedium,
-                                                                fontWeight = FontWeight.Bold
-                                                            )
-                                                            Text(
-                                                                text = outDims ?: "Ready",
-                                                                style = MaterialTheme.typography.labelSmall,
-                                                                fontFamily = FontFamily.Monospace,
-                                                                color = MaterialTheme.colorScheme.primary
-                                                            )
-                                                        }
-                                                    } else {
-                                                        Column(modifier = Modifier.weight(1f)) {
-                                                            Text("TARGET ESTIMATE", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                                            Text(
-                                                                text = if (presetSubMode == 0) "${customMinKb.roundToInt()}–${customMaxKb.roundToInt()} KB"
-                                                                else if (pdfTargetMaxKb > 0f) "≤ ${pdfTargetMaxKb.roundToInt()} KB"
-                                                                else selectedPdfCompression.label,
-                                                                style = MaterialTheme.typography.bodyMedium,
-                                                                fontWeight = FontWeight.Bold
-                                                            )
-                                                            Text(
-                                                                text = if (presetSubMode == 0) {
-                                                                    val w = customWidthInput.ifBlank { "Auto" }
-                                                                    val h = customHeightInput.ifBlank { "Auto" }
-                                                                    "${w}×${h} px"
-                                                                } else selectedPdfCompression.label,
-                                                                style = MaterialTheme.typography.labelSmall,
-                                                                fontFamily = FontFamily.Monospace,
-                                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                            )
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-
-                                        if (outFile != null && outFile.exists()) {
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.SpaceBetween
-                                            ) {
-                                                Text(
-                                                    text = outFile.absolutePath,
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    fontFamily = FontFamily.Monospace,
-                                                    color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f),
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis,
-                                                    modifier = Modifier.weight(1f)
-                                                )
-                                                Spacer(modifier = Modifier.width(8.dp))
-                                                FilledTonalButton(
-                                                    onClick = { appState?.open(outFile.toUniversal()) }
-                                                ) {
-                                                    Icon(Icons.Default.Visibility, contentDescription = null, modifier = Modifier.size(16.dp))
-                                                    Spacer(modifier = Modifier.width(6.dp))
-                                                    Text("Preview")
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        presetErrorText?.let { err ->
-                            item {
-                                Surface(
-                                    shape = RoundedCornerShape(12.dp),
-                                    color = MaterialTheme.colorScheme.errorContainer,
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Text(
-                                        text = err,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onErrorContainer,
-                                        modifier = Modifier.padding(12.dp)
-                                    )
-                                }
-                            }
-                        }
+                    IconButton(onClick = { SettingsManager.toggleFullScreenTabBar() }, modifier = Modifier.size(34.dp)) {
+                        Icon(
+                            if (isFullScreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
+                            contentDescription = "Full Screen",
+                            tint = if (isFullScreen) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
+                        )
                     }
                 }
+            )
 
-                ConverterTopTab.SINGLE_FILE -> {
-                    // TAB 2: VERT-STYLE DYNAMIC SINGLE FILE CONVERTER
-                    LazyColumn(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(horizontal = 14.dp),
-                        contentPadding = PaddingValues(vertical = 14.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        item {
-                            OutlinedCard(
-                                shape = RoundedCornerShape(16.dp),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { showSingleFilePicker = true }
-                            ) {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(20.dp),
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Surface(
-                                        shape = RoundedCornerShape(14.dp),
-                                        color = MaterialTheme.colorScheme.primaryContainer,
-                                        modifier = Modifier.size(52.dp)
-                                    ) {
-                                        Box(contentAlignment = Alignment.Center) {
-                                            Icon(
-                                                Icons.Default.UploadFile,
-                                                contentDescription = null,
-                                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                                modifier = Modifier.size(28.dp)
-                                            )
-                                        }
-                                    }
-                                    Text(
-                                        text = singleItem?.sourceFile?.name ?: "Select Any File to See Available Target Formats",
-                                        style = MaterialTheme.typography.titleSmall,
-                                        fontWeight = FontWeight.Bold,
-                                        textAlign = TextAlign.Center
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+            ) {
+                when (activeTab) {
+                    ConverterTopTab.QUICK_PRESETS -> {
+                        ConverterPresetsWorkbench(
+                            isWide = isWide,
+                            presetSubMode = presetSubMode,
+                            onSubModeChange = {
+                                presetSubMode = it
+                                presetOutputResult = null
+                                presetErrorText = null
+                            },
+                            selectedStudentPreset = selectedStudentPreset,
+                            onStudentPresetChange = { selectedStudentPreset = it },
+                            studentSourceFile = studentSourceFile,
+                            onPickStudentImage = { showStudentImagePicker = true },
+                            customMinKb = customMinKb,
+                            customMaxKb = customMaxKb,
+                            onMaxKbChange = { customMaxKb = it },
+                            customWidthInput = customWidthInput,
+                            onWidthChange = { customWidthInput = it },
+                            customHeightInput = customHeightInput,
+                            onHeightChange = { customHeightInput = it },
+                            enhanceSignatureInk = enhanceSignatureInk,
+                            onEnhanceInkChange = { enhanceSignatureInk = it },
+                            pdfSourceFile = pdfSourceFile,
+                            onPickPdf = { showPdfFilePicker = true },
+                            selectedPdfCompression = selectedPdfCompression,
+                            onPdfCompressionChange = { selectedPdfCompression = it },
+                            pdfTargetMaxKb = pdfTargetMaxKb,
+                            onPdfTargetMaxKbChange = { pdfTargetMaxKb = it },
+                            presetProcessing = presetProcessing,
+                            presetProgressText = presetProgressText,
+                            presetOutputResult = presetOutputResult,
+                            presetErrorText = presetErrorText,
+                            onRunImageCompress = {
+                                val src = studentSourceFile
+                                if (src == null || !src.exists()) {
+                                    Toast.makeText(context, "Pick an image first", Toast.LENGTH_SHORT).show()
+                                    return@ConverterPresetsWorkbench
+                                }
+                                presetProcessing = true
+                                presetErrorText = null
+                                presetOutputResult = null
+                                scope.launch {
+                                    val outFile = FileConverterDispatcher.resolveUniqueOutputFile(
+                                        sourceFile = src,
+                                        targetFormat = "jpg",
+                                        destinationMode = destinationMode,
+                                        customFolder = customOutputFolder
                                     )
-                                    Text(
-                                        text = singleItem?.let {
-                                            "Detected: .${it.sourceExtension.uppercase()} (${it.category.title}) • ${Formatter.formatFileSize(context, it.sourceFile.length())}"
-                                        } ?: "Images (PNG, JPG, WEBP, BMP, ICO, SVG, PDF) • Docs & Data (MD, HTML, PDF, TXT, JSON, CSV, XML, YAML, DOCX, XLSX) • Media (MP4, WAV, M4A, AAC) • Archives (ZIP, TAR, GZ)",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        textAlign = TextAlign.Center
+                                    val res = SquooshImageCompressor.compressImageToTargetKb(
+                                        context = context,
+                                        sourceFile = src,
+                                        outputFile = outFile,
+                                        minTargetKb = customMinKb.roundToInt(),
+                                        maxTargetKb = customMaxKb.roundToInt(),
+                                        exactWidthPx = customWidthInput.toIntOrNull() ?: 0,
+                                        exactHeightPx = customHeightInput.toIntOrNull() ?: 0,
+                                        enhanceSignatureContrast = enhanceSignatureInk,
+                                        onProgress = { _, msg -> presetProgressText = msg }
                                     )
-                                    FilledTonalButton(onClick = { showSingleFilePicker = true }) {
-                                        Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(16.dp))
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text(if (singleItem == null) "Browse & Pick File" else "Pick Different File")
-                                    }
+                                    presetProcessing = false
+                                    res.onSuccess { presetOutputResult = it }
+                                        .onFailure { presetErrorText = it.message ?: "Compression failed" }
                                 }
-                            }
-                        }
-
-                        singleItem?.let { current ->
-                            item {
-                                OutlinedCard(
-                                    shape = RoundedCornerShape(14.dp),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Column(
-                                        modifier = Modifier.padding(14.dp),
-                                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                                    ) {
-                                        Text(
-                                            text = "Available Output Formats for .${current.sourceExtension.uppercase()}:",
-                                            style = MaterialTheme.typography.titleSmall,
-                                            fontWeight = FontWeight.Bold
-                                        )
-
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .horizontalScroll(rememberScrollState()),
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                        ) {
-                                            current.availableTargets.forEach { fmt ->
-                                                val isChosen = current.targetFormat.equals(fmt, ignoreCase = true)
-                                                FilterChip(
-                                                    selected = isChosen,
-                                                    onClick = { current.targetFormat = fmt },
-                                                    label = {
-                                                        Text(
-                                                            text = ".${fmt.uppercase()}",
-                                                            fontWeight = FontWeight.Bold,
-                                                            fontFamily = FontFamily.Monospace
-                                                        )
-                                                    },
-                                                    leadingIcon = if (isChosen) {
-                                                        { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(15.dp)) }
-                                                    } else null
-                                                )
-                                            }
-                                        }
-
-                                        if (current.category == ConversionCategory.IMAGE) {
-                                            Row(
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                            ) {
-                                                Text("Quality: ${current.tuning.imageQuality}%", style = MaterialTheme.typography.labelMedium)
-                                                Slider(
-                                                    value = current.tuning.imageQuality.toFloat(),
-                                                    onValueChange = {
-                                                        current.tuning = current.tuning.copy(imageQuality = it.roundToInt())
-                                                    },
-                                                    valueRange = 15f..100f,
-                                                    modifier = Modifier.weight(1f)
-                                                )
-                                            }
-                                        }
-
-                                        Button(
-                                            onClick = {
-                                                singleConverting = true
-                                                current.status = ConversionJobStatus.CONVERTING
-                                                current.errorMessage = null
-                                                scope.launch {
-                                                    val res = FileConverterDispatcher.convertSingleItem(
-                                                        context = context,
-                                                        item = current,
-                                                        destinationMode = destinationMode,
-                                                        customFolder = customOutputFolder,
-                                                        onProgress = { p, msg ->
-                                                            current.progress = p
-                                                            current.statusDetail = msg
-                                                        }
-                                                    )
-                                                    singleConverting = false
-                                                    res.onSuccess { out ->
-                                                        current.outputFile = out
-                                                        current.status = ConversionJobStatus.COMPLETED
-                                                    }.onFailure { err ->
-                                                        current.status = ConversionJobStatus.FAILED
-                                                        current.errorMessage = err.message ?: "Conversion failed"
-                                                    }
-                                                }
-                                            },
-                                            enabled = !singleConverting,
-                                            modifier = Modifier.fillMaxWidth(),
-                                            shape = RoundedCornerShape(12.dp)
-                                        ) {
-                                            Icon(Icons.Default.Transform, contentDescription = null, modifier = Modifier.size(18.dp))
-                                            Spacer(modifier = Modifier.width(8.dp))
-                                            Text(
-                                                if (singleConverting) current.statusDetail.ifBlank { "Converting..." }
-                                                else "Convert ${current.sourceFile.name} → .${current.targetFormat.uppercase()}",
-                                                fontWeight = FontWeight.Bold
-                                            )
-                                        }
-
-                                        current.outputFile?.let { out ->
-                                            Surface(
-                                                shape = RoundedCornerShape(10.dp),
-                                                color = MaterialTheme.colorScheme.secondaryContainer,
-                                                modifier = Modifier.fillMaxWidth()
-                                            ) {
-                                                Row(
-                                                    modifier = Modifier.padding(12.dp),
-                                                    verticalAlignment = Alignment.CenterVertically,
-                                                    horizontalArrangement = Arrangement.SpaceBetween
-                                                ) {
-                                                    Column(modifier = Modifier.weight(1f)) {
-                                                        Text(
-                                                            "Saved: ${out.name} (${Formatter.formatFileSize(context, out.length())})",
-                                                            style = MaterialTheme.typography.bodySmall,
-                                                            fontWeight = FontWeight.Bold
-                                                        )
-                                                        Text(
-                                                            out.absolutePath,
-                                                            style = MaterialTheme.typography.labelSmall,
-                                                            fontFamily = FontFamily.Monospace,
-                                                            maxLines = 1,
-                                                            overflow = TextOverflow.Ellipsis
-                                                        )
-                                                    }
-                                                    FilledTonalButton(onClick = { appState?.open(out.toUniversal()) }) {
-                                                        Text("Open")
-                                                    }
-                                                }
-                                            }
-                                        }
-
-                                        current.errorMessage?.let { err ->
-                                            Text(err, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-                                        }
-                                    }
+                            },
+                            onRunPdfCompress = {
+                                val src = pdfSourceFile
+                                if (src == null || !src.exists()) {
+                                    Toast.makeText(context, "Select a PDF first", Toast.LENGTH_SHORT).show()
+                                    return@ConverterPresetsWorkbench
                                 }
-                            }
-                        }
-                    }
-                }
-
-                ConverterTopTab.BATCH_CONVERT -> {
-                    // TAB 3: BATCH CONVERT & COMBINE IMAGES TO PDF
-                    val commonTargets = remember(batchQueue.size) {
-                        if (batchQueue.isEmpty()) emptyList()
-                        else batchQueue.map { it.availableTargets.toSet() }
-                            .reduceOrNull { acc, set -> acc.intersect(set) }
-                            ?.toList()
-                            .orEmpty()
-                    }
-                    val allAreImages = remember(batchQueue.size) {
-                        batchQueue.isNotEmpty() && batchQueue.all { it.category == ConversionCategory.IMAGE }
+                                presetProcessing = true
+                                presetErrorText = null
+                                presetOutputResult = null
+                                scope.launch {
+                                    val outFile = FileConverterDispatcher.resolveUniqueOutputFile(
+                                        sourceFile = src,
+                                        targetFormat = "pdf",
+                                        destinationMode = destinationMode,
+                                        customFolder = customOutputFolder
+                                    )
+                                    val res = SquooshImageCompressor.compressPdfToTarget(
+                                        context = context,
+                                        sourcePdf = src,
+                                        outputFile = outFile,
+                                        level = selectedPdfCompression,
+                                        targetMaxKb = pdfTargetMaxKb.roundToInt(),
+                                        onProgress = { _, msg -> presetProgressText = msg }
+                                    )
+                                    presetProcessing = false
+                                    res.onSuccess { presetOutputResult = it }
+                                        .onFailure { presetErrorText = it.message ?: "PDF compression failed" }
+                                }
+                            },
+                            onOpenOutput = { out -> appState?.open(out.toUniversal()) }
+                        )
                     }
 
-                    LazyColumn(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(horizontal = 14.dp),
-                        contentPadding = PaddingValues(vertical = 14.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        item {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Button(
-                                        onClick = { showBatchFilePicker = true },
-                                        shape = RoundedCornerShape(10.dp)
-                                    ) {
-                                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text("Add Files (${batchQueue.size})")
-                                    }
-                                    if (batchQueue.isNotEmpty()) {
-                                        OutlinedButton(
-                                            onClick = { batchQueue.clear() },
-                                            shape = RoundedCornerShape(10.dp)
-                                        ) {
-                                            Text("Clear")
+                    ConverterTopTab.SINGLE_FILE -> {
+                        ConverterSingleFileWorkbench(
+                            isWide = isWide,
+                            singleItem = singleItem,
+                            singleConverting = singleConverting,
+                            onPickFile = { showSingleFilePicker = true },
+                            onConvert = { current ->
+                                singleConverting = true
+                                current.status = ConversionJobStatus.CONVERTING
+                                current.errorMessage = null
+                                scope.launch {
+                                    val res = FileConverterDispatcher.convertSingleItem(
+                                        context = context,
+                                        item = current,
+                                        destinationMode = destinationMode,
+                                        customFolder = customOutputFolder,
+                                        onProgress = { p, msg ->
+                                            current.progress = p
+                                            current.statusDetail = msg
                                         }
-                                    }
-                                }
-
-                                if (batchQueue.isNotEmpty()) {
-                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        if (allAreImages && batchQueue.size >= 2) {
-                                            FilledTonalButton(
-                                                onClick = {
-                                                    isBatchRunning = true
-                                                    scope.launch {
-                                                        val first = batchQueue.first().sourceFile
-                                                        val outFile = FileConverterDispatcher.resolveUniqueOutputFile(
-                                                            sourceFile = File(first.parentFile ?: customOutputFolder, "Combined_Images.pdf"),
-                                                            targetFormat = "pdf",
-                                                            destinationMode = destinationMode,
-                                                            customFolder = customOutputFolder
-                                                        )
-                                                        val res = SquooshImageCompressor.combineImagesToPdf(
-                                                            context = context,
-                                                            imageFiles = batchQueue.map { it.sourceFile },
-                                                            outputFile = outFile
-                                                        )
-                                                        isBatchRunning = false
-                                                        res.onSuccess { pdf ->
-                                                            Toast.makeText(context, "Created ${pdf.name}", Toast.LENGTH_SHORT).show()
-                                                            appState?.open(pdf.toUniversal())
-                                                        }.onFailure { err ->
-                                                            Toast.makeText(context, "Error: ${err.message}", Toast.LENGTH_SHORT).show()
-                                                        }
-                                                    }
-                                                },
-                                                enabled = !isBatchRunning,
-                                                shape = RoundedCornerShape(10.dp)
-                                            ) {
-                                                Icon(Icons.Default.PictureAsPdf, contentDescription = null, modifier = Modifier.size(16.dp))
-                                                Spacer(modifier = Modifier.width(6.dp))
-                                                Text("Combine into 1 PDF")
-                                            }
-                                        }
-
-                                        Button(
-                                            onClick = {
-                                                isBatchRunning = true
-                                                scope.launch {
-                                                    for (item in batchQueue) {
-                                                        item.status = ConversionJobStatus.CONVERTING
-                                                        val res = FileConverterDispatcher.convertSingleItem(
-                                                            context = context,
-                                                            item = item,
-                                                            destinationMode = destinationMode,
-                                                            customFolder = customOutputFolder,
-                                                            onProgress = { p, msg ->
-                                                                item.progress = p
-                                                                item.statusDetail = msg
-                                                            }
-                                                        )
-                                                        res.onSuccess { out ->
-                                                            item.outputFile = out
-                                                            item.status = ConversionJobStatus.COMPLETED
-                                                        }.onFailure { err ->
-                                                            item.status = ConversionJobStatus.FAILED
-                                                            item.errorMessage = err.message
-                                                        }
-                                                    }
-                                                    isBatchRunning = false
-                                                }
-                                            },
-                                            enabled = !isBatchRunning,
-                                            shape = RoundedCornerShape(10.dp)
-                                        ) {
-                                            Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            Text(if (isBatchRunning) "Converting..." else "Convert All")
-                                        }
+                                    )
+                                    singleConverting = false
+                                    res.onSuccess { out ->
+                                        current.outputFile = out
+                                        current.status = ConversionJobStatus.COMPLETED
+                                    }.onFailure { err ->
+                                        current.status = ConversionJobStatus.FAILED
+                                        current.errorMessage = err.message ?: "Conversion failed"
                                     }
                                 }
-                            }
-                        }
+                            },
+                            onOpenOutput = { out -> appState?.open(out.toUniversal()) }
+                        )
+                    }
 
-                        if (commonTargets.isNotEmpty()) {
-                            item {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .horizontalScroll(rememberScrollState()),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Text("Convert All To:", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-                                    commonTargets.forEach { target ->
-                                        FilterChip(
-                                            selected = globalTargetFormat == target,
-                                            onClick = {
-                                                globalTargetFormat = target
-                                                batchQueue.forEach { it.targetFormat = target }
-                                            },
-                                            label = { Text(".${target.uppercase()}", fontSize = 11.sp, fontFamily = FontFamily.Monospace) }
+                    ConverterTopTab.BATCH_CONVERT -> {
+                        ConverterBatchWorkbench(
+                            isWide = isWide,
+                            batchQueue = batchQueue,
+                            isBatchRunning = isBatchRunning,
+                            globalTargetFormat = globalTargetFormat,
+                            onGlobalTargetSelected = { fmt ->
+                                globalTargetFormat = fmt
+                                batchQueue.forEach { item ->
+                                    if (fmt in item.availableTargets) item.targetFormat = fmt
+                                }
+                            },
+                            onAddFiles = { showBatchFilePicker = true },
+                            onClearQueue = {
+                                batchQueue.clear()
+                                globalTargetFormat = null
+                            },
+                            onCombineToPdf = {
+                                if (batchQueue.size >= 2) {
+                                    isBatchRunning = true
+                                    scope.launch {
+                                        val first = batchQueue.first().sourceFile
+                                        val outFile = FileConverterDispatcher.resolveUniqueOutputFile(
+                                            sourceFile = File(first.parentFile ?: customOutputFolder, "Combined_Images.pdf"),
+                                            targetFormat = "pdf",
+                                            destinationMode = destinationMode,
+                                            customFolder = customOutputFolder
                                         )
-                                    }
-                                }
-                            }
-                        }
-
-                        if (batchQueue.isEmpty()) {
-                            item {
-                                Surface(
-                                    shape = RoundedCornerShape(14.dp),
-                                    color = MaterialTheme.colorScheme.surfaceContainerLow,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable { showBatchFilePicker = true }
-                                ) {
-                                    Column(
-                                        modifier = Modifier.padding(28.dp),
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        Icon(Icons.Default.LibraryAdd, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(32.dp))
-                                        Text("Batch Queue is Empty", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                                        Text(
-                                            "Tap 'Add Files' to queue multiple images, documents, audio/video files, or archives for batch conversion or multi-image PDF merging.",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            textAlign = TextAlign.Center
+                                        val res = SquooshImageCompressor.combineImagesToPdf(
+                                            context = context,
+                                            imageFiles = batchQueue.map { it.sourceFile },
+                                            outputFile = outFile
                                         )
-                                    }
-                                }
-                            }
-                        } else {
-                            items(batchQueue, key = { it.id }) { item ->
-                                OutlinedCard(
-                                    shape = RoundedCornerShape(12.dp),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.SpaceBetween
-                                        ) {
-                                            Column(modifier = Modifier.weight(1f)) {
-                                                Text(item.sourceFile.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                                Text(
-                                                    "${Formatter.formatFileSize(context, item.sourceFile.length())} • ${item.status.name}",
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                )
-                                            }
-                                            IconButton(onClick = { batchQueue.remove(item) }, modifier = Modifier.size(28.dp)) {
-                                                Icon(Icons.Default.Close, contentDescription = "Remove", modifier = Modifier.size(16.dp))
-                                            }
-                                        }
-
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .horizontalScroll(rememberScrollState()),
-                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                        ) {
-                                            item.availableTargets.forEach { fmt ->
-                                                FilterChip(
-                                                    selected = item.targetFormat.equals(fmt, true),
-                                                    onClick = { item.targetFormat = fmt },
-                                                    label = { Text(".${fmt.uppercase()}", fontSize = 11.sp, fontFamily = FontFamily.Monospace) }
-                                                )
-                                            }
-                                        }
-
-                                        item.outputFile?.let { out ->
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                horizontalArrangement = Arrangement.SpaceBetween,
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Text(
-                                                    "Saved: ${out.name} (${Formatter.formatFileSize(context, out.length())})",
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    color = MaterialTheme.colorScheme.primary,
-                                                    fontWeight = FontWeight.Bold
-                                                )
-                                                TextButton(onClick = { appState?.open(out.toUniversal()) }) {
-                                                    Text("Open", style = MaterialTheme.typography.labelSmall)
-                                                }
-                                            }
+                                        isBatchRunning = false
+                                        res.onSuccess { pdf ->
+                                            Toast.makeText(context, "Created ${pdf.name}", Toast.LENGTH_SHORT).show()
+                                            appState?.open(pdf.toUniversal())
+                                        }.onFailure { err ->
+                                            Toast.makeText(context, "Error: ${err.message}", Toast.LENGTH_SHORT).show()
                                         }
                                     }
                                 }
-                            }
-                        }
+                            },
+                            onConvertAll = {
+                                isBatchRunning = true
+                                scope.launch {
+                                    for (item in batchQueue) {
+                                        item.status = ConversionJobStatus.CONVERTING
+                                        val res = FileConverterDispatcher.convertSingleItem(
+                                            context = context,
+                                            item = item,
+                                            destinationMode = destinationMode,
+                                            customFolder = customOutputFolder,
+                                            onProgress = { p, msg ->
+                                                item.progress = p
+                                                item.statusDetail = msg
+                                            }
+                                        )
+                                        res.onSuccess { out ->
+                                            item.outputFile = out
+                                            item.status = ConversionJobStatus.COMPLETED
+                                        }.onFailure { err ->
+                                            item.status = ConversionJobStatus.FAILED
+                                            item.errorMessage = err.message
+                                        }
+                                    }
+                                    isBatchRunning = false
+                                }
+                            },
+                            onOpenOutput = { out -> appState?.open(out.toUniversal()) }
+                        )
                     }
                 }
             }

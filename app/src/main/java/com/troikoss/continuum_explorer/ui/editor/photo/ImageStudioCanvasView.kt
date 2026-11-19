@@ -7,13 +7,9 @@ import android.os.Environment
 import android.widget.Toast
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -24,7 +20,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -39,6 +34,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.troikoss.continuum_explorer.ui.components.suite.SingleRowCommandBar
+import com.troikoss.continuum_explorer.ui.components.suite.SlimStatusStrip
+import com.troikoss.continuum_explorer.ui.components.suite.TonalVerticalPaneDivider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -132,7 +130,7 @@ fun rememberPhotoEditorStateController(): PhotoEditorStateController {
 }
 
 /**
- * Top Bar for Image Viewer default mode.
+ * Single-Line 48.dp Top Bar for Image Viewer default mode (no stacked 2-line subtitle).
  */
 @Composable
 fun PhotoEditorViewTopBar(
@@ -152,111 +150,83 @@ fun PhotoEditorViewTopBar(
 ) {
     var showMenu by remember { mutableStateOf(false) }
 
-    Surface(
-        color = Color(0xCC141414),
-        modifier = modifier
-            .fillMaxWidth()
-            .height(52.dp)
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.weight(1f)
+    SingleRowCommandBar(
+        modifier = modifier,
+        containerColor = Color(0xD9121418),
+        showBottomHairline = false,
+        navigationContent = {
+            IconButton(onClick = onMenuClick, modifier = Modifier.size(36.dp)) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White, modifier = Modifier.size(20.dp))
+            }
+        },
+        titleContent = {
+            Text(
+                text = fileName,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = Color.White,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        },
+        actionsContent = {
+            FilledTonalButton(
+                onClick = onEnterEditMode,
+                shape = RoundedCornerShape(50),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                modifier = Modifier.height(32.dp)
             ) {
-                IconButton(onClick = onMenuClick, modifier = Modifier.size(36.dp)) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
-                }
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = fileName,
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Text(
-                        text = "${imageWidth}×${imageHeight} • $fileSizeFormatted",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Color.White.copy(alpha = 0.72f),
-                        maxLines = 1
-                    )
-                }
+                Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(15.dp))
+                Spacer(Modifier.width(4.dp))
+                Text("Edit", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
             }
 
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                FilledTonalButton(
-                    onClick = onEnterEditMode,
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                    modifier = Modifier.height(34.dp)
-                ) {
-                    Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("Edit", style = MaterialTheme.typography.labelMedium)
-                }
+            IconButton(onClick = onShare, modifier = Modifier.size(34.dp)) {
+                Icon(Icons.Default.Share, contentDescription = "Share", tint = Color.White, modifier = Modifier.size(18.dp))
+            }
 
-                IconButton(onClick = onShare, modifier = Modifier.size(36.dp)) {
-                    Icon(Icons.Default.Share, contentDescription = "Share", tint = Color.White)
+            Box {
+                IconButton(onClick = { showMenu = true }, modifier = Modifier.size(34.dp)) {
+                    Icon(Icons.Default.MoreVert, contentDescription = "More", tint = Color.White, modifier = Modifier.size(19.dp))
                 }
-
-                Box {
-                    IconButton(onClick = { showMenu = true }, modifier = Modifier.size(36.dp)) {
-                        Icon(Icons.Default.MoreVert, contentDescription = "More", tint = Color.White)
-                    }
-                    DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
-                        DropdownMenuItem(
-                            text = { Text("Image Info & EXIF") },
-                            leadingIcon = { Icon(Icons.Default.Info, contentDescription = null) },
-                            onClick = { showMenu = false; onShowExifDialog() }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Print") },
-                            leadingIcon = { Icon(Icons.Default.Print, contentDescription = null) },
-                            onClick = { showMenu = false; onPrint() }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Move To...") },
-                            leadingIcon = { Icon(Icons.Default.DriveFileMove, contentDescription = null) },
-                            onClick = { showMenu = false; onMove() }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Copy To...") },
-                            leadingIcon = { Icon(Icons.Default.ContentCopy, contentDescription = null) },
-                            onClick = { showMenu = false; onCopy() }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Open Externally") },
-                            leadingIcon = { Icon(Icons.Default.OpenInNew, contentDescription = null) },
-                            onClick = { showMenu = false; onOpenExternal() }
-                        )
-                    }
+                DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                    DropdownMenuItem(
+                        text = { Text("Info (${imageWidth}×${imageHeight} • $fileSizeFormatted)") },
+                        leadingIcon = { Icon(Icons.Default.Info, contentDescription = null) },
+                        onClick = { showMenu = false; onShowExifDialog() }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Print") },
+                        leadingIcon = { Icon(Icons.Default.Print, contentDescription = null) },
+                        onClick = { showMenu = false; onPrint() }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Move") },
+                        leadingIcon = { Icon(Icons.Default.DriveFileMove, contentDescription = null) },
+                        onClick = { showMenu = false; onMove() }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Copy") },
+                        leadingIcon = { Icon(Icons.Default.ContentCopy, contentDescription = null) },
+                        onClick = { showMenu = false; onCopy() }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Open External") },
+                        leadingIcon = { Icon(Icons.Default.OpenInNew, contentDescription = null) },
+                        onClick = { showMenu = false; onOpenExternal() }
+                    )
                 }
             }
         }
-    }
-}
-
-private enum class PhotoToolTab(val label: String) {
-    FILTER("Filters"),
-    ADJUST("Adjust"),
-    CROP("Crop"),
-    CANVAS("Canvas"),
-    DRAW("Draw"),
-    TEXT("Text & Emoji")
+    )
 }
 
 /**
- * Full Interactive Photo Studio View integrating FilterEngine, CropOverlay, Canvas Frame/Layering, DrawingView, and GraphicManager.
+ * Desktop-First Ultra-Clean Tonal Flat Photo Studio.
+ * - Single 48.dp Command Bar (☰, filename, Undo/Redo, Save).
+ * - Desktop (>= 760.dp): Left 68.dp Vertical Tool Rail + Center Full-Bleed Canvas + Right 268.dp Tonal Properties Inspector.
+ * - Mobile (< 760.dp): Full-Bleed Canvas + Compact Bottom Tool Controls + Segmented Switcher.
+ * - Quiet 26.dp SlimStatusStrip at the bottom.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -322,7 +292,7 @@ fun PhotoEditorView(
 
     if (showImportImagePicker) {
         com.troikoss.continuum_explorer.ui.components.InAppFilePickerDialog(
-            title = "Select Image to Composite onto Canvas",
+            title = "Select Image Layer",
             selectFolders = false,
             allowedExtensions = setOf("jpg", "jpeg", "png", "webp", "bmp"),
             onDismiss = { showImportImagePicker = false },
@@ -344,7 +314,7 @@ fun PhotoEditorView(
                             c.drawBitmap(scaledOverlay, left, top, AndroidPaint(AndroidPaint.FILTER_BITMAP_FLAG))
                             withContext(Dispatchers.Main) {
                                 workingBitmap = baseCopy
-                                Toast.makeText(context, "Composited ${pickedFile.name} onto canvas", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, "Added ${pickedFile.name}", Toast.LENGTH_SHORT).show()
                             }
                         }
                     }
@@ -479,69 +449,10 @@ fun PhotoEditorView(
         )
     }
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .background(Color(0xFF101216))
-    ) {
-        // Studio Top Bar
-        Surface(
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(50.dp)
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    IconButton(onClick = onMenuClick, modifier = Modifier.size(36.dp)) {
-                        Icon(Icons.Default.Menu, contentDescription = "Toggle Sidebar")
-                    }
-                    Text(
-                        text = fileName.ifBlank { "Photo Studio" },
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    IconButton(onClick = { drawingState.undo() }, modifier = Modifier.size(36.dp)) {
-                        Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = "Undo", modifier = Modifier.size(18.dp))
-                    }
-                    IconButton(onClick = { drawingState.redo() }, modifier = Modifier.size(36.dp)) {
-                        Icon(Icons.AutoMirrored.Filled.Redo, contentDescription = "Redo", modifier = Modifier.size(18.dp))
-                    }
-                    Button(
-                        onClick = { showSaveDialog = true },
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                        modifier = Modifier.height(34.dp)
-                    ) {
-                        Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("Save", style = MaterialTheme.typography.labelMedium)
-                    }
-                }
-            }
-        }
-
-        // Interactive Canvas Area
+    @Composable
+    fun PhotoCanvasStage(modifier: Modifier = Modifier) {
         Box(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth(),
+            modifier = modifier.background(Color(0xFF101216)),
             contentAlignment = Alignment.Center
         ) {
             Image(
@@ -551,14 +462,12 @@ fun PhotoEditorView(
                 modifier = Modifier.fillMaxSize()
             )
 
-            // Drawing Canvas Layer
             DrawingView(
                 state = drawingState,
                 enabled = activeTab == PhotoToolTab.DRAW,
                 modifier = Modifier.fillMaxSize()
             )
 
-            // Crop Overlay when on Crop tab
             if (activeTab == PhotoToolTab.CROP) {
                 CropOverlay(
                     cropState = cropState,
@@ -567,7 +476,6 @@ fun PhotoEditorView(
                 )
             }
 
-            // Graphic Text & Emoji Overlays
             graphicManager.graphics.forEach { graphic ->
                 Box(
                     modifier = Modifier
@@ -623,225 +531,154 @@ fun PhotoEditorView(
                 modifier = Modifier.fillMaxSize()
             )
         }
+    }
 
-        // Bottom Tool Controls
-        Surface(
-            color = MaterialTheme.colorScheme.surfaceContainer,
-            tonalElevation = 3.dp,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                when (activeTab) {
-                    PhotoToolTab.FILTER -> {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            FilterPreset.entries.forEach { preset ->
-                                FilterChip(
-                                    selected = selectedPreset == preset,
-                                    onClick = { selectedPreset = preset },
-                                    label = { Text("${preset.icon} ${preset.displayName}", style = MaterialTheme.typography.labelSmall) }
-                                )
-                            }
-                        }
+    BoxWithConstraints(
+        modifier = modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.surface)
+    ) {
+        val isDesktop = maxWidth >= 760.dp
+
+        Column(modifier = Modifier.fillMaxSize()) {
+            // Strict Single 48.dp Command Bar
+            SingleRowCommandBar(
+                navigationContent = {
+                    IconButton(onClick = onMenuClick, modifier = Modifier.size(36.dp)) {
+                        Icon(Icons.Default.Menu, contentDescription = "Toggle Sidebar", modifier = Modifier.size(20.dp))
                     }
-                    PhotoToolTab.ADJUST -> {
-                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text("Brightness", style = MaterialTheme.typography.labelSmall, modifier = Modifier.width(72.dp))
-                                Slider(
-                                    value = colorAdjustments.brightness,
-                                    onValueChange = { colorAdjustments = colorAdjustments.copy(brightness = it) },
-                                    valueRange = -80f..80f,
-                                    modifier = Modifier.weight(1f)
-                                )
-                            }
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text("Contrast", style = MaterialTheme.typography.labelSmall, modifier = Modifier.width(72.dp))
-                                Slider(
-                                    value = colorAdjustments.contrast,
-                                    onValueChange = { colorAdjustments = colorAdjustments.copy(contrast = it) },
-                                    valueRange = 0.5f..1.8f,
-                                    modifier = Modifier.weight(1f)
-                                )
-                            }
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text("Saturation", style = MaterialTheme.typography.labelSmall, modifier = Modifier.width(72.dp))
-                                Slider(
-                                    value = colorAdjustments.saturation,
-                                    onValueChange = { colorAdjustments = colorAdjustments.copy(saturation = it) },
-                                    valueRange = 0f..2.0f,
-                                    modifier = Modifier.weight(1f)
-                                )
-                            }
-                        }
+                },
+                titleContent = {
+                    Text(
+                        text = fileName.ifBlank { "Photo Studio" },
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                },
+                actionsContent = {
+                    IconButton(onClick = { drawingState.undo() }, modifier = Modifier.size(34.dp)) {
+                        Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = "Undo", modifier = Modifier.size(18.dp))
                     }
-                    PhotoToolTab.CROP -> {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            CropAspectRatio.entries.forEach { ratio ->
-                                FilterChip(
-                                    selected = cropState.selectedAspectRatio == ratio,
-                                    onClick = { cropState.applyAspectRatio(ratio) },
-                                    label = { Text(ratio.label, style = MaterialTheme.typography.labelSmall) }
-                                )
-                            }
-                            AssistChip(
-                                onClick = { cropState.rotate90Clockwise() },
-                                label = { Text("Rotate 90°") }
-                            )
-                            Button(
-                                onClick = {
-                                    workingBitmap = CropTransformer.applyCropAndTransform(workingBitmap, cropState)
-                                    cropState.resetAll()
-                                    activeTab = PhotoToolTab.FILTER
-                                },
-                                modifier = Modifier.height(32.dp),
-                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
-                            ) {
-                                Text("Apply Crop", style = MaterialTheme.typography.labelSmall)
-                            }
-                        }
+                    IconButton(onClick = { drawingState.redo() }, modifier = Modifier.size(34.dp)) {
+                        Icon(Icons.AutoMirrored.Filled.Redo, contentDescription = "Redo", modifier = Modifier.size(18.dp))
                     }
-                    PhotoToolTab.CANVAS -> {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            listOf(
-                                Color.White to "White",
-                                Color(0xFF181A20) to "Dark",
-                                Color.Black to "Black",
-                                Color(0xFFF5F0E6) to "Cream"
-                            ).forEach { (bgCol, label) ->
-                                FilterChip(
-                                    selected = canvasBgColor == bgCol,
-                                    onClick = { canvasBgColor = bgCol },
-                                    label = { Text(label, style = MaterialTheme.typography.labelSmall) }
-                                )
-                            }
-                            AssistChip(
-                                onClick = { applyCanvasFrame(0, 0, 0.14f, canvasBgColor) },
-                                label = { Text("+Matte Border", style = MaterialTheme.typography.labelSmall) }
-                            )
-                            AssistChip(
-                                onClick = { applyCanvasFrame(1, 1, 0.08f, canvasBgColor) },
-                                label = { Text("1:1 Canvas", style = MaterialTheme.typography.labelSmall) }
-                            )
-                            AssistChip(
-                                onClick = { applyCanvasFrame(16, 9, 0.08f, canvasBgColor) },
-                                label = { Text("16:9 Canvas", style = MaterialTheme.typography.labelSmall) }
-                            )
-                            FilledTonalButton(
-                                onClick = { showImportImagePicker = true },
-                                modifier = Modifier.height(32.dp),
-                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp)
-                            ) {
-                                Icon(Icons.Default.AddPhotoAlternate, contentDescription = null, modifier = Modifier.size(15.dp))
-                                Spacer(Modifier.width(4.dp))
-                                Text("Add Image Layer", style = MaterialTheme.typography.labelSmall)
-                            }
-                            TextButton(
-                                onClick = { workingBitmap = baseBitmap },
-                                modifier = Modifier.height(32.dp)
-                            ) {
-                                Text("Reset", style = MaterialTheme.typography.labelSmall)
-                            }
-                        }
-                    }
-                    PhotoToolTab.DRAW -> {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            ShapeType.entries.forEach { shape ->
-                                FilterChip(
-                                    selected = drawingState.shapeType == shape,
-                                    onClick = { drawingState.shapeType = shape },
-                                    label = { Text(shape.label, style = MaterialTheme.typography.labelSmall) }
-                                )
-                            }
-                            listOf(
-                                Color(0xFFE53935),
-                                Color(0xFF1E88E5),
-                                Color(0xFF43A047),
-                                Color(0xFFFDD835),
-                                Color.White
-                            ).forEach { col ->
-                                Box(
-                                    modifier = Modifier
-                                        .size(24.dp)
-                                        .clip(CircleShape)
-                                        .background(col)
-                                        .border(
-                                            width = if (drawingState.strokeColor == col) 2.dp else 1.dp,
-                                            color = if (drawingState.strokeColor == col) MaterialTheme.colorScheme.primary else Color.Gray,
-                                            shape = CircleShape
-                                        )
-                                        .clickable { drawingState.strokeColor = col }
-                                )
-                            }
-                        }
-                    }
-                    PhotoToolTab.TEXT -> {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Button(
-                                onClick = { showAddTextDialog = true },
-                                modifier = Modifier.height(32.dp),
-                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
-                            ) {
-                                Icon(Icons.Default.TextFields, contentDescription = null, modifier = Modifier.size(15.dp))
-                                Spacer(Modifier.width(4.dp))
-                                Text("Add Text", style = MaterialTheme.typography.labelSmall)
-                            }
-                            listOf("⭐", "🔥", "✅", "❤️", "📌", "🎯", "✨").forEach { emoji ->
-                                AssistChip(
-                                    onClick = { graphicManager.addGraphic(EmojiGraphic(emoji = emoji)) },
-                                    label = { Text(emoji) }
-                                )
-                            }
-                        }
+                    FilledTonalButton(
+                        onClick = { showSaveDialog = true },
+                        shape = RoundedCornerShape(50),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                        modifier = Modifier.height(32.dp)
+                    ) {
+                        Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(15.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Save", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
                     }
                 }
+            )
 
-                // Bottom Tool Switcher Row
-                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                    PhotoToolTab.entries.forEachIndexed { idx, tab ->
-                        SegmentedButton(
-                            selected = activeTab == tab,
-                            onClick = { activeTab = tab },
-                            shape = SegmentedButtonDefaults.itemShape(index = idx, count = PhotoToolTab.entries.size)
+            // Main Workspace
+            if (isDesktop) {
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                ) {
+                    PhotoStudioToolRail(
+                        activeTab = activeTab,
+                        onSelectTab = { activeTab = it }
+                    )
+                    TonalVerticalPaneDivider()
+                    PhotoCanvasStage(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                    )
+                    TonalVerticalPaneDivider()
+                    PhotoStudioInspectorContent(
+                        activeTab = activeTab,
+                        isDesktopRail = true,
+                        selectedPreset = selectedPreset,
+                        onSelectPreset = { selectedPreset = it },
+                        colorAdjustments = colorAdjustments,
+                        onAdjustmentsChange = { colorAdjustments = it },
+                        cropState = cropState,
+                        onApplyCrop = {
+                            workingBitmap = CropTransformer.applyCropAndTransform(workingBitmap, cropState)
+                            cropState.resetAll()
+                            activeTab = PhotoToolTab.FILTER
+                        },
+                        canvasBgColor = canvasBgColor,
+                        onSelectCanvasBg = { canvasBgColor = it },
+                        onApplyCanvasFrame = { aw, ah, pad, bg -> applyCanvasFrame(aw, ah, pad, bg) },
+                        onImportImageLayer = { showImportImagePicker = true },
+                        onResetCanvas = { workingBitmap = baseBitmap },
+                        drawingState = drawingState,
+                        onAddTextClick = { showAddTextDialog = true },
+                        onAddEmoji = { emoji -> graphicManager.addGraphic(EmojiGraphic(emoji = emoji)) }
+                    )
+                }
+            } else {
+                PhotoCanvasStage(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                )
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    tonalElevation = 0.dp,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        PhotoStudioInspectorContent(
+                            activeTab = activeTab,
+                            isDesktopRail = false,
+                            selectedPreset = selectedPreset,
+                            onSelectPreset = { selectedPreset = it },
+                            colorAdjustments = colorAdjustments,
+                            onAdjustmentsChange = { colorAdjustments = it },
+                            cropState = cropState,
+                            onApplyCrop = {
+                                workingBitmap = CropTransformer.applyCropAndTransform(workingBitmap, cropState)
+                                cropState.resetAll()
+                                activeTab = PhotoToolTab.FILTER
+                            },
+                            canvasBgColor = canvasBgColor,
+                            onSelectCanvasBg = { canvasBgColor = it },
+                            onApplyCanvasFrame = { aw, ah, pad, bg -> applyCanvasFrame(aw, ah, pad, bg) },
+                            onImportImageLayer = { showImportImagePicker = true },
+                            onResetCanvas = { workingBitmap = baseBitmap },
+                            drawingState = drawingState,
+                            onAddTextClick = { showAddTextDialog = true },
+                            onAddEmoji = { emoji -> graphicManager.addGraphic(EmojiGraphic(emoji = emoji)) }
+                        )
+                        SingleChoiceSegmentedButtonRow(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                                .height(34.dp)
                         ) {
-                            Text(tab.label, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                            PhotoToolTab.entries.forEachIndexed { idx, tab ->
+                                SegmentedButton(
+                                    selected = activeTab == tab,
+                                    onClick = { activeTab = tab },
+                                    shape = SegmentedButtonDefaults.itemShape(index = idx, count = PhotoToolTab.entries.size),
+                                    icon = {}
+                                ) {
+                                    Text(tab.label, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                                }
+                            }
                         }
                     }
                 }
             }
+
+            // Quiet 26.dp Desktop Status Strip
+            SlimStatusStrip(
+                leftText = "${workingBitmap.width} × ${workingBitmap.height} px • ${selectedPreset.displayName}",
+                rightText = activeTab.label
+            )
         }
     }
 }

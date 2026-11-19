@@ -2,9 +2,9 @@ package com.troikoss.continuum_explorer.ui.editor
 
 import android.annotation.SuppressLint
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -17,6 +17,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.nativeCanvas
@@ -31,16 +32,20 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import com.troikoss.continuum_explorer.ui.components.suite.SingleRowCommandBar
+import com.troikoss.continuum_explorer.ui.components.suite.SlimStatusStrip
+import com.troikoss.continuum_explorer.ui.components.suite.TonalFloatingFindOverlay
+import com.troikoss.continuum_explorer.ui.components.suite.TonalVerticalPaneDivider
 import com.troikoss.continuum_explorer.ui.editor.text.FormatRegistry
 import com.troikoss.continuum_explorer.ui.editor.text.SyntaxHighlighter
 import java.io.File
 
 /**
- * Code Studio Editor with syntax highlighting, 1:1 TextLayoutResult-synchronized line numbers,
- * Material 3 Find & Replace, unsaved-changes guard, and built-in Live HTML5 Preview / Split View.
- * In Create/Edit mode:
- * - Shows Triple-Line Menu button (`Icons.Default.Menu`) to toggle the sidebar (no Back button or decorative icon before title).
- * - Closing the editor is handled via system Back gesture or closing the tab.
+ * Desktop-First Ultra-Clean Tonal Flat Code Studio Editor.
+ * - Strict single 48.dp Command Bar (no stacked Find/Replace or metadata bars).
+ * - Floating top-right Tonal Find & Replace card.
+ * - 1:1 TextLayoutResult-synchronized line numbers + Live HTML5 Split/Preview.
+ * - Quiet 26.dp SlimStatusStrip at the bottom.
  */
 @SuppressLint("SetJavaScriptEnabled")
 @OptIn(ExperimentalMaterial3Api::class)
@@ -110,7 +115,7 @@ fun CodeEditorView(
         AlertDialog(
             onDismissRequest = { showUnsavedDialog = false },
             icon = { Icon(Icons.Default.Save, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
-            title = { Text("Unsaved Code Changes", fontWeight = FontWeight.Bold) },
+            title = { Text("Unsaved Changes", fontWeight = FontWeight.Bold) },
             text = { Text("Save your changes to \"${file.name}\" before leaving Code Studio?") },
             confirmButton = {
                 Button(
@@ -120,53 +125,33 @@ fun CodeEditorView(
                         showUnsavedDialog = false
                         (onBackClick ?: onMenuClick).invoke()
                     }
-                ) {
-                    Text("Save & Exit")
-                }
+                ) { Text("Save & Exit") }
             },
             dismissButton = {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(
+                    FilledTonalButton(
                         onClick = {
                             showUnsavedDialog = false
                             (onBackClick ?: onMenuClick).invoke()
                         }
-                    ) {
-                        Text("Discard")
-                    }
-                    TextButton(onClick = { showUnsavedDialog = false }) {
-                        Text("Cancel")
-                    }
+                    ) { Text("Discard") }
+                    TextButton(onClick = { showUnsavedDialog = false }) { Text("Cancel") }
                 }
             }
         )
     }
 
-    Column(
+    BoxWithConstraints(
         modifier = modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.surface)
     ) {
-        // Unified 50.dp Toolbar with Triple-Line Menu Button on Left (no Back button or decorative icon before title)
-        Surface(
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            tonalElevation = 2.dp,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(50.dp)
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    modifier = Modifier.weight(1f)
-                ) {
+        val isWide = maxWidth >= 640.dp
+
+        Column(modifier = Modifier.fillMaxSize()) {
+            // Strict Single 48.dp Command Bar
+            SingleRowCommandBar(
+                navigationContent = {
                     IconButton(
                         onClick = onMenuClick,
                         modifier = Modifier
@@ -180,47 +165,69 @@ fun CodeEditorView(
                             modifier = Modifier.size(20.dp)
                         )
                     }
-                    Text(
-                        text = if (isModified) "${file.name} •" else file.name,
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false)
-                    )
-                    Surface(
-                        shape = RoundedCornerShape(6.dp),
-                        color = if (isModified) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.secondaryContainer
+                },
+                titleContent = {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         Text(
-                            text = file.extension.uppercase().ifEmpty { "CODE" },
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = if (isModified) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSecondaryContainer,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            text = if (isModified) "${file.name} •" else file.name,
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false)
                         )
                     }
-                }
-
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(2.dp)
-                ) {
-                    if (isHtmlFile) {
-                        FilterChip(
-                            selected = htmlPreviewMode == 1,
-                            onClick = { htmlPreviewMode = if (htmlPreviewMode == 1) 0 else 1 },
-                            label = { Text("Split", style = MaterialTheme.typography.labelSmall) },
-                            leadingIcon = { Icon(Icons.Default.VerticalSplit, contentDescription = null, modifier = Modifier.size(14.dp)) },
-                            modifier = Modifier.height(30.dp)
-                        )
-                        FilterChip(
-                            selected = htmlPreviewMode == 2,
-                            onClick = { htmlPreviewMode = if (htmlPreviewMode == 2) 0 else 2 },
-                            label = { Text("Preview", style = MaterialTheme.typography.labelSmall) },
-                            leadingIcon = { Icon(Icons.Default.Web, contentDescription = null, modifier = Modifier.size(14.dp)) },
-                            modifier = Modifier.height(30.dp)
-                        )
+                },
+                centerContent = {
+                    if (isHtmlFile && isWide) {
+                        val labels = listOf("Code", "Split", "Preview")
+                        SingleChoiceSegmentedButtonRow(modifier = Modifier.height(32.dp)) {
+                            labels.forEachIndexed { idx, label ->
+                                SegmentedButton(
+                                    selected = htmlPreviewMode == idx,
+                                    onClick = { htmlPreviewMode = idx },
+                                    shape = SegmentedButtonDefaults.itemShape(index = idx, count = labels.size),
+                                    icon = {},
+                                    colors = SegmentedButtonDefaults.colors(
+                                        activeContainerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                        activeContentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                                        inactiveContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                        inactiveContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        activeBorderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
+                                        inactiveBorderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)
+                                    )
+                                ) {
+                                    Text(
+                                        text = label,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = if (htmlPreviewMode == idx) FontWeight.SemiBold else FontWeight.Medium
+                                    )
+                                }
+                            }
+                        }
+                    }
+                },
+                actionsContent = {
+                    if (isHtmlFile && !isWide) {
+                        IconButton(
+                            onClick = { htmlPreviewMode = (htmlPreviewMode + 1) % 3 },
+                            modifier = Modifier.size(34.dp)
+                        ) {
+                            Icon(
+                                imageVector = when (htmlPreviewMode) {
+                                    0 -> Icons.Default.VerticalSplit
+                                    1 -> Icons.Default.Web
+                                    else -> Icons.Default.Code
+                                },
+                                contentDescription = "Switch HTML Mode",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                     }
                     IconButton(
                         onClick = { wordWrapEnabled = !wordWrapEnabled },
@@ -228,7 +235,7 @@ fun CodeEditorView(
                     ) {
                         Icon(
                             Icons.Default.WrapText,
-                            contentDescription = "Toggle Word Wrap",
+                            contentDescription = "Word Wrap",
                             tint = if (wordWrapEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(18.dp)
                         )
@@ -242,315 +249,238 @@ fun CodeEditorView(
                         Icon(
                             Icons.Default.Search,
                             contentDescription = "Find & Replace",
-                            tint = if (showSearch) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                            tint = if (showSearch) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(18.dp)
                         )
                     }
-                    IconButton(
-                        onClick = {
-                            onSave()
-                            lastSavedText = textValue
-                        },
-                        modifier = Modifier
-                            .size(34.dp)
-                            .testTag("code_editor_save_button")
-                    ) {
-                        Icon(
-                            Icons.Default.Save,
-                            contentDescription = "Save",
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(19.dp)
-                        )
-                    }
-                }
-            }
-        }
-
-        // Material 3 Find & Replace Panel
-        AnimatedVisibility(visible = showSearch) {
-            Surface(
-                color = MaterialTheme.colorScheme.surfaceContainer,
-                tonalElevation = 2.dp,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        OutlinedTextField(
-                            value = searchQuery,
-                            onValueChange = { searchQuery = it },
-                            placeholder = { Text("Find in code...", style = MaterialTheme.typography.bodySmall) },
-                            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(16.dp)) },
-                            trailingIcon = {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    if (searchQuery.isNotEmpty()) {
-                                        Text(
-                                            text = "$matchCount matches",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.padding(end = 4.dp)
-                                        )
-                                        IconButton(onClick = { searchQuery = "" }, modifier = Modifier.size(24.dp)) {
-                                            Icon(Icons.Default.Clear, contentDescription = "Clear", modifier = Modifier.size(14.dp))
-                                        }
-                                    }
-                                }
-                            },
-                            shape = RoundedCornerShape(12.dp),
-                            singleLine = true,
-                            modifier = Modifier
-                                .weight(1f)
-                                .testTag("code_search_input")
-                        )
-                        IconButton(onClick = { showSearch = false }, modifier = Modifier.size(32.dp)) {
-                            Icon(Icons.Default.Close, contentDescription = "Close Search", modifier = Modifier.size(18.dp))
-                        }
-                    }
-
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        OutlinedTextField(
-                            value = replaceQuery,
-                            onValueChange = { replaceQuery = it },
-                            placeholder = { Text("Replace with...", style = MaterialTheme.typography.bodySmall) },
-                            leadingIcon = { Icon(Icons.Default.FindReplace, contentDescription = null, modifier = Modifier.size(16.dp)) },
-                            shape = RoundedCornerShape(12.dp),
-                            singleLine = true,
-                            modifier = Modifier
-                                .weight(1f)
-                                .testTag("code_replace_input")
-                        )
+                    if (isWide) {
                         FilledTonalButton(
                             onClick = {
-                                if (searchQuery.isNotEmpty()) {
-                                    val updated = textValue.replaceFirst(searchQuery, replaceQuery, ignoreCase = true)
-                                    textValue = updated
-                                    onContentChange(updated)
-                                }
+                                onSave()
+                                lastSavedText = textValue
                             },
-                            enabled = searchQuery.isNotEmpty() && matchCount > 0,
-                            shape = RoundedCornerShape(10.dp),
+                            shape = RoundedCornerShape(50),
                             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
-                            modifier = Modifier.height(36.dp)
-                        ) {
-                            Text("Replace", style = MaterialTheme.typography.labelSmall)
-                        }
-                        Button(
-                            onClick = {
-                                if (searchQuery.isNotEmpty()) {
-                                    val updated = textValue.replace(searchQuery, replaceQuery, ignoreCase = true)
-                                    textValue = updated
-                                    onContentChange(updated)
-                                }
-                            },
-                            enabled = searchQuery.isNotEmpty() && matchCount > 0,
-                            shape = RoundedCornerShape(10.dp),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
-                            modifier = Modifier.height(36.dp)
-                        ) {
-                            Text("All", style = MaterialTheme.typography.labelSmall)
-                        }
-                    }
-                }
-            }
-        }
-
-        @Composable
-        fun CodePane(modifier: Modifier = Modifier) {
-            val gutterDigits = lineCount.toString().length.coerceAtLeast(2)
-            val gutterWidthDp = ((gutterDigits * (fontSizeSp * 0.65f)) + 22f).dp
-            val totalHeightDp = with(density) {
-                (textLayoutResult?.size?.height ?: 0).toDp().coerceAtLeast(240.dp)
-            }
-            val textSizePx = with(density) { fontSizeSp.sp.toPx() }
-            val rightPadPx = with(density) { 10.dp.toPx() }
-            val lineNumArgb = Color(0xFF858585).toArgb()
-
-            Box(
-                modifier = modifier
-                    .background(Color(0xFF1E1E1E))
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .verticalScroll(verticalScrollState)
-                ) {
-                    // 1:1 TextLayoutResult-Synchronized Line Number Gutter
-                    Box(
-                        modifier = Modifier
-                            .width(gutterWidthDp)
-                            .heightIn(min = totalHeightDp + 20.dp)
-                            .background(Color(0xFF252526))
-                            .padding(vertical = 10.dp)
-                    ) {
-                        Canvas(
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .height(totalHeightDp)
+                                .height(32.dp)
+                                .testTag("code_editor_save_button")
                         ) {
-                            val layout = textLayoutResult ?: return@Canvas
-                            val textLen = textValue.length
-                            val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-                                color = lineNumArgb
-                                textAlign = android.graphics.Paint.Align.RIGHT
-                                textSize = textSizePx
-                                typeface = android.graphics.Typeface.MONOSPACE
-                            }
-                            logicalLineStartOffsets.forEachIndexed { idx, startOffset ->
-                                val safeOffset = startOffset.coerceIn(0, textLen)
-                                val visualLine = try {
-                                    layout.getLineForOffset(safeOffset)
-                                } catch (_: Exception) {
-                                    0
-                                }
-                                val baselineY = try {
-                                    layout.getLineBaseline(visualLine)
-                                } catch (_: Exception) {
-                                    visualLine * (textSizePx + 10f) + textSizePx
-                                }
-                                drawContext.canvas.nativeCanvas.drawText(
-                                    (idx + 1).toString(),
-                                    size.width - rightPadPx,
-                                    baselineY,
-                                    paint
-                                )
-                            }
+                            Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(15.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Save", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
                         }
-                    }
-
-                    // Code Input Field with Live Syntax Highlighting
-                    val codeBoxMod = if (wordWrapEnabled) {
-                        Modifier
-                            .weight(1f)
-                            .padding(10.dp)
                     } else {
-                        Modifier
-                            .weight(1f)
-                            .horizontalScroll(horizontalScrollState)
-                            .padding(10.dp)
-                    }
-
-                    Box(modifier = codeBoxMod) {
-                        BasicTextField(
-                            value = textValue,
-                            onValueChange = {
-                                textValue = it
-                                onContentChange(it)
+                        IconButton(
+                            onClick = {
+                                onSave()
+                                lastSavedText = textValue
                             },
-                            onTextLayout = { result -> textLayoutResult = result },
-                            visualTransformation = syntaxHighlighter,
-                            textStyle = TextStyle(
-                                fontFamily = FontFamily.Monospace,
-                                fontSize = fontSizeSp.sp,
-                                color = Color(0xFFD4D4D4),
-                                lineHeight = (fontSizeSp + 5).sp
-                            ),
-                            cursorBrush = SolidColor(Color(0xFF00E676)),
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(min = 240.dp)
-                                .testTag("code_editor_text_field")
-                        )
+                                .size(34.dp)
+                                .testTag("code_editor_save_button")
+                        ) {
+                            Icon(
+                                Icons.Default.Save,
+                                contentDescription = "Save",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(19.dp)
+                            )
+                        }
                     }
-                }
-            }
-        }
-
-        @Composable
-        fun HtmlWebPane(modifier: Modifier = Modifier) {
-            val baseUrl = remember(file) {
-                file.parentFile?.let { "file://${it.absolutePath}/" } ?: "file:///android_asset/"
-            }
-            AndroidView(
-                modifier = modifier.background(Color.White),
-                factory = { ctx ->
-                    android.webkit.WebView(ctx).apply {
-                        settings.javaScriptEnabled = true
-                        settings.domStorageEnabled = true
-                        settings.allowFileAccess = true
-                        webViewClient = android.webkit.WebViewClient()
-                        loadDataWithBaseURL(baseUrl, textValue, "text/html", "UTF-8", null)
-                    }
-                },
-                update = { wv ->
-                    wv.loadDataWithBaseURL(baseUrl, textValue, "text/html", "UTF-8", null)
                 }
             )
-        }
 
-        // Main Workspace Area
-        Box(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()
-        ) {
-            when {
-                isHtmlFile && htmlPreviewMode == 2 -> {
-                    HtmlWebPane(Modifier.fillMaxSize())
+            @Composable
+            fun CodePane(modifier: Modifier = Modifier) {
+                val gutterDigits = lineCount.toString().length.coerceAtLeast(2)
+                val gutterWidthDp = ((gutterDigits * (fontSizeSp * 0.65f)) + 22f).dp
+                val totalHeightDp = with(density) {
+                    (textLayoutResult?.size?.height ?: 0).toDp().coerceAtLeast(240.dp)
                 }
-                isHtmlFile && htmlPreviewMode == 1 -> {
-                    Row(modifier = Modifier.fillMaxSize()) {
-                        CodePane(Modifier.weight(1f).fillMaxHeight())
-                        VerticalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outlineVariant)
-                        HtmlWebPane(Modifier.weight(1f).fillMaxHeight())
+                val textSizePx = with(density) { fontSizeSp.sp.toPx() }
+                val rightPadPx = with(density) { 10.dp.toPx() }
+                val lineNumArgb = Color(0xFF858585).toArgb()
+
+                Box(modifier = modifier.background(Color(0xFF1E1E1E))) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .verticalScroll(verticalScrollState)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .width(gutterWidthDp)
+                                .heightIn(min = totalHeightDp + 24.dp)
+                                .background(Color(0xFF252526))
+                                .padding(vertical = 12.dp)
+                        ) {
+                            Canvas(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(totalHeightDp)
+                            ) {
+                                val layout = textLayoutResult ?: return@Canvas
+                                val textLen = textValue.length
+                                val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                                    color = lineNumArgb
+                                    textAlign = android.graphics.Paint.Align.RIGHT
+                                    textSize = textSizePx
+                                    typeface = android.graphics.Typeface.MONOSPACE
+                                }
+                                logicalLineStartOffsets.forEachIndexed { idx, startOffset ->
+                                    val safeOffset = startOffset.coerceIn(0, textLen)
+                                    val visualLine = try {
+                                        layout.getLineForOffset(safeOffset)
+                                    } catch (_: Exception) {
+                                        0
+                                    }
+                                    val baselineY = try {
+                                        layout.getLineBaseline(visualLine)
+                                    } catch (_: Exception) {
+                                        visualLine * (textSizePx + 10f) + textSizePx
+                                    }
+                                    drawContext.canvas.nativeCanvas.drawText(
+                                        (idx + 1).toString(),
+                                        size.width - rightPadPx,
+                                        baselineY,
+                                        paint
+                                    )
+                                }
+                            }
+                        }
+
+                        val codeBoxMod = if (wordWrapEnabled) {
+                            Modifier
+                                .weight(1f)
+                                .padding(12.dp)
+                        } else {
+                            Modifier
+                                .weight(1f)
+                                .horizontalScroll(horizontalScrollState)
+                                .padding(12.dp)
+                        }
+
+                        Box(modifier = codeBoxMod) {
+                            BasicTextField(
+                                value = textValue,
+                                onValueChange = {
+                                    textValue = it
+                                    onContentChange(it)
+                                },
+                                onTextLayout = { result -> textLayoutResult = result },
+                                visualTransformation = syntaxHighlighter,
+                                textStyle = TextStyle(
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = fontSizeSp.sp,
+                                    color = Color(0xFFD4D4D4),
+                                    lineHeight = (fontSizeSp + 5).sp
+                                ),
+                                cursorBrush = SolidColor(Color(0xFF00E676)),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(min = 240.dp)
+                                    .testTag("code_editor_text_field")
+                            )
+                        }
                     }
-                }
-                else -> {
-                    CodePane(Modifier.fillMaxSize())
                 }
             }
-        }
 
-        // Status Footer Bar with Font Zoom Controls
-        Surface(
-            color = MaterialTheme.colorScheme.surfaceContainer,
-            tonalElevation = 1.dp
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Lines: $lineCount • Chars: $charCount" + if (isModified) " • Modified" else " • Saved",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = if (isModified) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    IconButton(
-                        onClick = { if (fontSizeSp > 10) fontSizeSp-- },
-                        modifier = Modifier.size(22.dp)
-                    ) {
-                        Icon(Icons.Default.Remove, contentDescription = "Smaller Font", modifier = Modifier.size(14.dp))
+            @Composable
+            fun HtmlWebPane(modifier: Modifier = Modifier) {
+                val baseUrl = remember(file) {
+                    file.parentFile?.let { "file://${it.absolutePath}/" } ?: "file:///android_asset/"
+                }
+                AndroidView(
+                    modifier = modifier.background(Color.White),
+                    factory = { ctx ->
+                        android.webkit.WebView(ctx).apply {
+                            settings.javaScriptEnabled = true
+                            settings.domStorageEnabled = true
+                            settings.allowFileAccess = true
+                            webViewClient = android.webkit.WebViewClient()
+                            loadDataWithBaseURL(baseUrl, textValue, "text/html", "UTF-8", null)
+                        }
+                    },
+                    update = { wv ->
+                        wv.loadDataWithBaseURL(baseUrl, textValue, "text/html", "UTF-8", null)
                     }
+                )
+            }
+
+            // Main Workspace Area + Floating Top-Right Find Overlay
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+            ) {
+                when {
+                    isHtmlFile && htmlPreviewMode == 2 -> HtmlWebPane(Modifier.fillMaxSize())
+                    isHtmlFile && htmlPreviewMode == 1 -> {
+                        Row(modifier = Modifier.fillMaxSize()) {
+                            CodePane(Modifier.weight(1f).fillMaxHeight())
+                            TonalVerticalPaneDivider()
+                            HtmlWebPane(Modifier.weight(1f).fillMaxHeight())
+                        }
+                    }
+                    else -> CodePane(Modifier.fillMaxSize())
+                }
+
+                if (showSearch) {
+                    TonalFloatingFindOverlay(
+                        searchQuery = searchQuery,
+                        onSearchChange = { searchQuery = it },
+                        replaceQuery = replaceQuery,
+                        onReplaceChange = { replaceQuery = it },
+                        matchCountLabel = if (searchQuery.isNotEmpty()) "$matchCount" else null,
+                        onFindNext = null,
+                        onReplaceAll = {
+                            if (searchQuery.isNotEmpty() && matchCount > 0) {
+                                val updated = textValue.replace(searchQuery, replaceQuery, ignoreCase = true)
+                                textValue = updated
+                                onContentChange(updated)
+                            }
+                        },
+                        onClose = { showSearch = false },
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(12.dp)
+                    )
+                }
+            }
+
+            // Quiet 26.dp Desktop Status Strip
+            SlimStatusStrip(
+                leftText = "${file.extension.uppercase().ifEmpty { "CODE" }} • $lineCount lines • $charCount chars" +
+                    if (isModified) " • Modified" else " • Saved",
+                centerContent = {
                     Text(
-                        text = "${fontSizeSp}sp • UTF-8",
+                        text = "A-",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .clickable { if (fontSizeSp > 10) fontSizeSp-- }
+                            .padding(horizontal = 4.dp)
+                    )
+                    Text(
+                        text = "${fontSizeSp}sp",
                         style = MaterialTheme.typography.labelSmall,
                         fontFamily = FontFamily.Monospace,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = MaterialTheme.colorScheme.onSurface
                     )
-                    IconButton(
-                        onClick = { if (fontSizeSp < 24) fontSizeSp++ },
-                        modifier = Modifier.size(22.dp)
-                    ) {
-                        Icon(Icons.Default.Add, contentDescription = "Larger Font", modifier = Modifier.size(14.dp))
-                    }
-                }
-            }
+                    Text(
+                        text = "A+",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .clickable { if (fontSizeSp < 24) fontSizeSp++ }
+                            .padding(horizontal = 4.dp)
+                    )
+                },
+                rightText = if (wordWrapEnabled) "WRAP • UTF-8" else "NO-WRAP • UTF-8"
+            )
         }
     }
 }

@@ -410,275 +410,7 @@ fun PdfViewerEngine(
             }
         }
 
-        // UNIFIED DESKTOP PDF CONTROL BAR (No duplicate title, 100% functional controls)
-        Surface(
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            tonalElevation = 1.dp,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 10.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                // 1. Page Navigation & Direct Page Jump Pill
-                IconButton(
-                    onClick = { jumpToPage(currentPageIndex - 1) },
-                    enabled = currentPageIndex > 0,
-                    modifier = Modifier.size(30.dp)
-                ) {
-                    Icon(Icons.AutoMirrored.Filled.NavigateBefore, contentDescription = "Previous Page", modifier = Modifier.size(18.dp))
-                }
-
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = MaterialTheme.colorScheme.primaryContainer,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickable(enabled = pageCount > 0) {
-                            jumpPageInput = "${currentPageIndex + 1}"
-                            showJumpPageDialog = true
-                        }
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Text(
-                            text = if (pageCount > 0) "Page ${currentPageIndex + 1} / $pageCount" else "0 / 0",
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer
-                        )
-                        Icon(
-                            Icons.Default.EditLocationAlt,
-                            contentDescription = "Jump to Page",
-                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                            modifier = Modifier.size(13.dp)
-                        )
-                    }
-                }
-
-                IconButton(
-                    onClick = { jumpToPage(currentPageIndex + 1) },
-                    enabled = currentPageIndex < pageCount - 1,
-                    modifier = Modifier.size(30.dp)
-                ) {
-                    Icon(Icons.AutoMirrored.Filled.NavigateNext, contentDescription = "Next Page", modifier = Modifier.size(18.dp))
-                }
-
-                VerticalDivider(modifier = Modifier.height(22.dp))
-
-                // 2. Zoom Controls (-, 100%, +)
-                IconButton(
-                    onClick = {
-                        zoomScale = (zoomScale - 0.25f).coerceIn(0.5f, 4.0f)
-                        if (zoomScale <= 1.02f) panOffset = Offset.Zero
-                    },
-                    modifier = Modifier.size(30.dp)
-                ) {
-                    Icon(Icons.Default.ZoomOut, contentDescription = "Zoom Out", modifier = Modifier.size(18.dp))
-                }
-
-                Surface(
-                    shape = RoundedCornerShape(6.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
-                        .clickable {
-                            zoomScale = 1f
-                            panOffset = Offset.Zero
-                        }
-                ) {
-                    Text(
-                        text = "${(zoomScale * 100).roundToInt()}%",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                    )
-                }
-
-                IconButton(
-                    onClick = { zoomScale = (zoomScale + 0.25f).coerceIn(0.5f, 4.0f) },
-                    modifier = Modifier.size(30.dp)
-                ) {
-                    Icon(Icons.Default.ZoomIn, contentDescription = "Zoom In", modifier = Modifier.size(18.dp))
-                }
-
-                VerticalDivider(modifier = Modifier.height(22.dp))
-
-                // 3. Layout Mode Switcher (Continuous / Single Page / 2-Page Spread)
-                PdfLayoutMode.entries.forEach { mode ->
-                    FilterChip(
-                        selected = layoutMode == mode,
-                        onClick = { layoutMode = mode },
-                        label = { Text(mode.label, fontSize = 11.sp) },
-                        modifier = Modifier.height(28.dp)
-                    )
-                }
-
-                VerticalDivider(modifier = Modifier.height(22.dp))
-
-                // 4. Page Rotation (90° steps)
-                IconButton(
-                    onClick = { pageRotationDegrees = (pageRotationDegrees + 90f) % 360f },
-                    modifier = Modifier.size(30.dp)
-                ) {
-                    Icon(Icons.Default.RotateRight, contentDescription = "Rotate 90°", modifier = Modifier.size(18.dp))
-                }
-
-                // 5. Reading Theme (Day / Night / Sepia)
-                AssistChip(
-                    onClick = {
-                        readingTheme = when (readingTheme) {
-                            PdfReadingTheme.NORMAL -> PdfReadingTheme.NIGHT_INVERTED
-                            PdfReadingTheme.NIGHT_INVERTED -> PdfReadingTheme.SEPIA
-                            PdfReadingTheme.SEPIA -> PdfReadingTheme.NORMAL
-                        }
-                    },
-                    label = { Text(readingTheme.label, fontSize = 11.sp) },
-                    leadingIcon = {
-                        Icon(
-                            when (readingTheme) {
-                                PdfReadingTheme.NORMAL -> Icons.Default.LightMode
-                                PdfReadingTheme.NIGHT_INVERTED -> Icons.Default.DarkMode
-                                PdfReadingTheme.SEPIA -> Icons.Default.AutoStories
-                            },
-                            contentDescription = null,
-                            modifier = Modifier.size(14.dp)
-                        )
-                    },
-                    modifier = Modifier.height(28.dp)
-                )
-
-                // 6. Thumbnail Strip Toggle
-                IconButton(
-                    onClick = { showThumbnailBar = !showThumbnailBar },
-                    modifier = Modifier.size(30.dp)
-                ) {
-                    Icon(
-                        Icons.Default.ViewCarousel,
-                        contentDescription = "Toggle Page Thumbnails",
-                        tint = if (showThumbnailBar) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-
-                // 7. Find in PDF Toggle
-                IconButton(
-                    onClick = {
-                        showSearchBar = !showSearchBar
-                        if (!showSearchBar) {
-                            searchQuery = ""
-                            searchMatchingPages = emptyList()
-                        }
-                    },
-                    modifier = Modifier.size(30.dp)
-                ) {
-                    Icon(
-                        Icons.Default.Search,
-                        contentDescription = "Find in PDF",
-                        tint = if (showSearchBar) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-
-                // 8. Print / Export PDF
-                IconButton(
-                    onClick = { printCurrentPdf() },
-                    modifier = Modifier.size(30.dp)
-                ) {
-                    Icon(Icons.Default.Print, contentDescription = "Print PDF", modifier = Modifier.size(18.dp))
-                }
-
-                // 9. Quick Compress PDF in File Converter
-                val localRef = file.fileRef ?: tempCopiedFile
-                if (appState != null && localRef != null) {
-                    AssistChip(
-                        onClick = { appState.openInFileConverter(listOf(localRef)) },
-                        label = { Text("Compress / Convert", fontSize = 11.sp) },
-                        leadingIcon = { Icon(Icons.Default.Compress, contentDescription = null, modifier = Modifier.size(14.dp)) },
-                        modifier = Modifier.height(28.dp)
-                    )
-                }
-            }
-        }
-
-        // Expandable Search Bar
-        if (showSearchBar) {
-            Surface(
-                color = MaterialTheme.colorScheme.surfaceContainer,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    OutlinedTextField(
-                        value = searchQuery,
-                        onValueChange = { searchQuery = it },
-                        placeholder = { Text("Find text in PDF...", style = MaterialTheme.typography.bodySmall) },
-                        singleLine = true,
-                        modifier = Modifier.weight(1f),
-                        trailingIcon = {
-                            if (isSearching) {
-                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                            } else if (searchQuery.isNotEmpty()) {
-                                IconButton(onClick = { executePdfSearch(searchQuery) }) {
-                                    Icon(Icons.Default.Search, contentDescription = "Run Search")
-                                }
-                            }
-                        }
-                    )
-
-                    Button(
-                        onClick = { executePdfSearch(searchQuery) },
-                        enabled = searchQuery.isNotBlank() && !isSearching
-                    ) {
-                        Text("Find")
-                    }
-
-                    if (searchMatchingPages.isNotEmpty()) {
-                        Text(
-                            text = "${currentMatchPointer + 1}/${searchMatchingPages.size}",
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.Bold
-                        )
-                        IconButton(
-                            onClick = {
-                                if (searchMatchingPages.isNotEmpty()) {
-                                    currentMatchPointer = (currentMatchPointer - 1 + searchMatchingPages.size) % searchMatchingPages.size
-                                    jumpToPage(searchMatchingPages[currentMatchPointer])
-                                }
-                            }
-                        ) {
-                            Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Previous Match")
-                        }
-                        IconButton(
-                            onClick = {
-                                if (searchMatchingPages.isNotEmpty()) {
-                                    currentMatchPointer = (currentMatchPointer + 1) % searchMatchingPages.size
-                                    jumpToPage(searchMatchingPages[currentMatchPointer])
-                                }
-                            }
-                        ) {
-                            Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Next Match")
-                        }
-                    }
-                }
-            }
-        }
-
-        // Main PDF Viewport
+        // Main PDF Viewport + Floating Top-Right Search Overlay
         Box(
             modifier = Modifier
                 .weight(1f)
@@ -843,16 +575,96 @@ fun PdfViewerEngine(
                     }
                 }
             }
+
+            // Floating Top-Right PDF Search Card (never stacks a second top bar)
+            if (showSearchBar) {
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(12.dp)
+                        .widthIn(min = 280.dp, max = 420.dp)
+                        .shadow(8.dp, RoundedCornerShape(14.dp))
+                ) {
+                    Row(
+                        modifier = Modifier.padding(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        com.troikoss.continuum_explorer.ui.components.suite.TonalSearchPill(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            placeholder = "Find in PDF",
+                            modifier = Modifier.weight(1f),
+                            testTagName = "pdf_find_input"
+                        )
+                        if (isSearching) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                        } else {
+                            FilledTonalButton(
+                                onClick = { executePdfSearch(searchQuery) },
+                                enabled = searchQuery.isNotBlank(),
+                                shape = RoundedCornerShape(50),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                                modifier = Modifier.height(32.dp)
+                            ) {
+                                Text("Find", style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
+                        if (searchMatchingPages.isNotEmpty()) {
+                            Text(
+                                text = "${currentMatchPointer + 1}/${searchMatchingPages.size}",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            IconButton(
+                                onClick = {
+                                    currentMatchPointer = (currentMatchPointer - 1 + searchMatchingPages.size) % searchMatchingPages.size
+                                    jumpToPage(searchMatchingPages[currentMatchPointer])
+                                },
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Previous Match", modifier = Modifier.size(18.dp))
+                            }
+                            IconButton(
+                                onClick = {
+                                    currentMatchPointer = (currentMatchPointer + 1) % searchMatchingPages.size
+                                    jumpToPage(searchMatchingPages[currentMatchPointer])
+                                },
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Next Match", modifier = Modifier.size(18.dp))
+                            }
+                        }
+                        IconButton(
+                            onClick = {
+                                showSearchBar = false
+                                searchQuery = ""
+                                searchMatchingPages = emptyList()
+                            },
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(Icons.Default.Close, contentDescription = "Close Search", modifier = Modifier.size(16.dp))
+                        }
+                    }
+                }
+            }
         }
 
-        // Bottom Thumbnail Strip
+        // Bottom Thumbnail Strip (above bottom control bar)
         if (showThumbnailBar && pageCount > 1 && pdfRenderer != null) {
+            HorizontalDivider(
+                thickness = 0.5.dp,
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)
+            )
             Surface(
-                color = MaterialTheme.colorScheme.surfaceContainer,
-                tonalElevation = 4.dp,
+                color = MaterialTheme.colorScheme.surfaceContainerLowest,
+                tonalElevation = 0.dp,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(84.dp)
+                    .height(82.dp)
             ) {
                 val thumbIndices = remember(pageCount) { (0 until pageCount).toList() }
                 LazyRow(
@@ -871,6 +683,233 @@ fun PdfViewerEngine(
                             bitmapCache = pageBitmapCache,
                             onClick = { jumpToPage(idx) }
                         )
+                    }
+                }
+            }
+        }
+
+        // UNIFIED BOTTOM DESKTOP PDF CONTROL BAR (zero stacked second top row!)
+        HorizontalDivider(
+            thickness = 0.5.dp,
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)
+        )
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            tonalElevation = 0.dp,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(44.dp)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                // 1. Page Navigation & Direct Page Jump Pill
+                IconButton(
+                    onClick = { jumpToPage(currentPageIndex - 1) },
+                    enabled = currentPageIndex > 0,
+                    modifier = Modifier.size(30.dp)
+                ) {
+                    Icon(Icons.AutoMirrored.Filled.NavigateBefore, contentDescription = "Previous Page", modifier = Modifier.size(18.dp))
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(50),
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .clickable(enabled = pageCount > 0) {
+                            jumpPageInput = "${currentPageIndex + 1}"
+                            showJumpPageDialog = true
+                        }
+                ) {
+                    Text(
+                        text = if (pageCount > 0) "${currentPageIndex + 1} / $pageCount" else "0 / 0",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                    )
+                }
+
+                IconButton(
+                    onClick = { jumpToPage(currentPageIndex + 1) },
+                    enabled = currentPageIndex < pageCount - 1,
+                    modifier = Modifier.size(30.dp)
+                ) {
+                    Icon(Icons.AutoMirrored.Filled.NavigateNext, contentDescription = "Next Page", modifier = Modifier.size(18.dp))
+                }
+
+                VerticalDivider(
+                    thickness = 0.5.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                    modifier = Modifier.height(18.dp)
+                )
+
+                // 2. Zoom Controls (-, 100%, +)
+                IconButton(
+                    onClick = {
+                        zoomScale = (zoomScale - 0.25f).coerceIn(0.5f, 4.0f)
+                        if (zoomScale <= 1.02f) panOffset = Offset.Zero
+                    },
+                    modifier = Modifier.size(30.dp)
+                ) {
+                    Icon(Icons.Default.ZoomOut, contentDescription = "Zoom Out", modifier = Modifier.size(17.dp))
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(50),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .clickable {
+                            zoomScale = 1f
+                            panOffset = Offset.Zero
+                        }
+                ) {
+                    Text(
+                        text = "${(zoomScale * 100).roundToInt()}%",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Medium,
+                        fontFamily = FontFamily.Monospace,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+                }
+
+                IconButton(
+                    onClick = { zoomScale = (zoomScale + 0.25f).coerceIn(0.5f, 4.0f) },
+                    modifier = Modifier.size(30.dp)
+                ) {
+                    Icon(Icons.Default.ZoomIn, contentDescription = "Zoom In", modifier = Modifier.size(17.dp))
+                }
+
+                VerticalDivider(
+                    thickness = 0.5.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                    modifier = Modifier.height(18.dp)
+                )
+
+                // 3. Borderless Tonal Layout Mode Switcher
+                PdfLayoutMode.entries.forEach { mode ->
+                    val active = layoutMode == mode
+                    Surface(
+                        onClick = { layoutMode = mode },
+                        shape = RoundedCornerShape(50),
+                        color = if (active) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+                        contentColor = if (active) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.height(28.dp)
+                    ) {
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier.padding(horizontal = 10.dp)
+                        ) {
+                            Text(mode.label, style = MaterialTheme.typography.labelSmall, fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal)
+                        }
+                    }
+                }
+
+                VerticalDivider(
+                    thickness = 0.5.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                    modifier = Modifier.height(18.dp)
+                )
+
+                // 4. Rotate, Reading Theme, Thumbnails, Find, Print, Compress
+                IconButton(
+                    onClick = { pageRotationDegrees = (pageRotationDegrees + 90f) % 360f },
+                    modifier = Modifier.size(30.dp)
+                ) {
+                    Icon(Icons.Default.RotateRight, contentDescription = "Rotate 90°", modifier = Modifier.size(17.dp))
+                }
+
+                Surface(
+                    onClick = {
+                        readingTheme = when (readingTheme) {
+                            PdfReadingTheme.NORMAL -> PdfReadingTheme.NIGHT_INVERTED
+                            PdfReadingTheme.NIGHT_INVERTED -> PdfReadingTheme.SEPIA
+                            PdfReadingTheme.SEPIA -> PdfReadingTheme.NORMAL
+                        }
+                    },
+                    shape = RoundedCornerShape(50),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    modifier = Modifier.height(28.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            when (readingTheme) {
+                                PdfReadingTheme.NORMAL -> Icons.Default.LightMode
+                                PdfReadingTheme.NIGHT_INVERTED -> Icons.Default.DarkMode
+                                PdfReadingTheme.SEPIA -> Icons.Default.AutoStories
+                            },
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Text(readingTheme.label, style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+
+                IconButton(
+                    onClick = { showThumbnailBar = !showThumbnailBar },
+                    modifier = Modifier.size(30.dp)
+                ) {
+                    Icon(
+                        Icons.Default.ViewCarousel,
+                        contentDescription = "Page Thumbnails",
+                        tint = if (showThumbnailBar) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(17.dp)
+                    )
+                }
+
+                IconButton(
+                    onClick = {
+                        showSearchBar = !showSearchBar
+                        if (!showSearchBar) {
+                            searchQuery = ""
+                            searchMatchingPages = emptyList()
+                        }
+                    },
+                    modifier = Modifier.size(30.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Search,
+                        contentDescription = "Find in PDF",
+                        tint = if (showSearchBar) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(17.dp)
+                    )
+                }
+
+                IconButton(
+                    onClick = { printCurrentPdf() },
+                    modifier = Modifier.size(30.dp)
+                ) {
+                    Icon(Icons.Default.Print, contentDescription = "Print", modifier = Modifier.size(17.dp))
+                }
+
+                val localRef = file.fileRef ?: tempCopiedFile
+                if (appState != null && localRef != null) {
+                    Surface(
+                        onClick = { appState.openInFileConverter(listOf(localRef)) },
+                        shape = RoundedCornerShape(50),
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        modifier = Modifier.height(28.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(Icons.Default.Compress, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Text("Convert", style = MaterialTheme.typography.labelSmall)
+                        }
                     }
                 }
             }

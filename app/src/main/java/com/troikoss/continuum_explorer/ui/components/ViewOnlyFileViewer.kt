@@ -229,171 +229,159 @@ fun ViewOnlyFileViewer(
         if (currentFile.length > 0) Formatter.formatFileSize(context, currentFile.length) else "0 B"
     }
 
+    var showMoreActionsMenu by remember { mutableStateOf(false) }
+
     Column(
         modifier = modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.surface)
     ) {
-        // Logical Action Bar directly beneath Title Bar (Tab Bar)
-        // Video files render their own dedicated top control bar inside DedicatedVideoPlayerView, so we do not duplicate the title here.
+        // Strict Single 48.dp Command Bar (no 2-line subtitle; Video renders its own player bar)
         if (!isVideo) {
-            Surface(
-                color = MaterialTheme.colorScheme.surfaceContainer,
-                tonalElevation = 2.dp,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(50.dp)
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    // 1. Back Button + File Name & Subtitle
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        IconButton(onClick = onClose, modifier = Modifier.size(36.dp)) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+            com.troikoss.continuum_explorer.ui.components.suite.SingleRowCommandBar(
+                navigationContent = {
+                    IconButton(onClick = onClose, modifier = Modifier.size(36.dp)) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back",
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                },
+                titleContent = {
+                    Text(
+                        text = currentFile.name,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                },
+                actionsContent = {
+                    if (isText || isImage) {
+                        FilledTonalButton(
+                            onClick = {
+                                isEditing = true
+                                appState.openInEditMode = true
+                            },
+                            shape = RoundedCornerShape(50),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                            modifier = Modifier.height(32.dp)
+                        ) {
+                            Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(15.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Edit", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
                         }
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = currentFile.name,
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                text = "${ext.uppercase().ifEmpty { "FILE" }} • $formattedSize",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
+                    } else if (isArchive) {
+                        FilledTonalButton(
+                            onClick = {
+                                val fRef = currentFile.fileRef
+                                onClose()
+                                appState.navigateTo(
+                                    newPath = null,
+                                    newUri = null,
+                                    archiveFile = fRef,
+                                    archiveUri = if (fRef == null) currentFile.documentFileRef?.uri else null
+                                )
+                            },
+                            shape = RoundedCornerShape(50),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                            modifier = Modifier.height(32.dp)
+                        ) {
+                            Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(15.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Browse", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
                         }
                     }
 
-                    // 2. Logical Action Buttons Order: Edit -> Metadata -> Delete -> Share -> External -> Fullscreen
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(2.dp)
+                    IconButton(
+                        onClick = { showMetadataDialog = true },
+                        modifier = Modifier.size(34.dp)
                     ) {
-                        // A. EDIT OPTION (or Browse Tab for Archives)
-                        if (isText || isImage) {
-                            FilledTonalButton(
+                        Icon(
+                            Icons.Default.Info,
+                            contentDescription = "Metadata",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+
+                    IconButton(
+                        onClick = { shareFiles(context, scope, listOf(currentFile)) },
+                        modifier = Modifier.size(34.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Share,
+                            contentDescription = "Share",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+
+                    IconButton(
+                        onClick = { SettingsManager.toggleFullScreenTabBar() },
+                        modifier = Modifier.size(34.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (isFullScreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
+                            contentDescription = if (isFullScreen) "Exit Full Screen" else "Full Screen",
+                            tint = if (isFullScreen) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(19.dp)
+                        )
+                    }
+
+                    Box {
+                        IconButton(
+                            onClick = { showMoreActionsMenu = true },
+                            modifier = Modifier.size(34.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.MoreVert,
+                                contentDescription = "More Actions",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(19.dp)
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = showMoreActionsMenu,
+                            onDismissRequest = { showMoreActionsMenu = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Open External") },
+                                leadingIcon = { Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null) },
                                 onClick = {
-                                    isEditing = true
-                                    appState.openInEditMode = true
-                                },
-                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
-                                modifier = Modifier.height(32.dp)
-                            ) {
-                                Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(15.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Edit", style = MaterialTheme.typography.labelMedium)
-                            }
-                        } else if (isArchive) {
-                            FilledTonalButton(
-                                onClick = {
-                                    val fRef = currentFile.fileRef
-                                    onClose()
-                                    appState.navigateTo(
-                                        newPath = null,
-                                        newUri = null,
-                                        archiveFile = fRef,
-                                        archiveUri = if (fRef == null) currentFile.documentFileRef?.uri else null
+                                    showMoreActionsMenu = false
+                                    val uri = getUriForUniversalFile(context, currentFile)
+                                    if (uri != null) {
+                                        val intent = Intent(Intent.ACTION_VIEW).apply {
+                                            setDataAndType(uri, "*/*")
+                                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                        }
+                                        runCatching { context.startActivity(Intent.createChooser(intent, "Open with")) }
+                                            .onFailure { Toast.makeText(context, "No external app found", Toast.LENGTH_SHORT).show() }
+                                    }
+                                }
+                            )
+                            HorizontalDivider()
+                            DropdownMenuItem(
+                                text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
+                                leadingIcon = {
+                                    Icon(
+                                        Icons.Default.DeleteOutline,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.error
                                     )
                                 },
-                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
-                                modifier = Modifier.height(32.dp)
-                            ) {
-                                Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(15.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Browse", style = MaterialTheme.typography.labelMedium)
-                            }
-                        }
-
-                        // B. METADATA VIEW / EDIT OPTION
-                        IconButton(
-                            onClick = { showMetadataDialog = true },
-                            modifier = Modifier.size(36.dp)
-                        ) {
-                            Icon(
-                                Icons.Default.Info,
-                                contentDescription = "View & Edit Metadata",
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-
-                        // C. DELETE ACTION
-                        IconButton(
-                            onClick = { showDeleteConfirmDialog = true },
-                            modifier = Modifier.size(36.dp)
-                        ) {
-                            Icon(
-                                Icons.Default.DeleteOutline,
-                                contentDescription = "Delete File",
-                                tint = MaterialTheme.colorScheme.error,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-
-                        // D. SHARE ACTION
-                        IconButton(
-                            onClick = { shareFiles(context, scope, listOf(currentFile)) },
-                            modifier = Modifier.size(36.dp)
-                        ) {
-                            Icon(
-                                Icons.Default.Share,
-                                contentDescription = "Share",
-                                modifier = Modifier.size(19.dp)
-                            )
-                        }
-
-                        // E. OPEN EXTERNALLY
-                        IconButton(
-                            onClick = {
-                                val uri = getUriForUniversalFile(context, currentFile)
-                                if (uri != null) {
-                                    val intent = Intent(Intent.ACTION_VIEW).apply {
-                                        setDataAndType(uri, "*/*")
-                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                    }
-                                    runCatching { context.startActivity(Intent.createChooser(intent, "Open with")) }
-                                        .onFailure { Toast.makeText(context, "No external app found", Toast.LENGTH_SHORT).show() }
+                                onClick = {
+                                    showMoreActionsMenu = false
+                                    showDeleteConfirmDialog = true
                                 }
-                            },
-                            modifier = Modifier.size(36.dp)
-                        ) {
-                            Icon(
-                                Icons.AutoMirrored.Filled.OpenInNew,
-                                contentDescription = "Open Externally",
-                                modifier = Modifier.size(19.dp)
-                            )
-                        }
-
-                        // F. FULL-SCREEN TOGGLE (Hides/Shows Top TabBar)
-                        IconButton(
-                            onClick = { SettingsManager.toggleFullScreenTabBar() },
-                            modifier = Modifier.size(36.dp)
-                        ) {
-                            Icon(
-                                imageVector = if (isFullScreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
-                                contentDescription = if (isFullScreen) "Exit Full Screen" else "Full Screen",
-                                tint = if (isFullScreen) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                                modifier = Modifier.size(20.dp)
                             )
                         }
                     }
                 }
-            }
-            HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
+            )
         }
 
         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
@@ -443,6 +431,16 @@ fun ViewOnlyFileViewer(
                     )
                 }
             }
+        }
+
+        if (!isVideo && !isAudio) {
+            val parentLabel = remember(currentFile.absolutePath) {
+                currentFile.fileRef?.parentFile?.name ?: currentFile.absolutePath.substringBeforeLast('/').substringAfterLast('/', "")
+            }
+            com.troikoss.continuum_explorer.ui.components.suite.SlimStatusStrip(
+                leftText = "${ext.uppercase().ifEmpty { "FILE" }} • $formattedSize",
+                rightText = parentLabel
+            )
         }
     }
 

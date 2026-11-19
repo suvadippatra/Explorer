@@ -4,20 +4,16 @@ import android.os.Environment
 import android.text.format.DateUtils
 import android.text.format.Formatter
 import android.widget.Toast
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -26,28 +22,38 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.troikoss.continuum_explorer.data.db.SuiteActivityType
 import com.troikoss.continuum_explorer.data.db.SuiteRecentDatabase
+import com.troikoss.continuum_explorer.data.db.SuiteRecentRecord
 import com.troikoss.continuum_explorer.domain.logic.FileOpenPolicyEngine
 import com.troikoss.continuum_explorer.managers.SettingsManager
-import com.troikoss.continuum_explorer.model.ScreenSize
+import com.troikoss.continuum_explorer.model.UniversalFile
 import com.troikoss.continuum_explorer.rules.MiniAppRegistry
 import com.troikoss.continuum_explorer.rules.MiniAppRuleDescriptor
+import com.troikoss.continuum_explorer.ui.components.suite.HoverPreviewController
+import com.troikoss.continuum_explorer.ui.components.suite.HoverPreviewPopupHost
+import com.troikoss.continuum_explorer.ui.components.suite.SingleRowCommandBar
+import com.troikoss.continuum_explorer.ui.components.suite.TonalSearchPill
+import com.troikoss.continuum_explorer.ui.components.suite.hoverPreviewTarget
+import com.troikoss.continuum_explorer.ui.components.suite.rememberHoverPreviewController
 import com.troikoss.continuum_explorer.utils.IconHelper
 import com.troikoss.continuum_explorer.utils.open
 import com.troikoss.continuum_explorer.utils.openInEdit
 import com.troikoss.continuum_explorer.utils.openInFileConverter
 import com.troikoss.continuum_explorer.utils.toUniversal
 import java.io.File
+import kotlin.math.roundToInt
 
 data class EditorTool(
     val id: String,
@@ -58,14 +64,22 @@ data class EditorTool(
     val color: Color
 )
 
+private enum class SuiteRecentFilter(val label: String) {
+    ALL("All"),
+    DOCS("Docs"),
+    CODE("Code"),
+    TABLES("Tables"),
+    PHOTOS("Photos")
+}
+
 /**
- * Android Desktop/DeX & Mobile optimized "My Suite" Workspace.
- * - Narrow Window (`maxWidth < 560.dp`): Shows compact icon-only buttons for New File and Open in the heading bar.
- * - Desktop / Tablet (`maxWidth >= 660.dp`): Replaces full-width stretched row cards with multi-column compact
- *   desktop tiles for both Studios and Recent Files.
- * - Lockable Top Heading Bar (`SettingsManager.isSubpageHeaderPinned`) frozen at the top of the screen.
+ * Desktop-First Ultra-Clean Tonal Flat "My Suite" Workspace.
+ * - Zero card outlines; uses pure Material 3 surface container tonal hierarchy.
+ * - Single 48.dp Command Bar (no decorative title icon, icon-only New/Open on narrow windows).
+ * - Balanced 5-tile Studio Dock on desktop (single row) and 2-column grid on mobile.
+ * - Interactive 2-second mouse hover preview over file names (with touch long-press fallback).
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun VibeAreaScreen(
     appState: com.troikoss.continuum_explorer.utils.FileExplorerState? = null,
@@ -73,10 +87,12 @@ fun VibeAreaScreen(
     onMenuClick: () -> Unit = {}
 ) {
     val context = LocalContext.current
+    val hoverController = rememberHoverPreviewController()
 
     var showCreateFileDialog by remember { mutableStateOf(false) }
     var showOpenFilePicker by remember { mutableStateOf(false) }
     var showTargetDirPicker by remember { mutableStateOf(false) }
+    var showMobileSearch by remember { mutableStateOf(false) }
 
     var newFileNameInput by remember { mutableStateOf("notes.md") }
     var targetDirectory by remember {
@@ -89,12 +105,11 @@ fun VibeAreaScreen(
         )
     }
 
-    var isSearchActive by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
+    var activeFilter by remember { mutableStateOf(SuiteRecentFilter.ALL) }
     var isGridView by remember { mutableStateOf(false) }
     val isFullScreen by SettingsManager.isFullScreenTabBarHidden
     val isWideSidebarCollapsed by SettingsManager.isWideSidebarCollapsed
-    val isHeaderPinned by SettingsManager.isSubpageHeaderPinned
 
     LaunchedEffect(Unit) {
         SuiteRecentDatabase.init(context)
@@ -102,13 +117,21 @@ fun VibeAreaScreen(
 
     val activeMiniApps = remember { MiniAppRegistry.activeMiniApps }
 
-    val suiteRecentPairs = remember(SuiteRecentDatabase.records.size, searchQuery) {
+    val filteredRecents = remember(SuiteRecentDatabase.records.size, searchQuery, activeFilter) {
         val allValid = SuiteRecentDatabase.getValidUniversalFiles(context)
-        if (searchQuery.isBlank()) allValid
-        else allValid.filter { (rec, _) ->
-            rec.fileName.contains(searchQuery.trim(), ignoreCase = true) ||
+        allValid.filter { (rec, _) ->
+            val matchesFilter = when (activeFilter) {
+                SuiteRecentFilter.ALL -> true
+                SuiteRecentFilter.DOCS -> rec.editorToolId == "text_editor" || rec.extension in setOf("md", "txt", "org", "adoc")
+                SuiteRecentFilter.CODE -> rec.editorToolId == "code_studio" || rec.extension in setOf("kt", "java", "py", "js", "ts", "html", "css", "json", "xml", "sql", "sh")
+                SuiteRecentFilter.TABLES -> rec.editorToolId == "csv_editor" || rec.extension in setOf("csv", "tsv")
+                SuiteRecentFilter.PHOTOS -> rec.editorToolId == "image_studio" || rec.extension in setOf("jpg", "jpeg", "png", "webp", "bmp")
+            }
+            val matchesQuery = searchQuery.isBlank() ||
+                rec.fileName.contains(searchQuery.trim(), ignoreCase = true) ||
                 rec.extension.contains(searchQuery.trim(), ignoreCase = true) ||
                 rec.editorToolName.contains(searchQuery.trim(), ignoreCase = true)
+            matchesFilter && matchesQuery
         }
     }
 
@@ -116,11 +139,7 @@ fun VibeAreaScreen(
         if (!file.exists() || file.isDirectory) return
         val uFile = file.toUniversal()
         if (!FileOpenPolicyEngine.isEditable(uFile)) {
-            Toast.makeText(
-                context,
-                "\"${file.name}\" is not an editable text, table, or image file.",
-                Toast.LENGTH_SHORT
-            ).show()
+            Toast.makeText(context, "\"${file.name}\" opened in viewer.", Toast.LENGTH_SHORT).show()
             appState?.open(uFile)
             return
         }
@@ -129,16 +148,12 @@ fun VibeAreaScreen(
             file = file,
             activityType = activityType
         )
-        if (appState != null) {
-            appState.openInEdit(uFile)
-        }
+        appState?.openInEdit(uFile)
     }
 
     fun handleMiniAppClick(descriptor: MiniAppRuleDescriptor) {
         if (descriptor.id == "file_converter") {
-            if (appState != null) {
-                appState.openInFileConverter(emptyList())
-            }
+            appState?.openInFileConverter(emptyList())
             return
         }
         if (appState != null) {
@@ -151,7 +166,7 @@ fun VibeAreaScreen(
 
     if (showOpenFilePicker) {
         InAppFilePickerDialog(
-            title = "Select Editable File (Text, Markdown, CSV, Code, Image)",
+            title = "Open File in Suite",
             selectFolders = false,
             initialDirectory = Environment.getExternalStorageDirectory(),
             onDismiss = { showOpenFilePicker = false },
@@ -164,160 +179,71 @@ fun VibeAreaScreen(
 
     if (showTargetDirPicker) {
         InAppFilePickerDialog(
-            title = "Select Folder for New File",
+            title = "Choose Save Folder",
             selectFolders = true,
             initialDirectory = targetDirectory,
             onDismiss = { showTargetDirPicker = false },
             onSelected = { folder ->
                 showTargetDirPicker = false
-                if (folder.isDirectory) {
-                    targetDirectory = folder
-                }
+                if (folder.isDirectory) targetDirectory = folder
             }
         )
     }
 
     if (showCreateFileDialog) {
-        val cleanName = newFileNameInput.trim()
-        val ext = cleanName.substringAfterLast('.', "").lowercase()
-        val assignedEditorLayout = remember(cleanName, ext) {
-            when {
-                cleanName.lowercase().endsWith("todo.txt") ->
-                    "Todo.txt Interactive Task Board + Raw Task Editor"
-                ext in listOf("md", "markdown", "mdown", "mkd") ->
-                    "Markdown Studio (Live KaTeX Math, Prism Code & Mermaid Preview)"
-                ext in listOf("csv", "tsv") ->
-                    "CSV Interactive Spreadsheet Grid + Column Aligner"
-                ext in listOf("org") ->
-                    "Org-Mode Outliner & Document Preview Engine"
-                ext in listOf("adoc", "asciidoc") ->
-                    "AsciiDoc Technical Document Editor & Preview"
-                ext in listOf("kt", "java", "py", "js", "ts", "html", "css", "json", "xml", "sh", "sql", "c", "cpp", "yaml", "yml", "toml") ->
-                    "Code Editor with Syntax Highlighting (${ext.uppercase()})"
-                else ->
-                    "Markor Plain Text & Utility Editor"
-            }
-        }
-
         AlertDialog(
             onDismissRequest = { showCreateFileDialog = false },
-            title = {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Icon(Icons.Default.NoteAdd, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                    Text("Create New File", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
-                }
-            },
+            title = { Text("New File", fontWeight = FontWeight.SemiBold) },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     OutlinedTextField(
                         value = newFileNameInput,
                         onValueChange = { newFileNameInput = it },
-                        label = { Text("File Name") },
-                        placeholder = { Text("notes.md, sheet.csv, script.py") },
+                        label = { Text("File name") },
                         singleLine = true,
-                        shape = RoundedCornerShape(10.dp),
+                        shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth()
                     )
-
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("Quick Format Extensions:", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold)
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState())
-                        ) {
-                            listOf(
-                                ".md" to "Markdown",
-                                ".txt" to "Text",
-                                ".csv" to "CSV Grid",
-                                "todo.txt" to "Todo.txt",
-                                ".json" to "JSON",
-                                ".org" to "Org",
-                                ".adoc" to "AsciiDoc",
-                                ".py" to "Python",
-                                ".kt" to "Kotlin",
-                                ".html" to "HTML"
-                            ).forEach { (presetExt, _) ->
-                                val isTodo = presetExt == "todo.txt"
-                                val isSelected = if (isTodo) {
-                                    cleanName.equals("todo.txt", ignoreCase = true) || cleanName.endsWith(".todo.txt", ignoreCase = true)
-                                } else {
-                                    cleanName.endsWith(presetExt, ignoreCase = true)
-                                }
-                                FilterChip(
-                                    selected = isSelected,
-                                    onClick = {
-                                        if (isTodo) {
-                                            newFileNameInput = "todo.txt"
-                                        } else {
-                                            val base = newFileNameInput.substringBeforeLast('.', newFileNameInput).ifBlank { "untitled" }
-                                            newFileNameInput = "$base$presetExt"
-                                        }
-                                    },
-                                    label = { Text(presetExt, fontSize = 11.sp, fontFamily = FontFamily.Monospace) }
-                                )
-                            }
-                        }
-                    }
-
-                    Surface(
-                        shape = RoundedCornerShape(10.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { showTargetDirPicker = true }
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text("Save in Folder", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        listOf("notes.md", "todo.txt", "data.csv", "index.html", "script.py", "Main.kt").forEach { preset ->
+                            Surface(
+                                onClick = { newFileNameInput = preset },
+                                shape = RoundedCornerShape(50),
+                                color = if (newFileNameInput == preset) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh
+                            ) {
                                 Text(
-                                    text = targetDirectory.absolutePath,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    fontFamily = FontFamily.Monospace,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
+                                    text = preset,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                                 )
-                            }
-                            TextButton(onClick = { showTargetDirPicker = true }) {
-                                Text("Change", style = MaterialTheme.typography.labelSmall)
                             }
                         }
                     }
-
                     Surface(
-                        shape = RoundedCornerShape(10.dp),
-                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f),
+                        onClick = { showTargetDirPicker = true },
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Row(
-                            modifier = Modifier.padding(10.dp),
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Icon(
-                                Icons.Default.AutoAwesome,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(18.dp)
+                            Icon(Icons.Default.Folder, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                            Text(
+                                text = targetDirectory.name,
+                                style = MaterialTheme.typography.bodySmall,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f)
                             )
-                            Column {
-                                Text(
-                                    text = "Assigned Editor Layout",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
-                                )
-                                Text(
-                                    text = assignedEditorLayout,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer
-                                )
-                            }
+                            Text("Change", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
                         }
                     }
                 }
@@ -325,675 +251,607 @@ fun VibeAreaScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        if (cleanName.isEmpty()) {
-                            Toast.makeText(context, "Please enter a file name", Toast.LENGTH_SHORT).show()
-                            return@Button
-                        }
-                        try {
+                        val cleanName = newFileNameInput.trim().ifBlank { "notes.md" }
+                        runCatching {
                             if (!targetDirectory.exists()) targetDirectory.mkdirs()
-                            val newFile = File(targetDirectory, cleanName)
-                            if (!newFile.exists()) {
-                                newFile.createNewFile()
-                                if (ext == "csv") {
-                                    newFile.writeText("Column 1,Column 2,Column 3\nValue 1,Value 2,Value 3\n")
-                                }
-                            }
+                            val outFile = File(targetDirectory, cleanName)
+                            if (!outFile.exists()) outFile.createNewFile()
                             showCreateFileDialog = false
-                            openFileDirectlyInEditor(newFile, SuiteActivityType.CREATED)
-                        } catch (e: Exception) {
-                            Toast.makeText(context, "Failed to create file: ${e.message}", Toast.LENGTH_SHORT).show()
+                            openFileDirectlyInEditor(outFile, SuiteActivityType.CREATED)
+                        }.onFailure {
+                            Toast.makeText(context, "Could not create file: ${it.message}", Toast.LENGTH_SHORT).show()
                         }
                     }
-                ) {
-                    Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Create & Edit Now")
-                }
+                ) { Text("Create") }
             },
             dismissButton = {
-                TextButton(onClick = { showCreateFileDialog = false }) {
-                    Text("Cancel")
-                }
-            },
-            shape = RoundedCornerShape(16.dp)
+                TextButton(onClick = { showCreateFileDialog = false }) { Text("Cancel") }
+            }
         )
     }
-
-    val isSmallScreen = appState?.getScreenSize() == ScreenSize.SMALL
-    val showMenuButton = isSmallScreen || isWideSidebarCollapsed
 
     BoxWithConstraints(
         modifier = modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.surface)
     ) {
-        val containerWidth = maxWidth
-        val isNarrowWindow = containerWidth < 560.dp
-        val isDesktopLayout = containerWidth >= 660.dp
+        val rootWidth = maxWidth
+        val isNarrow = rootWidth < 560.dp
+        val isDesktop = rootWidth >= 720.dp
 
         Column(modifier = Modifier.fillMaxSize()) {
-            // --- LOCKABLE TOP HEADING BAR ---
-            Surface(
-                color = MaterialTheme.colorScheme.surfaceContainer,
-                tonalElevation = if (isHeaderPinned) 2.dp else 0.dp,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(50.dp)
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    if (showMenuButton) {
+            // Strict Single 48.dp Command Bar (zero decorative icon before title)
+            SingleRowCommandBar(
+                navigationContent = {
+                    if (isNarrow || isWideSidebarCollapsed) {
                         IconButton(
-                            onClick = {
-                                if (!isSmallScreen && isWideSidebarCollapsed) {
-                                    SettingsManager.setWideSidebarCollapsed(false)
-                                } else {
-                                    onMenuClick()
-                                }
-                            },
-                            modifier = Modifier.size(36.dp)
+                            onClick = onMenuClick,
+                            modifier = Modifier
+                                .size(36.dp)
+                                .testTag("suite_menu_button")
+                        ) {
+                            Icon(Icons.Default.Menu, contentDescription = "Toggle Sidebar", modifier = Modifier.size(20.dp))
+                        }
+                    }
+                },
+                titleContent = {
+                    Text(
+                        text = "My Suite",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1
+                    )
+                },
+                centerContent = {
+                    if (!isNarrow) {
+                        TonalSearchPill(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            placeholder = "Search suite files",
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .widthIn(max = 360.dp),
+                            testTagName = "suite_search_input"
+                        )
+                    }
+                },
+                actionsContent = {
+                    if (isNarrow) {
+                        IconButton(
+                            onClick = { showMobileSearch = !showMobileSearch },
+                            modifier = Modifier.size(34.dp)
                         ) {
                             Icon(
-                                imageVector = Icons.Default.Menu,
-                                contentDescription = "Show Navigation Sidebar",
-                                tint = MaterialTheme.colorScheme.onSurface
+                                Icons.Default.Search,
+                                contentDescription = "Search",
+                                tint = if (showMobileSearch || searchQuery.isNotEmpty()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(18.dp)
                             )
                         }
-                    }
-
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight(),
-                        contentAlignment = Alignment.CenterStart
-                    ) {
-                        AnimatedContent(
-                            targetState = isSearchActive,
-                            transitionSpec = {
-                                fadeIn(animationSpec = tween(200)) togetherWith fadeOut(animationSpec = tween(200))
-                            },
-                            label = "MySuiteSearchTransition"
-                        ) { searching ->
-                            if (!searching) {
-                                Text(
-                                    text = "My Suite",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.padding(start = 8.dp)
-                                )
-                            } else {
-                                Surface(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(36.dp)
-                                        .padding(horizontal = 4.dp),
-                                    shape = RoundedCornerShape(18.dp),
-                                    color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                                    border = androidx.compose.foundation.BorderStroke(
-                                        1.dp,
-                                        MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)
-                                    )
-                                ) {
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxSize()
-                                            .padding(horizontal = 10.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        BasicTextField(
-                                            value = searchQuery,
-                                            onValueChange = { searchQuery = it },
-                                            singleLine = true,
-                                            textStyle = MaterialTheme.typography.bodyMedium.copy(
-                                                color = MaterialTheme.colorScheme.onSurface,
-                                                fontSize = 14.sp
-                                            ),
-                                            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                                            modifier = Modifier.weight(1f),
-                                            decorationBox = { innerTextField ->
-                                                if (searchQuery.isEmpty()) {
-                                                    Text(
-                                                        text = "Filter recent suite files...",
-                                                        style = MaterialTheme.typography.bodyMedium.copy(
-                                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                                                            fontSize = 13.sp
-                                                        )
-                                                    )
-                                                }
-                                                innerTextField()
-                                            }
-                                        )
-
-                                        if (searchQuery.isNotEmpty()) {
-                                            IconButton(
-                                                onClick = { searchQuery = "" },
-                                                modifier = Modifier.size(20.dp)
-                                            ) {
-                                                Icon(
-                                                    Icons.Default.Close,
-                                                    contentDescription = "Clear",
-                                                    modifier = Modifier.size(14.dp),
-                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // Quick Action: New File & Open (Icon-only in narrow window, labeled button in wide window)
-                    if (isNarrowWindow) {
-                        FilledTonalIconButton(
+                        IconButton(
                             onClick = { showCreateFileDialog = true },
-                            modifier = Modifier.size(34.dp),
-                            shape = RoundedCornerShape(10.dp)
+                            modifier = Modifier
+                                .size(34.dp)
+                                .testTag("suite_new_file_button")
                         ) {
-                            Icon(
-                                Icons.Default.NoteAdd,
-                                contentDescription = "New File",
-                                modifier = Modifier.size(17.dp)
-                            )
+                            Icon(Icons.Default.NoteAdd, contentDescription = "New File", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(19.dp))
                         }
-                        Spacer(modifier = Modifier.width(4.dp))
-                        OutlinedIconButton(
+                        IconButton(
                             onClick = { showOpenFilePicker = true },
-                            modifier = Modifier.size(34.dp),
-                            shape = RoundedCornerShape(10.dp)
+                            modifier = Modifier
+                                .size(34.dp)
+                                .testTag("suite_open_file_button")
                         ) {
-                            Icon(
-                                Icons.Default.FolderOpen,
-                                contentDescription = "Open File",
-                                modifier = Modifier.size(17.dp)
-                            )
+                            Icon(Icons.Default.FolderOpen, contentDescription = "Open File", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(19.dp))
                         }
                     } else {
                         FilledTonalButton(
                             onClick = { showCreateFileDialog = true },
-                            shape = RoundedCornerShape(10.dp),
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                            modifier = Modifier.height(32.dp)
+                            shape = RoundedCornerShape(50),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                            modifier = Modifier
+                                .height(32.dp)
+                                .testTag("suite_new_file_button")
                         ) {
-                            Icon(Icons.Default.NoteAdd, contentDescription = null, modifier = Modifier.size(15.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("New File", style = MaterialTheme.typography.labelMedium)
+                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(15.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("New", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
                         }
-
-                        Spacer(modifier = Modifier.width(6.dp))
-
-                        OutlinedButton(
+                        Surface(
                             onClick = { showOpenFilePicker = true },
-                            shape = RoundedCornerShape(10.dp),
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                            modifier = Modifier.height(32.dp)
+                            shape = RoundedCornerShape(50),
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            modifier = Modifier
+                                .height(32.dp)
+                                .testTag("suite_open_file_button")
                         ) {
-                            Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(15.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Open", style = MaterialTheme.typography.labelMedium)
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(15.dp))
+                                Text("Open", style = MaterialTheme.typography.labelMedium)
+                            }
                         }
                     }
 
-                    // Pin / Lock Heading Bar Toggle
                     IconButton(
-                        onClick = { SettingsManager.toggleSubpageHeaderPinned(context) },
-                        modifier = Modifier.size(36.dp)
+                        onClick = { isGridView = !isGridView },
+                        modifier = Modifier.size(34.dp)
                     ) {
                         Icon(
-                            imageVector = Icons.Default.PushPin,
-                            contentDescription = if (isHeaderPinned) "Header Locked on Top" else "Lock Header on Top",
-                            tint = if (isHeaderPinned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            imageVector = if (isGridView) Icons.Default.ViewList else Icons.Default.GridView,
+                            contentDescription = "Switch View",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(18.dp)
                         )
                     }
 
-                    // Toggle Compact Tiles / Icon Grid View
-                    IconButton(
-                        onClick = { isGridView = !isGridView },
-                        modifier = Modifier.size(36.dp)
-                    ) {
-                        Icon(
-                            imageVector = if (isGridView) Icons.Default.ViewModule else Icons.Default.GridView,
-                            contentDescription = if (isGridView) "Switch to Compact Cards" else "Switch to Icon Grid",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(19.dp)
-                        )
-                    }
-
-                    // Search Toggle Button
-                    IconButton(
-                        onClick = {
-                            isSearchActive = !isSearchActive
-                            if (!isSearchActive) searchQuery = ""
-                        },
-                        modifier = Modifier.size(36.dp)
-                    ) {
-                        Icon(
-                            imageVector = if (isSearchActive) Icons.Default.Close else Icons.Default.Search,
-                            contentDescription = if (isSearchActive) "Close Search" else "Search Recent Suite Files",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(19.dp)
-                        )
-                    }
-
-                    // Fullscreen Toggle Button
                     IconButton(
                         onClick = { SettingsManager.toggleFullScreenTabBar() },
-                        modifier = Modifier.size(36.dp)
+                        modifier = Modifier.size(34.dp)
                     ) {
                         Icon(
                             imageVector = if (isFullScreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
-                            contentDescription = if (isFullScreen) "Exit Full Screen" else "Full Screen",
+                            contentDescription = "Full Screen",
                             tint = if (isFullScreen) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(19.dp)
+                            modifier = Modifier.size(18.dp)
                         )
                     }
                 }
-            }
+            )
 
-            HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
+            // Mobile search input only when toggled on narrow windows
+            if (isNarrow && showMobileSearch) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.surfaceContainerLow)
+                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                ) {
+                    TonalSearchPill(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        placeholder = "Search suite files",
+                        modifier = Modifier.fillMaxWidth(),
+                        testTagName = "suite_search_input"
+                    )
+                }
+            }
 
             LazyColumn(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 12.dp),
-                contentPadding = PaddingValues(vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                    .weight(1f)
+                    .fillMaxWidth(),
+                contentPadding = PaddingValues(
+                    horizontal = if (isDesktop) 24.dp else 14.dp,
+                    vertical = if (isDesktop) 20.dp else 14.dp
+                ),
+                verticalArrangement = Arrangement.spacedBy(20.dp)
             ) {
-                // Section 1: Studios (Multi-Column Grid on Desktop/Tablet, never stretched full-width rows)
-                item {
-                    Text(
-                        text = "STUDIOS",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                }
+                // 1. Balanced Studio Bento Dock (Single 5-column horizontal row on desktop; 2-column grid on mobile)
+                item(key = "studio_dock") {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text(
+                            text = "Studios",
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
 
-                if (isGridView) {
-                    val studioCols = when {
-                        containerWidth >= 960.dp -> 5
-                        isDesktopLayout -> 3
-                        else -> 2
-                    }
-                    val studioRows = activeMiniApps.chunked(studioCols)
-                    items(studioRows) { rowStudios ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            rowStudios.forEach { descriptor ->
-                                OutlinedCard(
-                                    shape = RoundedCornerShape(12.dp),
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .clickable { handleMiniAppClick(descriptor) }
-                                ) {
-                                    Column(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(12.dp),
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                                    ) {
-                                        Surface(
-                                            shape = RoundedCornerShape(10.dp),
-                                            color = descriptor.accentColor.copy(alpha = 0.14f),
-                                            modifier = Modifier.size(40.dp)
-                                        ) {
-                                            Box(contentAlignment = Alignment.Center) {
-                                                Icon(
-                                                    imageVector = descriptor.icon,
-                                                    contentDescription = descriptor.title,
-                                                    tint = descriptor.accentColor,
-                                                    modifier = Modifier.size(22.dp)
-                                                )
-                                            }
-                                        }
-                                        Text(
-                                            text = descriptor.title,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            fontWeight = FontWeight.Bold,
-                                            textAlign = TextAlign.Center,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                        Text(
-                                            text = descriptor.badge,
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.primary,
-                                            maxLines = 1
-                                        )
-                                    }
+                        if (isDesktop) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                activeMiniApps.forEach { app ->
+                                    TonalStudioTile(
+                                        descriptor = app,
+                                        onClick = { handleMiniAppClick(app) },
+                                        modifier = Modifier.weight(1f)
+                                    )
                                 }
                             }
-                            repeat(studioCols - rowStudios.size) {
-                                Spacer(modifier = Modifier.weight(1f))
-                            }
-                        }
-                    }
-                } else {
-                    // Desktop Compact Multi-Column Studio Cards (3 columns on large desktop, 2 on medium desktop, 1 on mobile)
-                    val studioCols = when {
-                        containerWidth >= 980.dp -> 3
-                        isDesktopLayout -> 2
-                        else -> 1
-                    }
-                    val studioRows = activeMiniApps.chunked(studioCols)
-                    items(studioRows) { rowStudios ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            rowStudios.forEach { descriptor ->
-                                OutlinedCard(
-                                    shape = RoundedCornerShape(12.dp),
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .clickable { handleMiniAppClick(descriptor) }
-                                ) {
+                        } else {
+                            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                activeMiniApps.chunked(2).forEach { rowApps ->
                                     Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(horizontal = 12.dp, vertical = 10.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                                     ) {
-                                        Surface(
-                                            shape = RoundedCornerShape(10.dp),
-                                            color = descriptor.accentColor.copy(alpha = 0.14f),
-                                            modifier = Modifier.size(38.dp)
-                                        ) {
-                                            Box(contentAlignment = Alignment.Center) {
-                                                Icon(
-                                                    imageVector = descriptor.icon,
-                                                    contentDescription = descriptor.title,
-                                                    tint = descriptor.accentColor,
-                                                    modifier = Modifier.size(20.dp)
-                                                )
-                                            }
-                                        }
-
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(
-                                                text = descriptor.title,
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                fontWeight = FontWeight.SemiBold,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                            Text(
-                                                text = descriptor.badge,
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = descriptor.accentColor,
-                                                maxLines = 1
+                                        rowApps.forEach { app ->
+                                            TonalStudioTile(
+                                                descriptor = app,
+                                                onClick = { handleMiniAppClick(app) },
+                                                modifier = Modifier.weight(1f)
                                             )
                                         }
-
-                                        Icon(
-                                            Icons.Default.ChevronRight,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            modifier = Modifier.size(18.dp)
-                                        )
+                                        if (rowApps.size == 1) {
+                                            Spacer(modifier = Modifier.weight(1f))
+                                        }
                                     }
                                 }
-                            }
-                            repeat(studioCols - rowStudios.size) {
-                                Spacer(modifier = Modifier.weight(1f))
                             }
                         }
                     }
                 }
 
-                // Section 2: Recent Files in My Suite
-                item {
-                    Spacer(modifier = Modifier.height(4.dp))
+                // 2. Recent Workspace Section Header + Filter Pills
+                item(key = "recent_header") {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "RECENT FILES",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary
+                            text = "Recent",
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            modifier = Modifier.horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Text(
-                                text = "${suiteRecentPairs.size} files",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            if (suiteRecentPairs.isNotEmpty()) {
-                                TextButton(
-                                    onClick = { SuiteRecentDatabase.clearAll(context) },
-                                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
-                                    modifier = Modifier.height(24.dp)
+                            SuiteRecentFilter.entries.forEach { filter ->
+                                val selected = activeFilter == filter
+                                Surface(
+                                    onClick = { activeFilter = filter },
+                                    shape = RoundedCornerShape(50),
+                                    color = if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
+                                    contentColor = if (selected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
                                 ) {
-                                    Text("Clear", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+                                    Text(
+                                        text = filter.label,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                                    )
                                 }
                             }
                         }
                     }
                 }
 
-                if (suiteRecentPairs.isEmpty()) {
-                    item {
+                // 3. Recent Files Table / Grid with 2-second Hover Preview
+                if (filteredRecents.isEmpty()) {
+                    item(key = "empty_recents") {
                         Surface(
-                            shape = RoundedCornerShape(12.dp),
+                            shape = RoundedCornerShape(18.dp),
                             color = MaterialTheme.colorScheme.surfaceContainerLow,
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Column(
-                                modifier = Modifier.padding(20.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 40.dp, horizontal = 20.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 Icon(
-                                    Icons.Default.EditNote,
+                                    Icons.Default.History,
                                     contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(26.dp)
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
+                                    modifier = Modifier.size(36.dp)
                                 )
                                 Text(
-                                    text = if (searchQuery.isNotBlank()) "No matches for \"$searchQuery\"" else "No recent files yet",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    textAlign = TextAlign.Center
+                                    text = if (searchQuery.isNotBlank()) "No matching files" else "No recent files",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                         }
                     }
                 } else if (isGridView) {
-                    val columns = when {
-                        containerWidth >= 980.dp -> 5
-                        isDesktopLayout -> 4
+                    val cols = when {
+                        rootWidth >= 1040.dp -> 4
+                        rootWidth >= 720.dp -> 3
                         else -> 2
                     }
-                    val chunkedPairs = suiteRecentPairs.chunked(columns)
-                    items(chunkedPairs) { rowItems ->
+                    val chunked = filteredRecents.chunked(cols)
+                    items(chunked.size, key = { "grid_row_$it" }) { rowIdx ->
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
-                            rowItems.forEach { (record, uFile) ->
-                                val relativeTime = remember(record.timestamp) {
-                                    DateUtils.getRelativeTimeSpanString(
-                                        record.timestamp,
-                                        System.currentTimeMillis(),
-                                        DateUtils.MINUTE_IN_MILLIS
-                                    ).toString()
-                                }
-                                OutlinedCard(
-                                    shape = RoundedCornerShape(12.dp),
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .clickable {
-                                            val f = File(record.absolutePath)
-                                            if (f.exists()) {
-                                                openFileDirectlyInEditor(f, SuiteActivityType.EDITED)
-                                            }
-                                        }
-                                ) {
-                                    Column(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(10.dp),
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        verticalArrangement = Arrangement.spacedBy(5.dp)
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(48.dp)
-                                                .clip(RoundedCornerShape(10.dp))
-                                                .background(MaterialTheme.colorScheme.surfaceVariant),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            IconHelper.FileThumbnail(
-                                                file = uFile,
-                                                iconSize = 40.dp,
-                                                modifier = Modifier.size(40.dp)
-                                            )
-                                        }
-                                        Text(
-                                            text = record.fileName,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            fontWeight = FontWeight.Bold,
-                                            textAlign = TextAlign.Center,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                        Text(
-                                            text = record.editorToolName,
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.primary,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                        Text(
-                                            text = "${Formatter.formatFileSize(context, uFile.length)} • $relativeTime",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                    }
-                                }
+                            chunked[rowIdx].forEach { (record, uFile) ->
+                                SuiteRecentGridTile(
+                                    record = record,
+                                    uFile = uFile,
+                                    hoverController = hoverController,
+                                    onClick = {
+                                        hoverController.dismiss()
+                                        uFile.fileRef?.let { openFileDirectlyInEditor(it) }
+                                    },
+                                    onRemove = { SuiteRecentDatabase.removeRecord(context, record.absolutePath) },
+                                    modifier = Modifier.weight(1f)
+                                )
                             }
-                            repeat(columns - rowItems.size) {
+                            repeat(cols - chunked[rowIdx].size) {
                                 Spacer(modifier = Modifier.weight(1f))
                             }
                         }
                     }
                 } else {
-                    // Multi-column compact tiles on Desktop/DeX (no stretched full-width rows!), 1 column on mobile
-                    val recentCols = when {
-                        containerWidth >= 1020.dp -> 3
-                        isDesktopLayout -> 2
-                        else -> 1
-                    }
-                    val chunkedPairs = suiteRecentPairs.chunked(recentCols)
-                    items(chunkedPairs) { rowItems ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            rowItems.forEach { (record, uFile) ->
-                                val relativeTime = remember(record.timestamp) {
-                                    DateUtils.getRelativeTimeSpanString(
-                                        record.timestamp,
-                                        System.currentTimeMillis(),
-                                        DateUtils.MINUTE_IN_MILLIS
-                                    ).toString()
-                                }
-                                val actionBadge = if (record.activityType == SuiteActivityType.CREATED) "Created" else "Edited"
-
-                                OutlinedCard(
-                                    shape = RoundedCornerShape(10.dp),
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .clickable {
-                                            val f = File(record.absolutePath)
-                                            if (f.exists()) {
-                                                openFileDirectlyInEditor(f, SuiteActivityType.EDITED)
-                                            }
-                                        }
-                                ) {
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(horizontal = 10.dp, vertical = 8.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(34.dp)
-                                                .clip(RoundedCornerShape(8.dp))
-                                                .background(MaterialTheme.colorScheme.surfaceVariant),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            IconHelper.FileThumbnail(
-                                                file = uFile,
-                                                iconSize = 28.dp,
-                                                modifier = Modifier.size(28.dp)
-                                            )
-                                        }
-
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(
-                                                text = record.fileName,
-                                                style = MaterialTheme.typography.bodySmall,
-                                                fontWeight = FontWeight.SemiBold,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                            Text(
-                                                text = "$actionBadge • ${Formatter.formatFileSize(context, uFile.length)} • $relativeTime",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                        }
-
-                                        IconButton(
-                                            onClick = {
-                                                val f = File(record.absolutePath)
-                                                if (f.exists()) {
-                                                    openFileDirectlyInEditor(f, SuiteActivityType.EDITED)
-                                                }
-                                            },
-                                            modifier = Modifier.size(28.dp)
-                                        ) {
-                                            Icon(
-                                                Icons.Default.Edit,
-                                                contentDescription = "Edit",
-                                                tint = MaterialTheme.colorScheme.primary,
-                                                modifier = Modifier.size(16.dp)
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                            repeat(recentCols - rowItems.size) {
-                                Spacer(modifier = Modifier.weight(1f))
+                    // Clean Desktop Table Header
+                    if (isDesktop) {
+                        item(key = "table_header") {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 14.dp, vertical = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Name", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+                                Text("Studio", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(124.dp))
+                                Text("Modified", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(110.dp))
+                                Text("Size", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(74.dp))
+                                Spacer(modifier = Modifier.width(36.dp))
                             }
                         }
                     }
+                    items(filteredRecents, key = { it.first.absolutePath }) { (record, uFile) ->
+                        SuiteRecentTableRow(
+                            record = record,
+                            uFile = uFile,
+                            isDesktop = isDesktop,
+                            hoverController = hoverController,
+                            onClick = {
+                                hoverController.dismiss()
+                                uFile.fileRef?.let { openFileDirectlyInEditor(it) }
+                            },
+                            onRemove = { SuiteRecentDatabase.removeRecord(context, record.absolutePath) }
+                        )
+                    }
                 }
+            }
+        }
+
+        // Floating 2-second hover preview host over hovered file names
+        HoverPreviewPopupHost(controller = hoverController)
+    }
+}
+
+@Composable
+private fun TonalStudioTile(
+    descriptor: MiniAppRuleDescriptor,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        tonalElevation = 0.dp,
+        modifier = modifier
+            .height(92.dp)
+            .testTag("studio_tile_${descriptor.id}")
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(14.dp),
+            verticalArrangement = Arrangement.SpaceBetween
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(RoundedCornerShape(11.dp))
+                    .background(descriptor.accentColor.copy(alpha = 0.14f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = descriptor.icon,
+                    contentDescription = descriptor.title,
+                    tint = descriptor.accentColor,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+            Text(
+                text = shortStudioLabel(descriptor),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+private fun shortStudioLabel(descriptor: MiniAppRuleDescriptor): String = when (descriptor.id) {
+    "text_editor" -> "Markdown"
+    "code_studio" -> "Code"
+    "csv_editor" -> "Tables"
+    "image_studio" -> "Photo"
+    "file_converter" -> "Converter"
+    else -> descriptor.title
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun SuiteRecentTableRow(
+    record: SuiteRecentRecord,
+    uFile: UniversalFile,
+    isDesktop: Boolean,
+    hoverController: HoverPreviewController,
+    onClick: () -> Unit,
+    onRemove: () -> Unit
+) {
+    val context = LocalContext.current
+    var rowCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    val sizeText = remember(uFile.length) { Formatter.formatFileSize(context, uFile.length) }
+    val timeText = remember(record.timestamp) {
+        DateUtils.getRelativeTimeSpanString(record.timestamp, System.currentTimeMillis(), DateUtils.MINUTE_IN_MILLIS).toString()
+    }
+
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        tonalElevation = 0.dp,
+        modifier = Modifier
+            .fillMaxWidth()
+            .onGloballyPositioned { rowCoords = it }
+            .hoverPreviewTarget(uFile, hoverController)
+            .clip(RoundedCornerShape(14.dp))
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = {
+                    val pos = rowCoords?.positionInWindow()
+                    hoverController.showImmediately(
+                        uFile,
+                        IntOffset((pos?.x ?: 24f).roundToInt(), (pos?.y ?: 120f).roundToInt())
+                    )
+                }
+            )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = IconHelper.getIconForItem(uFile),
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(20.dp)
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            Text(
+                text = record.fileName,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
+            )
+            if (isDesktop) {
+                Text(
+                    text = record.editorToolName.substringBefore(" "),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    modifier = Modifier.width(124.dp)
+                )
+                Text(
+                    text = timeText,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    modifier = Modifier.width(110.dp)
+                )
+                Text(
+                    text = sizeText,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    modifier = Modifier.width(74.dp)
+                )
+            } else {
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = sizeText,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            IconButton(
+                onClick = onRemove,
+                modifier = Modifier.size(30.dp)
+            ) {
+                Icon(
+                    Icons.Default.Close,
+                    contentDescription = "Remove",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
+                    modifier = Modifier.size(15.dp)
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun SuiteRecentGridTile(
+    record: SuiteRecentRecord,
+    uFile: UniversalFile,
+    hoverController: HoverPreviewController,
+    onClick: () -> Unit,
+    onRemove: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    var tileCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    val sizeText = remember(uFile.length) { Formatter.formatFileSize(context, uFile.length) }
+
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        tonalElevation = 0.dp,
+        modifier = modifier
+            .height(104.dp)
+            .onGloballyPositioned { tileCoords = it }
+            .hoverPreviewTarget(uFile, hoverController)
+            .clip(RoundedCornerShape(16.dp))
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = {
+                    val pos = tileCoords?.positionInWindow()
+                    hoverController.showImmediately(
+                        uFile,
+                        IntOffset((pos?.x ?: 24f).roundToInt(), (pos?.y ?: 120f).roundToInt())
+                    )
+                }
+            )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(12.dp),
+            verticalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = IconHelper.getIconForItem(uFile),
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(22.dp)
+                )
+                IconButton(onClick = onRemove, modifier = Modifier.size(22.dp)) {
+                    Icon(
+                        Icons.Default.Close,
+                        contentDescription = "Remove",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                        modifier = Modifier.size(14.dp)
+                    )
+                }
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    text = record.fileName,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = "${record.extension.uppercase()} • $sizeText",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1
+                )
             }
         }
     }

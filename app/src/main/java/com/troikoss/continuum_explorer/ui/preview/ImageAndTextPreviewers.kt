@@ -20,6 +20,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -34,6 +35,8 @@ import androidx.compose.ui.unit.sp
 import coil.compose.SubcomposeAsyncImage
 import coil.request.ImageRequest
 import com.troikoss.continuum_explorer.model.UniversalFile
+import com.troikoss.continuum_explorer.ui.components.suite.TonalSearchPill
+import com.troikoss.continuum_explorer.ui.components.suite.TonalVerticalPaneDivider
 import com.troikoss.continuum_explorer.ui.editor.text.DocumentPreviewEngine
 import com.troikoss.continuum_explorer.ui.editor.text.FormatRegistry
 import com.troikoss.continuum_explorer.ui.editor.text.SyntaxHighlighter
@@ -110,7 +113,7 @@ fun ImageFullPageView(file: UniversalFile) {
             shape = RoundedCornerShape(24.dp),
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(bottom = 20.dp)
+                .padding(bottom = 18.dp)
         ) {
             Row(
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
@@ -162,10 +165,12 @@ fun ImageFullPageView(file: UniversalFile) {
 }
 
 /**
- * Interactive HTML / XHTML Web Previewer with Rendered WebView, Split View, and Source View,
- * plus Desktop Viewport toggle, Dark/Light canvas toggle, and Reload action.
+ * Interactive HTML / XHTML Web Previewer with zero stacked top bar.
+ * Mode switcher (Web / Split / Source), Desktop Viewport toggle, Dark canvas toggle,
+ * and Reload sit cleanly in a borderless tonal bottom bar.
  */
 @android.annotation.SuppressLint("SetJavaScriptEnabled")
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HtmlFullPagePreview(
     rawHtml: String,
@@ -174,7 +179,7 @@ fun HtmlFullPagePreview(
     onEditInCodeStudio: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
-    var viewMode by remember { mutableIntStateOf(0) } // 0 = Rendered Web, 1 = Split View, 2 = Source Code
+    var viewMode by remember { mutableIntStateOf(0) } // 0 = Web, 1 = Split, 2 = Source
     var desktopMode by remember { mutableStateOf(false) }
     var darkWebCanvas by remember { mutableStateOf(false) }
     var reloadKey by remember { mutableIntStateOf(0) }
@@ -182,206 +187,189 @@ fun HtmlFullPagePreview(
         baseFile?.parentFile?.let { "file://${it.absolutePath}/" } ?: "file:///android_asset/"
     }
 
+    val effectiveHtml = remember(rawHtml, darkWebCanvas) {
+        if (!darkWebCanvas) rawHtml
+        else {
+            val darkStyle = "<style>html,body{background:#121212 !important;color:#e2e8f0 !important;}a{color:#60a5fa !important;}</style>"
+            if (rawHtml.contains("</head>", ignoreCase = true)) {
+                rawHtml.replaceFirst(Regex("(?i)</head>"), "$darkStyle</head>")
+            } else {
+                "$darkStyle$rawHtml"
+            }
+        }
+    }
+
+    @Composable
+    fun RenderHtmlWebView(modifier: Modifier = Modifier) {
+        key(reloadKey, desktopMode, darkWebCanvas) {
+            androidx.compose.ui.viewinterop.AndroidView(
+                modifier = modifier.fillMaxSize(),
+                factory = { ctx ->
+                    android.webkit.WebView(ctx).apply {
+                        settings.javaScriptEnabled = true
+                        settings.domStorageEnabled = true
+                        settings.allowFileAccess = true
+                        settings.allowContentAccess = true
+                        settings.builtInZoomControls = true
+                        settings.displayZoomControls = false
+                        settings.useWideViewPort = desktopMode
+                        settings.loadWithOverviewMode = desktopMode
+                        webViewClient = android.webkit.WebViewClient()
+                        loadDataWithBaseURL(baseUrl, effectiveHtml, "text/html", "UTF-8", null)
+                    }
+                },
+                update = { webView ->
+                    webView.settings.useWideViewPort = desktopMode
+                    webView.settings.loadWithOverviewMode = desktopMode
+                    webView.loadDataWithBaseURL(baseUrl, effectiveHtml, "text/html", "UTF-8", null)
+                }
+            )
+        }
+    }
+
+    @Composable
+    fun RenderSourceCodePane(modifier: Modifier = Modifier) {
+        val highlighted = remember(rawHtml, fileName) {
+            SyntaxHighlighter.highlightText(rawHtml, FormatRegistry.detectFormat(fileName))
+        }
+        SelectionContainer {
+            Column(
+                modifier = modifier
+                    .fillMaxSize()
+                    .background(Color(0xFF1E1E1E))
+                    .verticalScroll(rememberScrollState())
+                    .padding(16.dp)
+            ) {
+                Text(
+                    text = highlighted,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 13.sp,
+                    lineHeight = 20.sp,
+                    color = Color(0xFFD4D4D4)
+                )
+            }
+        }
+    }
+
     Column(
         modifier = modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.surface)
     ) {
-        // HTML Preview Control Bar
-        Surface(
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-            tonalElevation = 1.dp,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Surface(
-                    shape = RoundedCornerShape(6.dp),
-                    color = MaterialTheme.colorScheme.primaryContainer
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.Html,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Text(
-                            text = "HTML5 PREVIEW",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer
-                        )
-                    }
-                }
-
-                FilterChip(
-                    selected = viewMode == 0,
-                    onClick = { viewMode = 0 },
-                    label = { Text("Rendered Web", style = MaterialTheme.typography.labelSmall) },
-                    leadingIcon = { Icon(Icons.Default.Web, contentDescription = null, modifier = Modifier.size(14.dp)) }
-                )
-                FilterChip(
-                    selected = viewMode == 1,
-                    onClick = { viewMode = 1 },
-                    label = { Text("Split View", style = MaterialTheme.typography.labelSmall) },
-                    leadingIcon = { Icon(Icons.Default.VerticalSplit, contentDescription = null, modifier = Modifier.size(14.dp)) }
-                )
-                FilterChip(
-                    selected = viewMode == 2,
-                    onClick = { viewMode = 2 },
-                    label = { Text("Source Code", style = MaterialTheme.typography.labelSmall) },
-                    leadingIcon = { Icon(Icons.Default.Code, contentDescription = null, modifier = Modifier.size(14.dp)) }
-                )
-
-                FilterChip(
-                    selected = desktopMode,
-                    onClick = {
-                        desktopMode = !desktopMode
-                        reloadKey++
-                    },
-                    label = { Text(if (desktopMode) "Desktop 1280px" else "Mobile Fit", style = MaterialTheme.typography.labelSmall) },
-                    leadingIcon = {
-                        Icon(
-                            if (desktopMode) Icons.Default.DesktopWindows else Icons.Default.Smartphone,
-                            contentDescription = null,
-                            modifier = Modifier.size(14.dp)
-                        )
-                    }
-                )
-
-                IconButton(
-                    onClick = {
-                        darkWebCanvas = !darkWebCanvas
-                        reloadKey++
-                    },
-                    modifier = Modifier.size(32.dp)
-                ) {
-                    Icon(
-                        if (darkWebCanvas) Icons.Default.LightMode else Icons.Default.DarkMode,
-                        contentDescription = "Toggle Web Theme",
-                        modifier = Modifier.size(17.dp)
-                    )
-                }
-
-                IconButton(
-                    onClick = { reloadKey++ },
-                    modifier = Modifier.size(32.dp)
-                ) {
-                    Icon(Icons.Default.Refresh, contentDescription = "Reload HTML", modifier = Modifier.size(17.dp))
-                }
-
-                if (onEditInCodeStudio != null) {
-                    FilledTonalButton(
-                        onClick = onEditInCodeStudio,
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                        modifier = Modifier.height(32.dp)
-                    ) {
-                        Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Edit in Code Studio", style = MaterialTheme.typography.labelMedium)
-                    }
-                }
-            }
-        }
-
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-
-        val effectiveHtml = remember(rawHtml, darkWebCanvas) {
-            if (!darkWebCanvas) rawHtml
-            else {
-                val darkStyle = "<style>html,body{background:#121212 !important;color:#e2e8f0 !important;}a{color:#60a5fa !important;}</style>"
-                if (rawHtml.contains("</head>", ignoreCase = true)) {
-                    rawHtml.replaceFirst(Regex("(?i)</head>"), "$darkStyle</head>")
-                } else {
-                    "$darkStyle$rawHtml"
-                }
-            }
-        }
-
-        @Composable
-        fun RenderHtmlWebView(modifier: Modifier = Modifier) {
-            key(reloadKey, desktopMode, darkWebCanvas) {
-                androidx.compose.ui.viewinterop.AndroidView(
-                    modifier = modifier.fillMaxSize(),
-                    factory = { ctx ->
-                        android.webkit.WebView(ctx).apply {
-                            settings.javaScriptEnabled = true
-                            settings.domStorageEnabled = true
-                            settings.allowFileAccess = true
-                            settings.allowContentAccess = true
-                            settings.builtInZoomControls = true
-                            settings.displayZoomControls = false
-                            settings.useWideViewPort = desktopMode
-                            settings.loadWithOverviewMode = desktopMode
-                            webViewClient = android.webkit.WebViewClient()
-                            loadDataWithBaseURL(baseUrl, effectiveHtml, "text/html", "UTF-8", null)
-                        }
-                    },
-                    update = { webView ->
-                        webView.settings.useWideViewPort = desktopMode
-                        webView.settings.loadWithOverviewMode = desktopMode
-                        webView.loadDataWithBaseURL(baseUrl, effectiveHtml, "text/html", "UTF-8", null)
-                    }
-                )
-            }
-        }
-
-        @Composable
-        fun RenderSourceCodePane(modifier: Modifier = Modifier) {
-            val highlighted = remember(rawHtml, fileName) {
-                SyntaxHighlighter.highlightText(rawHtml, FormatRegistry.detectFormat(fileName))
-            }
-            SelectionContainer {
-                Column(
-                    modifier = modifier
-                        .fillMaxSize()
-                        .background(Color(0xFF1E1E1E))
-                        .verticalScroll(rememberScrollState())
-                        .padding(16.dp)
-                ) {
-                    Text(
-                        text = highlighted,
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 13.sp,
-                        lineHeight = 20.sp,
-                        color = Color(0xFFD4D4D4)
-                    )
-                }
-            }
-        }
-
+        // Full-bleed HTML viewport directly beneath the single main top bar
         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
             when (viewMode) {
                 0 -> RenderHtmlWebView(Modifier.fillMaxSize())
                 1 -> {
                     Row(modifier = Modifier.fillMaxSize()) {
                         RenderSourceCodePane(Modifier.weight(1f).fillMaxHeight())
-                        VerticalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outlineVariant)
+                        TonalVerticalPaneDivider()
                         RenderHtmlWebView(Modifier.weight(1f).fillMaxHeight())
                     }
                 }
                 else -> RenderSourceCodePane(Modifier.fillMaxSize())
             }
         }
+
+        // Sleek Borderless Tonal Bottom Control Strip (zero second top row!)
+        HorizontalDivider(
+            thickness = 0.5.dp,
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)
+        )
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            tonalElevation = 0.dp,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(42.dp)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                val modes = listOf("Web", "Split", "Source")
+                SingleChoiceSegmentedButtonRow(modifier = Modifier.height(30.dp)) {
+                    modes.forEachIndexed { idx, label ->
+                        SegmentedButton(
+                            selected = viewMode == idx,
+                            onClick = { viewMode = idx },
+                            shape = SegmentedButtonDefaults.itemShape(index = idx, count = modes.size),
+                            icon = {},
+                            colors = SegmentedButtonDefaults.colors(
+                                activeContainerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                activeContentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                                inactiveContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                inactiveContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                activeBorderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
+                                inactiveBorderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)
+                            )
+                        ) {
+                            Text(label, style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                }
+
+                Surface(
+                    onClick = {
+                        desktopMode = !desktopMode
+                        reloadKey++
+                    },
+                    shape = RoundedCornerShape(50),
+                    color = if (desktopMode) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+                    modifier = Modifier.height(30.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        Icon(
+                            if (desktopMode) Icons.Default.DesktopWindows else Icons.Default.Smartphone,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Text(
+                            text = if (desktopMode) "Desktop" else "Fit",
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                    }
+                }
+
+                IconButton(
+                    onClick = {
+                        darkWebCanvas = !darkWebCanvas
+                        reloadKey++
+                    },
+                    modifier = Modifier.size(30.dp)
+                ) {
+                    Icon(
+                        if (darkWebCanvas) Icons.Default.LightMode else Icons.Default.DarkMode,
+                        contentDescription = "Web Theme",
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+
+                IconButton(
+                    onClick = { reloadKey++ },
+                    modifier = Modifier.size(30.dp)
+                ) {
+                    Icon(Icons.Default.Refresh, contentDescription = "Reload", modifier = Modifier.size(16.dp))
+                }
+            }
+        }
     }
 }
 
 /**
- * Full-page Read-Only Document, HTML & Code Viewer with Markor WebView Rendering
- * for Markdown/Org/AsciiDoc/CSV, Interactive HTML5 WebView Preview for .html/.htm/.xhtml,
- * Interactive Task View for Todo.txt, and Syntax-Highlighted Code View.
+ * Full-page Read-Only Document, HTML & Code Viewer.
+ * Zero stacked top header or duplicate Edit button — renders content full-bleed
+ * with a clean floating bottom-right Rendered/Raw pill when rich preview is supported.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TextFullPageView(
     file: UniversalFile,
@@ -423,130 +411,99 @@ fun TextFullPageView(
             rawHtml = textContent ?: "",
             baseFile = file.fileRef,
             fileName = file.name,
-            onEditInCodeStudio = if (appState != null) {
-                {
-                    appState.viewingFile = file
-                    appState.openInEditMode = true
-                }
-            } else null,
+            onEditInCodeStudio = null,
             modifier = Modifier.fillMaxSize()
         )
         return
     }
 
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.surface)
     ) {
-        // Quick Action Bar for switching Rendered vs Raw Source or launching Markor Editor
-        Surface(
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-            tonalElevation = 1.dp,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Surface(
-                        shape = RoundedCornerShape(6.dp),
-                        color = MaterialTheme.colorScheme.secondaryContainer
+        when {
+            isLoading -> {
+                CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+            }
+            !showRawSource && formatType == TextFormatType.CSV -> {
+                CsvInteractiveTablePreview(
+                    rawText = textContent ?: "",
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+            !showRawSource && formatType == TextFormatType.TODO_TXT -> {
+                TodoTxtInteractiveView(
+                    rawText = textContent ?: "",
+                    onTextChange = {},
+                    readOnly = true,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+            !showRawSource && supportsRichPreview -> {
+                DocumentPreviewEngine(
+                    rawText = textContent ?: "",
+                    formatType = formatType,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+            else -> {
+                val highlighted = remember(textContent, formatType) {
+                    SyntaxHighlighter.highlightText(textContent ?: "", formatType)
+                }
+                SelectionContainer {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .verticalScroll(rememberScrollState())
+                            .padding(horizontal = 20.dp, vertical = 16.dp)
                     ) {
                         Text(
-                            text = formatType.name.replace('_', ' '),
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSecondaryContainer,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            text = highlighted,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 13.sp,
+                            lineHeight = 20.sp,
+                            color = MaterialTheme.colorScheme.onSurface
                         )
-                    }
-                    if (supportsRichPreview) {
-                        FilterChip(
-                            selected = !showRawSource,
-                            onClick = { showRawSource = false },
-                            label = { Text("Rendered View", style = MaterialTheme.typography.labelSmall) }
-                        )
-                        FilterChip(
-                            selected = showRawSource,
-                            onClick = { showRawSource = true },
-                            label = { Text("Raw Source", style = MaterialTheme.typography.labelSmall) }
-                        )
-                    }
-                }
-
-                if (appState != null) {
-                    val studioButtonLabel = when {
-                        formatType == TextFormatType.CSV || ext in listOf("csv", "tsv") -> "Edit in CSV Studio"
-                        ext in listOf("kt", "java", "py", "js", "ts", "html", "htm", "xhtml", "css", "json", "xml", "yaml", "yml", "sh", "sql", "c", "cpp") -> "Edit in Code Studio"
-                        else -> "Edit in Markor"
-                    }
-                    FilledTonalButton(
-                        onClick = {
-                            appState.viewingFile = file
-                            appState.openInEditMode = true
-                        },
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                        modifier = Modifier.height(32.dp)
-                    ) {
-                        Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(15.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(studioButtonLabel, style = MaterialTheme.typography.labelMedium)
                     }
                 }
             }
         }
 
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-
-        Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-            when {
-                isLoading -> {
-                    CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
-                }
-                !showRawSource && formatType == TextFormatType.CSV -> {
-                    CsvInteractiveTablePreview(
-                        rawText = textContent ?: "",
-                        modifier = Modifier.fillMaxSize()
-                    )
-                }
-                !showRawSource && formatType == TextFormatType.TODO_TXT -> {
-                    TodoTxtInteractiveView(
-                        rawText = textContent ?: "",
-                        onTextChange = {},
-                        readOnly = true,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                }
-                !showRawSource && supportsRichPreview -> {
-                    DocumentPreviewEngine(
-                        rawText = textContent ?: "",
-                        formatType = formatType,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                }
-                else -> {
-                    val highlighted = remember(textContent, formatType) {
-                        SyntaxHighlighter.highlightText(textContent ?: "", formatType)
-                    }
-                    SelectionContainer {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .verticalScroll(rememberScrollState())
-                                .padding(16.dp)
+        // Compact Floating Rendered | Raw switcher pill (bottom-right, never stacks a top row)
+        if (!isLoading && supportsRichPreview && !isHtmlFile) {
+            Surface(
+                shape = RoundedCornerShape(50),
+                color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(end = 14.dp, bottom = if (formatType == TextFormatType.CSV && !showRawSource) 54.dp else 14.dp)
+                    .shadow(6.dp, RoundedCornerShape(50))
+            ) {
+                Row(
+                    modifier = Modifier.padding(3.dp),
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    listOf(false to "Rendered", true to "Raw").forEach { (raw, label) ->
+                        val active = showRawSource == raw
+                        Surface(
+                            onClick = { showRawSource = raw },
+                            shape = RoundedCornerShape(50),
+                            color = if (active) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent,
+                            contentColor = if (active) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.height(28.dp)
                         ) {
-                            Text(
-                                text = highlighted,
-                                fontFamily = FontFamily.Monospace,
-                                fontSize = 13.sp,
-                                lineHeight = 20.sp,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier.padding(horizontal = 12.dp)
+                            ) {
+                                Text(
+                                    text = label,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium
+                                )
+                            }
                         }
                     }
                 }
@@ -556,8 +513,8 @@ fun TextFullPageView(
 }
 
 /**
- * Interactive formatted Spreadsheet Table Preview for .csv and .tsv files
- * with sticky header row, row numbers, alternating row striping, and row search filter.
+ * Ultra-Clean Tonal Flat Spreadsheet Table Preview for .csv and .tsv files.
+ * Zero stacked top filter bar — filter pill & row stats live neatly in a slim 42.dp bottom bar.
  */
 @Composable
 fun CsvInteractiveTablePreview(
@@ -597,68 +554,19 @@ fun CsvInteractiveTablePreview(
                 val vb = b.getOrNull(sCol).orEmpty()
                 val na = va.toDoubleOrNull()
                 val nb = vb.toDoubleOrNull()
-                if (na != null && nb != null) {
-                    na.compareTo(nb)
-                } else {
-                    va.compareTo(vb, ignoreCase = true)
-                }
+                if (na != null && nb != null) na.compareTo(nb)
+                else va.compareTo(vb, ignoreCase = true)
             }
             if (sortAscending) sorted else sorted.reversed()
         }
     }
     val maxCols = remember(allRows) { (allRows.maxOfOrNull { it.size } ?: 1).coerceAtLeast(1) }
 
-    Column(modifier = modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
-        // Table Filter & Stats Strip
-        Surface(
-            color = MaterialTheme.colorScheme.surfaceContainer,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        text = "${dataRows.size} rows × $maxCols columns",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                    if (sortColumnIndex != null) {
-                        TextButton(
-                            onClick = { sortColumnIndex = null },
-                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
-                            modifier = Modifier.height(26.dp)
-                        ) {
-                            Text("Reset Sort", style = MaterialTheme.typography.labelSmall)
-                        }
-                    }
-                }
-
-                OutlinedTextField(
-                    value = filterQuery,
-                    onValueChange = { filterQuery = it },
-                    placeholder = { Text("Filter rows...", style = MaterialTheme.typography.labelSmall) },
-                    singleLine = true,
-                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(15.dp)) },
-                    trailingIcon = {
-                        if (filterQuery.isNotEmpty()) {
-                            IconButton(onClick = { filterQuery = "" }, modifier = Modifier.size(20.dp)) {
-                                Icon(Icons.Default.Close, contentDescription = "Clear", modifier = Modifier.size(13.dp))
-                            }
-                        }
-                    },
-                    modifier = Modifier
-                        .widthIn(min = 180.dp, max = 280.dp)
-                        .height(44.dp)
-                )
-            }
-        }
-
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.surface)
+    ) {
         val hScroll = rememberScrollState()
         Box(
             modifier = Modifier
@@ -667,28 +575,37 @@ fun CsvInteractiveTablePreview(
                 .horizontalScroll(hScroll)
         ) {
             Column(modifier = Modifier.fillMaxHeight()) {
-                // Sticky Header Row (Clickable for column sorting)
+                // Sticky Tonal Header Row (Clickable for column sorting)
                 Row(
                     modifier = Modifier
-                        .background(MaterialTheme.colorScheme.primaryContainer)
-                        .padding(vertical = 2.dp),
+                        .height(36.dp)
+                        .background(MaterialTheme.colorScheme.surfaceContainerHigh),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Box(
-                        modifier = Modifier
-                            .width(48.dp)
-                            .padding(6.dp),
+                        modifier = Modifier.width(48.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text("#", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall)
+                        Text(
+                            "#",
+                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                     for (colIdx in 0 until maxCols) {
+                        VerticalDivider(
+                            thickness = 0.5.dp,
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
+                            modifier = Modifier.fillMaxHeight()
+                        )
                         val colTitle = headerRow.getOrNull(colIdx)?.ifBlank { "Col ${colIdx + 1}" } ?: "Col ${colIdx + 1}"
                         val isSorted = sortColumnIndex == colIdx
                         val sortArrow = if (isSorted) (if (sortAscending) " ▲" else " ▼") else ""
                         Box(
                             modifier = Modifier
-                                .width(150.dp)
+                                .width(156.dp)
+                                .fillMaxHeight()
                                 .pointerInput(colIdx) {
                                     detectTapGestures(
                                         onTap = {
@@ -701,40 +618,37 @@ fun CsvInteractiveTablePreview(
                                         }
                                     )
                                 }
-                                .padding(horizontal = 8.dp, vertical = 6.dp),
+                                .padding(horizontal = 10.dp),
                             contentAlignment = Alignment.CenterStart
                         ) {
                             Text(
                                 text = colTitle + sortArrow,
-                                fontWeight = FontWeight.Bold,
+                                fontWeight = FontWeight.SemiBold,
                                 style = MaterialTheme.typography.labelMedium,
-                                color = if (isSorted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onPrimaryContainer,
+                                color = if (isSorted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                                 maxLines = 1
                             )
                         }
                     }
                 }
 
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-
                 androidx.compose.foundation.lazy.LazyColumn(
-                    modifier = Modifier.fillMaxHeight()
+                    modifier = Modifier.fillMaxHeight(),
+                    contentPadding = PaddingValues(bottom = 12.dp)
                 ) {
                     items(dataRows.size) { rowIndex ->
                         val row = dataRows[rowIndex]
                         Row(
                             modifier = Modifier
+                                .heightIn(min = 38.dp)
                                 .background(
                                     if (rowIndex % 2 == 0) MaterialTheme.colorScheme.surface
                                     else MaterialTheme.colorScheme.surfaceContainerLow
-                                )
-                                .padding(vertical = 2.dp),
+                                ),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Box(
-                                modifier = Modifier
-                                    .width(48.dp)
-                                    .padding(6.dp),
+                                modifier = Modifier.width(48.dp),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
@@ -745,11 +659,16 @@ fun CsvInteractiveTablePreview(
                                 )
                             }
                             for (colIdx in 0 until maxCols) {
+                                VerticalDivider(
+                                    thickness = 0.5.dp,
+                                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.20f),
+                                    modifier = Modifier.height(38.dp)
+                                )
                                 val cell = row.getOrNull(colIdx).orEmpty()
                                 Box(
                                     modifier = Modifier
-                                        .width(150.dp)
-                                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                                        .width(156.dp)
+                                        .padding(horizontal = 10.dp, vertical = 6.dp),
                                     contentAlignment = Alignment.CenterStart
                                 ) {
                                     Text(
@@ -761,9 +680,57 @@ fun CsvInteractiveTablePreview(
                                 }
                             }
                         }
-                        HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
                     }
                 }
+            }
+        }
+
+        // Sleek 42.dp Bottom Table Filter & Stats Strip
+        HorizontalDivider(
+            thickness = 0.5.dp,
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)
+        )
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(42.dp)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "${dataRows.size} rows × $maxCols cols",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (sortColumnIndex != null) {
+                        TextButton(
+                            onClick = { sortColumnIndex = null },
+                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                            modifier = Modifier.height(26.dp)
+                        ) {
+                            Text("Reset Sort", style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                }
+
+                TonalSearchPill(
+                    value = filterQuery,
+                    onValueChange = { filterQuery = it },
+                    placeholder = "Filter rows",
+                    modifier = Modifier.widthIn(min = 150.dp, max = 240.dp),
+                    testTagName = "csv_preview_filter"
+                )
             }
         }
     }
@@ -814,31 +781,32 @@ fun UnsupportedFullPageView(
             Icons.AutoMirrored.Filled.InsertDriveFile,
             contentDescription = null,
             tint = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.size(72.dp)
+            modifier = Modifier.size(64.dp)
         )
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(14.dp))
         Text(
             text = file.name,
             style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold,
+            fontWeight = FontWeight.SemiBold,
             textAlign = TextAlign.Center
         )
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(6.dp))
         Text(
-            text = "Size: ${appState.formatSize(file.length)} • Modified: ${appState.formatDate(file.lastModified)}",
+            text = "${appState.formatSize(file.length)} • ${appState.formatDate(file.lastModified)}",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(22.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            OutlinedButton(
+            FilledTonalButton(
                 onClick = {
                     appState.viewingFile = file
                     appState.openInEditMode = true
-                }
+                },
+                shape = RoundedCornerShape(50)
             ) {
-                Icon(Icons.Default.EditNote, contentDescription = null)
-                Spacer(modifier = Modifier.width(8.dp))
+                Icon(Icons.Default.EditNote, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(6.dp))
                 Text("Open as Text")
             }
 
@@ -856,11 +824,12 @@ fun UnsupportedFullPageView(
                             Toast.makeText(context, "No external app found", Toast.LENGTH_SHORT).show()
                         }
                     }
-                }
+                },
+                shape = RoundedCornerShape(50)
             ) {
-                Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Open Externally")
+                Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Open External")
             }
         }
     }

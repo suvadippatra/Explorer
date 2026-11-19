@@ -6,14 +6,16 @@ import android.os.Environment
 import android.text.format.DateUtils
 import android.text.format.Formatter
 import android.widget.Toast
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
@@ -22,37 +24,44 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.troikoss.continuum_explorer.data.db.SuiteActivityType
 import com.troikoss.continuum_explorer.data.db.SuiteRecentDatabase
+import com.troikoss.continuum_explorer.data.db.SuiteRecentRecord
 import com.troikoss.continuum_explorer.managers.SettingsManager
+import com.troikoss.continuum_explorer.model.UniversalFile
 import com.troikoss.continuum_explorer.rules.MiniAppRegistry
+import com.troikoss.continuum_explorer.ui.components.suite.HoverPreviewController
+import com.troikoss.continuum_explorer.ui.components.suite.HoverPreviewPopupHost
+import com.troikoss.continuum_explorer.ui.components.suite.SingleRowCommandBar
+import com.troikoss.continuum_explorer.ui.components.suite.TonalSearchPill
+import com.troikoss.continuum_explorer.ui.components.suite.TonalVerticalPaneDivider
+import com.troikoss.continuum_explorer.ui.components.suite.hoverPreviewTarget
+import com.troikoss.continuum_explorer.ui.components.suite.rememberHoverPreviewController
 import com.troikoss.continuum_explorer.utils.FileExplorerState
 import com.troikoss.continuum_explorer.utils.IconHelper
-import com.troikoss.continuum_explorer.utils.toUniversal
 import java.io.File
 import java.io.FileOutputStream
+import kotlin.math.roundToInt
 
 /**
- * Desktop & Mobile optimized Landing Page for every My Suite Studio:
- * - Markor Text & Markdown Studio (`text_editor`)
- * - Code Studio (`code_studio`)
- * - CSV & Table Studio (`csv_editor`)
- * - PhotoEditor Studio (`image_studio`)
- *
- * Features:
- * 1. Lockable 50.dp Top Heading Bar with Back to My Suite button, Narrow-Window Icon-Only New/Open buttons,
- *    Pin/Lock toggle, View Mode toggle, and Fullscreen toggle.
- * 2. Desktop/DeX multi-column compact tile layout for Recent Studio Files (no stretched full-width rows).
+ * Desktop-First Ultra-Clean Tonal Flat Studio Start Workspace (for Markdown, Code, Table, and Photo Studios).
+ * - Single 48.dp Command Bar (zero decorative icon before title, zero stacked bars).
+ * - Desktop (>= 720.dp): 2-Pane Layout (Left 272.dp Tonal Template & Quick-Create Rail + Right Recent Grid/Table).
+ * - Mobile (< 720.dp): Compact tonal quick-create header + recent list.
+ * - Includes 2-second floating mouse hover preview over recent file names.
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun MiniAppLandingScreen(
     toolId: String,
@@ -63,6 +72,8 @@ fun MiniAppLandingScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val hoverController = rememberHoverPreviewController()
+
     val descriptor = remember(toolId) {
         MiniAppRegistry.allMiniApps.firstOrNull { it.id == toolId }
             ?: MiniAppRegistry.activeMiniApps.first()
@@ -78,10 +89,10 @@ fun MiniAppLandingScreen(
 
     var targetDirectory by remember { mutableStateOf(defaultSuiteDir) }
     var isGridView by remember { mutableStateOf(false) }
+    var searchQuery by remember { mutableStateOf("") }
     var showFilePicker by remember { mutableStateOf(false) }
     var showFolderPicker by remember { mutableStateOf(false) }
-    var showCreateDialog by remember { mutableStateOf(false) }
-    val isHeaderPinned by SettingsManager.isSubpageHeaderPinned
+    val isFullScreen by SettingsManager.isFullScreenTabBarHidden
 
     val studioExtensions = remember(toolId) {
         when (toolId) {
@@ -99,22 +110,24 @@ fun MiniAppLandingScreen(
                 "text_editor" -> "Notes.md"
                 "code_studio" -> "Main.kt"
                 "csv_editor" -> "Sheet1.csv"
-                "image_studio" -> "Canvas_1080p.png"
+                "image_studio" -> "Canvas.png"
                 else -> "Untitled.md"
             }
         )
     }
-    var canvasPreset by remember { mutableStateOf("1080x1080 Square") }
+    var canvasPreset by remember { mutableStateOf("1080x1080") }
 
-    val recentStudioFiles = remember(SuiteRecentDatabase.records.size, toolId) {
+    val recentStudioFiles = remember(SuiteRecentDatabase.records.size, toolId, searchQuery) {
         SuiteRecentDatabase.getValidUniversalFiles(context).filter { (rec, _) ->
-            when (toolId) {
+            val matchesTool = when (toolId) {
                 "text_editor" -> rec.editorToolId == "text_editor" && rec.extension in descriptor.supportedExtensions
                 "code_studio" -> rec.editorToolId == "code_studio" || rec.extension in descriptor.supportedExtensions
                 "csv_editor" -> rec.editorToolId == "csv_editor" || rec.extension in setOf("csv", "tsv")
                 "image_studio" -> rec.editorToolId == "image_studio" || rec.extension in setOf("jpg", "jpeg", "png", "webp", "bmp")
                 else -> rec.editorToolId == toolId
             }
+            val matchesSearch = searchQuery.isBlank() || rec.fileName.contains(searchQuery.trim(), ignoreCase = true)
+            matchesTool && matchesSearch
         }
     }
 
@@ -125,9 +138,9 @@ fun MiniAppLandingScreen(
             val outFile = File(targetDirectory, cleanName)
             val ext = outFile.extension.lowercase()
             if (toolId == "image_studio") {
-                val (w, h) = when {
-                    canvasPreset.startsWith("1920x1080") -> 1920 to 1080
-                    canvasPreset.startsWith("1080x1920") -> 1080 to 1920
+                val (w, h) = when (canvasPreset) {
+                    "1920x1080" -> 1920 to 1080
+                    "1080x1920" -> 1080 to 1920
                     else -> 1080 to 1080
                 }
                 val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
@@ -142,32 +155,20 @@ fun MiniAppLandingScreen(
                     bmp.compress(format, 95, fos)
                 }
                 bmp.recycle()
-            } else {
-                if (!outFile.exists()) {
-                    outFile.createNewFile()
-                    val initialTemplate = when {
-                        cleanName.endsWith("todo.txt", ignoreCase = true) ->
-                            "(A) Welcome to Todo.txt in Markor Studio +Project @Context\n"
-                        ext == "csv" ->
-                            "Column 1,Column 2,Column 3\nRow 1,Sample A,100\nRow 2,Sample B,250\n"
-                        ext == "tsv" ->
-                            "Column 1\tColumn 2\tColumn 3\nRow 1\tSample A\t100\n"
-                        ext in listOf("md", "markdown") ->
-                            "# ${outFile.nameWithoutExtension}\n\nStart writing Markdown, LaTeX math, or tasks here.\n"
-                        ext == "kt" ->
-                            "fun main() {\n    println(\"Hello from Code Studio!\")\n}\n"
-                        ext == "py" ->
-                            "def main():\n    print(\"Hello from Code Studio!\")\n\nif __name__ == \"__main__\":\n    main()\n"
-                        ext == "html" ->
-                            "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n  <meta charset=\"UTF-8\">\n  <title>${outFile.nameWithoutExtension}</title>\n</head>\n<body>\n  <h1>Hello World</h1>\n</body>\n</html>\n"
-                        ext == "json" ->
-                            "{\n  \"name\": \"${outFile.nameWithoutExtension}\",\n  \"version\": 1\n}\n"
-                        else -> ""
-                    }
-                    if (initialTemplate.isNotEmpty()) {
-                        outFile.writeText(initialTemplate)
-                    }
+            } else if (!outFile.exists()) {
+                outFile.createNewFile()
+                val initialTemplate = when {
+                    cleanName.endsWith("todo.txt", ignoreCase = true) -> "(A) First task +Project @Context\n"
+                    ext == "csv" -> "Column 1,Column 2,Column 3\nRow 1,Value A,100\nRow 2,Value B,250\n"
+                    ext == "tsv" -> "Column 1\tColumn 2\tColumn 3\nRow 1\tValue A\t100\n"
+                    ext in listOf("md", "markdown") -> "# ${outFile.nameWithoutExtension}\n\n"
+                    ext == "kt" -> "fun main() {\n    println(\"Hello\")\n}\n"
+                    ext == "py" -> "def main():\n    print(\"Hello\")\n\nif __name__ == \"__main__\":\n    main()\n"
+                    ext == "html" -> "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n  <meta charset=\"UTF-8\">\n  <title>${outFile.nameWithoutExtension}</title>\n</head>\n<body>\n  <h1>Hello</h1>\n</body>\n</html>\n"
+                    ext == "json" -> "{\n  \"name\": \"${outFile.nameWithoutExtension}\"\n}\n"
+                    else -> ""
                 }
+                if (initialTemplate.isNotEmpty()) outFile.writeText(initialTemplate)
             }
             SuiteRecentDatabase.recordFileActivity(
                 context = context,
@@ -184,7 +185,7 @@ fun MiniAppLandingScreen(
 
     if (showFilePicker) {
         InAppFilePickerDialog(
-            title = "Open File in ${descriptor.title}",
+            title = "Open in ${descriptor.title}",
             selectFolders = false,
             initialDirectory = Environment.getExternalStorageDirectory(),
             allowedExtensions = descriptor.supportedExtensions,
@@ -216,616 +217,510 @@ fun MiniAppLandingScreen(
         )
     }
 
-    if (showCreateDialog) {
-        AlertDialog(
-            onDismissRequest = { showCreateDialog = false },
-            title = {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Icon(descriptor.icon, contentDescription = null, tint = descriptor.accentColor)
-                    Text("New File in ${descriptor.title}", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                }
-            },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    OutlinedTextField(
+    @Composable
+    fun QuickCreatePanel(isSideRail: Boolean, modifier: Modifier = Modifier) {
+        val railMod = if (isSideRail) {
+            modifier
+                .width(276.dp)
+                .fillMaxHeight()
+                .background(MaterialTheme.colorScheme.surfaceContainerLow)
+                .verticalScroll(rememberScrollState())
+                .padding(16.dp)
+        } else {
+            modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surfaceContainerLow)
+                .padding(14.dp)
+        }
+
+        Column(
+            modifier = railMod,
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                text = if (toolId == "image_studio") "New Canvas" else "New Document",
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            // Borderless tonal filename field
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(40.dp)
+            ) {
+                Box(
+                    contentAlignment = Alignment.CenterStart,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 12.dp)
+                ) {
+                    BasicTextField(
                         value = newFileName,
                         onValueChange = { newFileName = it },
-                        label = { Text("File Name & Extension") },
-                        placeholder = { Text("e.g. notes.md, index.html") },
-                        leadingIcon = {
-                            Icon(
-                                imageVector = descriptor.icon,
-                                contentDescription = null,
-                                tint = descriptor.accentColor,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        },
-                        trailingIcon = {
-                            if (newFileName.isNotEmpty()) {
-                                IconButton(onClick = { newFileName = "" }) {
-                                    Icon(Icons.Default.Close, contentDescription = "Clear", modifier = Modifier.size(16.dp))
-                                }
-                            }
-                        },
-                        shape = RoundedCornerShape(12.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = descriptor.accentColor,
-                            focusedLabelColor = descriptor.accentColor
-                        ),
                         singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("Format Presets:", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold)
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState())
-                        ) {
-                            studioExtensions.forEach { extPreset ->
-                                val isSelected = if (extPreset == "todo.txt") {
-                                    newFileName.equals("todo.txt", ignoreCase = true) || newFileName.endsWith(".todo.txt", ignoreCase = true)
-                                } else {
-                                    newFileName.endsWith(extPreset, ignoreCase = true)
-                                }
-                                FilterChip(
-                                    selected = isSelected,
-                                    onClick = {
-                                        if (extPreset == "todo.txt") {
-                                            newFileName = "todo.txt"
-                                        } else {
-                                            val base = newFileName.substringBeforeLast('.', newFileName).ifBlank { "Untitled" }
-                                            newFileName = "$base$extPreset"
-                                        }
-                                    },
-                                    label = { Text(extPreset, fontSize = 11.sp, fontFamily = FontFamily.Monospace) }
-                                )
-                            }
-                        }
-                    }
-
-                    if (toolId == "image_studio") {
-                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text("Blank Canvas Resolution:", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold)
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                modifier = Modifier.horizontalScroll(rememberScrollState())
-                            ) {
-                                listOf("1080x1080 Square", "1920x1080 Landscape", "1080x1920 Portrait").forEach { preset ->
-                                    FilterChip(
-                                        selected = canvasPreset == preset,
-                                        onClick = { canvasPreset = preset },
-                                        label = { Text(preset, fontSize = 11.sp) }
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    Surface(
-                        shape = RoundedCornerShape(10.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        textStyle = MaterialTheme.typography.bodySmall.copy(
+                            color = MaterialTheme.colorScheme.onSurface,
+                            fontFamily = FontFamily.Monospace
+                        ),
+                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { showFolderPicker = true }
+                            .testTag("landing_filename_input")
+                    )
+                }
+            }
+
+            // Template / Extension Pills
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                studioExtensions.forEach { extChoice ->
+                    val isSelected = newFileName.endsWith(extChoice, ignoreCase = true)
+                    Surface(
+                        onClick = {
+                            newFileName = if (extChoice == "todo.txt") {
+                                "todo.txt"
+                            } else {
+                                val base = newFileName.substringBeforeLast('.').ifBlank { "Untitled" }
+                                "$base$extChoice"
+                            }
+                        },
+                        shape = RoundedCornerShape(50),
+                        color = if (isSelected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+                        contentColor = if (isSelected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
                     ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
+                        Text(
+                            text = extChoice,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                        )
+                    }
+                }
+            }
+
+            if (toolId == "image_studio") {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    listOf("1080x1080", "1920x1080", "1080x1920").forEach { size ->
+                        val selected = canvasPreset == size
+                        Surface(
+                            onClick = { canvasPreset = size },
+                            shape = RoundedCornerShape(50),
+                            color = if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+                            contentColor = if (selected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
                         ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text("Target Folder", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                Text(
-                                    text = targetDirectory.absolutePath,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    fontFamily = FontFamily.Monospace,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                            TextButton(onClick = { showFolderPicker = true }) {
-                                Text("Change", style = MaterialTheme.typography.labelSmall)
-                            }
+                            Text(
+                                text = size,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontFamily = FontFamily.Monospace,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                            )
                         }
                     }
                 }
-            },
-            confirmButton = {
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 Button(
-                    onClick = {
-                        showCreateDialog = false
-                        createAndLaunchNewFile(newFileName)
-                    }
+                    onClick = { createAndLaunchNewFile(newFileName) },
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(38.dp)
+                        .testTag("landing_create_button")
                 ) {
-                    Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Create & Open Editor")
+                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("Create", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
                 }
-            },
-            dismissButton = {
-                TextButton(onClick = { showCreateDialog = false }) {
-                    Text("Cancel")
+
+                FilledTonalButton(
+                    onClick = { showFilePicker = true },
+                    shape = RoundedCornerShape(12.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp),
+                    modifier = Modifier
+                        .height(38.dp)
+                        .testTag("landing_open_button")
+                ) {
+                    Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("Open", style = MaterialTheme.typography.labelMedium)
                 }
             }
-        )
+
+            if (isSideRail) {
+                Spacer(modifier = Modifier.weight(1f, fill = false))
+            }
+
+            // Save Folder Anchor Pill
+            Surface(
+                onClick = { showFolderPicker = true },
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surfaceContainer,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Folder,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Text(
+                        text = targetDirectory.name,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Icon(
+                        Icons.Default.Edit,
+                        contentDescription = "Change Save Folder",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(14.dp)
+                    )
+                }
+            }
+        }
     }
 
-    val isFullScreen by SettingsManager.isFullScreenTabBarHidden
+    @Composable
+    fun RecentFilesPane(isDesktop: Boolean, availableWidthDp: Int, modifier: Modifier = Modifier) {
+        LazyColumn(
+            modifier = modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.surface),
+            contentPadding = PaddingValues(18.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            item(key = "recent_title") {
+                Text(
+                    text = "Recent (${recentStudioFiles.size})",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 4.dp)
+                )
+            }
+
+            if (recentStudioFiles.isEmpty()) {
+                item(key = "empty_studio_recents") {
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerLow,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 44.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                descriptor.icon,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                                modifier = Modifier.size(36.dp)
+                            )
+                            Text(
+                                text = "No recent files",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            } else if (isGridView) {
+                val cols = when {
+                    availableWidthDp >= 780 -> 3
+                    else -> 2
+                }
+                val chunked = recentStudioFiles.chunked(cols)
+                items(chunked.size, key = { "landing_grid_$it" }) { rowIdx ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        chunked[rowIdx].forEach { (rec, uFile) ->
+                            LandingRecentTile(
+                                record = rec,
+                                uFile = uFile,
+                                hoverController = hoverController,
+                                onClick = {
+                                    hoverController.dismiss()
+                                    uFile.fileRef?.let { onOpenFileInStudio(it) }
+                                },
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                        repeat(cols - chunked[rowIdx].size) {
+                            Spacer(modifier = Modifier.weight(1f))
+                        }
+                    }
+                }
+            } else {
+                items(recentStudioFiles, key = { it.first.absolutePath }) { (rec, uFile) ->
+                    LandingRecentRow(
+                        record = rec,
+                        uFile = uFile,
+                        isDesktop = isDesktop,
+                        hoverController = hoverController,
+                        onClick = {
+                            hoverController.dismiss()
+                            uFile.fileRef?.let { onOpenFileInStudio(it) }
+                        }
+                    )
+                }
+            }
+        }
+    }
 
     BoxWithConstraints(
         modifier = modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.surface)
     ) {
-        val containerWidth = maxWidth
-        val isNarrowWindow = containerWidth < 560.dp
-        val isDesktopLayout = containerWidth >= 660.dp
+        val rootWidth = maxWidth
+        val isDesktop = rootWidth >= 720.dp
 
         Column(modifier = Modifier.fillMaxSize()) {
-            // --- LOCKABLE 50.dp TOP HEADING BAR ---
-            Surface(
-                color = MaterialTheme.colorScheme.surfaceContainer,
-                tonalElevation = if (isHeaderPinned) 2.dp else 0.dp,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(50.dp)
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+            SingleRowCommandBar(
+                navigationContent = {
                     IconButton(
                         onClick = onBackToSuite,
-                        modifier = Modifier.size(36.dp)
+                        modifier = Modifier
+                            .size(36.dp)
+                            .testTag("landing_back_button")
                     ) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", modifier = Modifier.size(20.dp))
+                    }
+                },
+                titleContent = {
+                    Text(
+                        text = descriptor.title,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                },
+                centerContent = {
+                    if (isDesktop) {
+                        TonalSearchPill(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            placeholder = "Filter recent",
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .widthIn(max = 320.dp)
+                        )
+                    }
+                },
+                actionsContent = {
+                    IconButton(onClick = { isGridView = !isGridView }, modifier = Modifier.size(34.dp)) {
                         Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back to My Suite",
-                            tint = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.width(6.dp))
-
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = descriptor.title,
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Text(
-                            text = descriptor.badge,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = descriptor.accentColor,
-                            maxLines = 1
-                        )
-                    }
-
-                    // Header Action Buttons (Icon-only in narrow window, labeled button in wide window)
-                    if (isNarrowWindow) {
-                        FilledTonalIconButton(
-                            onClick = { showCreateDialog = true },
-                            modifier = Modifier.size(34.dp),
-                            shape = RoundedCornerShape(10.dp)
-                        ) {
-                            Icon(
-                                Icons.Default.NoteAdd,
-                                contentDescription = "New File",
-                                modifier = Modifier.size(17.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(4.dp))
-                        OutlinedIconButton(
-                            onClick = { showFilePicker = true },
-                            modifier = Modifier.size(34.dp),
-                            shape = RoundedCornerShape(10.dp)
-                        ) {
-                            Icon(
-                                Icons.Default.FolderOpen,
-                                contentDescription = "Open File",
-                                modifier = Modifier.size(17.dp)
-                            )
-                        }
-                    } else {
-                        FilledTonalButton(
-                            onClick = { showCreateDialog = true },
-                            shape = RoundedCornerShape(10.dp),
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                            modifier = Modifier.height(32.dp)
-                        ) {
-                            Icon(Icons.Default.NoteAdd, contentDescription = null, modifier = Modifier.size(15.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("New File", style = MaterialTheme.typography.labelMedium)
-                        }
-                        Spacer(modifier = Modifier.width(6.dp))
-                        OutlinedButton(
-                            onClick = { showFilePicker = true },
-                            shape = RoundedCornerShape(10.dp),
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                            modifier = Modifier.height(32.dp)
-                        ) {
-                            Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(15.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Open", style = MaterialTheme.typography.labelMedium)
-                        }
-                    }
-
-                    // Pin / Lock Heading Bar Toggle
-                    IconButton(
-                        onClick = { SettingsManager.toggleSubpageHeaderPinned(context) },
-                        modifier = Modifier.size(36.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.PushPin,
-                            contentDescription = if (isHeaderPinned) "Header Locked on Top" else "Lock Header on Top",
-                            tint = if (isHeaderPinned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            if (isGridView) Icons.Default.ViewList else Icons.Default.GridView,
+                            contentDescription = "Switch View",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(18.dp)
                         )
                     }
-
-                    IconButton(
-                        onClick = { isGridView = !isGridView },
-                        modifier = Modifier.size(36.dp)
-                    ) {
+                    IconButton(onClick = { SettingsManager.toggleFullScreenTabBar() }, modifier = Modifier.size(34.dp)) {
                         Icon(
-                            imageVector = if (isGridView) Icons.Default.ViewModule else Icons.Default.GridView,
-                            contentDescription = if (isGridView) "Switch to Compact Cards" else "Switch to Icon Grid",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(19.dp)
-                        )
-                    }
-
-                    IconButton(
-                        onClick = { SettingsManager.toggleFullScreenTabBar() },
-                        modifier = Modifier.size(36.dp)
-                    ) {
-                        Icon(
-                            imageVector = if (isFullScreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
-                            contentDescription = "Fullscreen",
+                            if (isFullScreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
+                            contentDescription = "Full Screen",
                             tint = if (isFullScreen) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(19.dp)
+                            modifier = Modifier.size(18.dp)
                         )
                     }
                 }
-            }
+            )
 
-            HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
-
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 14.dp),
-                contentPadding = PaddingValues(vertical = 14.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                // Hero Action Cards: Open File to Edit vs Create Blank Canvas / New File
-                item {
-                    if (isDesktopLayout) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            StudioLandingActionCard(
-                                title = if (toolId == "image_studio") "Open Image to Edit" else "Open File to Edit",
-                                subtitle = if (toolId == "image_studio") {
-                                    "Pick an existing photo to crop, filter, frame on a canvas, or annotate"
-                                } else {
-                                    "Browse storage for ${descriptor.supportedExtensions.take(8).joinToString(", ") { ".$it" }} files"
-                                },
-                                icon = Icons.Default.FolderOpen,
-                                accentColor = MaterialTheme.colorScheme.primary,
-                                buttonLabel = "Browse Files",
-                                onClick = { showFilePicker = true },
-                                modifier = Modifier.weight(1f)
-                            )
-                            StudioLandingActionCard(
-                                title = if (toolId == "image_studio") "New Blank / Layer Canvas" else "Create New File",
-                                subtitle = if (toolId == "image_studio") {
-                                    "Start a blank 1080p sketchpad or composite multiple images onto a canvas"
-                                } else {
-                                    "Create a new ${studioExtensions.joinToString(", ")} document and edit immediately"
-                                },
-                                icon = Icons.Default.NoteAdd,
-                                accentColor = descriptor.accentColor,
-                                buttonLabel = if (toolId == "image_studio") "New Canvas" else "Create New",
-                                onClick = { showCreateDialog = true },
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
-                    } else {
-                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            StudioLandingActionCard(
-                                title = if (toolId == "image_studio") "Open Image to Edit" else "Open File to Edit",
-                                subtitle = if (toolId == "image_studio") {
-                                    "Pick an existing photo to crop, filter, frame on a canvas, or annotate"
-                                } else {
-                                    "Browse storage for ${descriptor.supportedExtensions.take(8).joinToString(", ") { ".$it" }} files"
-                                },
-                                icon = Icons.Default.FolderOpen,
-                                accentColor = MaterialTheme.colorScheme.primary,
-                                buttonLabel = "Browse Files",
-                                onClick = { showFilePicker = true },
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                            StudioLandingActionCard(
-                                title = if (toolId == "image_studio") "New Blank / Layer Canvas" else "Create New File",
-                                subtitle = if (toolId == "image_studio") {
-                                    "Start a blank 1080p sketchpad or composite multiple images onto a canvas"
-                                } else {
-                                    "Create a new ${studioExtensions.joinToString(", ")} document and edit immediately"
-                                },
-                                icon = Icons.Default.NoteAdd,
-                                accentColor = descriptor.accentColor,
-                                buttonLabel = if (toolId == "image_studio") "New Canvas" else "Create New",
-                                onClick = { showCreateDialog = true },
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                        }
-                    }
+            if (isDesktop) {
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                ) {
+                    QuickCreatePanel(isSideRail = true)
+                    TonalVerticalPaneDivider()
+                    RecentFilesPane(
+                        isDesktop = true,
+                        availableWidthDp = (rootWidth.value - 276f).toInt(),
+                        modifier = Modifier.weight(1f)
+                    )
                 }
-
-                // Recent Files Section Header
-                item {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "RECENT IN ${descriptor.title.uppercase()}",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        Text(
-                            text = "${recentStudioFiles.size} files",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-
-                if (recentStudioFiles.isEmpty()) {
-                    item {
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = MaterialTheme.colorScheme.surfaceContainerLow,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Column(
-                                modifier = Modifier.padding(24.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Icon(
-                                    descriptor.icon,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(28.dp)
-                                )
-                                Text(
-                                    text = "No recent files in ${descriptor.title} yet. Tap 'Create New' or 'Browse Files' above to begin.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    textAlign = TextAlign.Center
-                                )
-                            }
-                        }
-                    }
-                } else if (isGridView) {
-                    val columns = when {
-                        containerWidth >= 980.dp -> 5
-                        isDesktopLayout -> 4
-                        else -> 2
-                    }
-                    val chunked = recentStudioFiles.chunked(columns)
-                    items(chunked) { rowItems ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            rowItems.forEach { (record, uFile) ->
-                                OutlinedCard(
-                                    shape = RoundedCornerShape(12.dp),
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .clickable {
-                                            val f = File(record.absolutePath)
-                                            if (f.exists()) onOpenFileInStudio(f)
-                                        }
-                                ) {
-                                    Column(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(10.dp),
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(48.dp)
-                                                .clip(RoundedCornerShape(10.dp))
-                                                .background(MaterialTheme.colorScheme.surfaceVariant),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            IconHelper.FileThumbnail(
-                                                file = uFile,
-                                                iconSize = 42.dp,
-                                                modifier = Modifier.size(42.dp)
-                                            )
-                                        }
-                                        Text(
-                                            text = record.fileName,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            fontWeight = FontWeight.SemiBold,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                        Text(
-                                            text = Formatter.formatFileSize(context, uFile.length),
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                }
-                            }
-                            repeat(columns - rowItems.size) {
-                                Spacer(modifier = Modifier.weight(1f))
-                            }
-                        }
-                    }
-                } else {
-                    // Multi-column compact tiles on Desktop/DeX (2 or 3 columns, never stretched full-width rows)
-                    val cols = when {
-                        containerWidth >= 1020.dp -> 3
-                        isDesktopLayout -> 2
-                        else -> 1
-                    }
-                    val chunked = recentStudioFiles.chunked(cols)
-                    items(chunked) { rowItems ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            rowItems.forEach { (record, uFile) ->
-                                val relativeTime = remember(record.timestamp) {
-                                    DateUtils.getRelativeTimeSpanString(
-                                        record.timestamp,
-                                        System.currentTimeMillis(),
-                                        DateUtils.MINUTE_IN_MILLIS
-                                    ).toString()
-                                }
-                                OutlinedCard(
-                                    shape = RoundedCornerShape(10.dp),
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .clickable {
-                                            val f = File(record.absolutePath)
-                                            if (f.exists()) onOpenFileInStudio(f)
-                                        }
-                                ) {
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(horizontal = 10.dp, vertical = 8.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(34.dp)
-                                                .clip(RoundedCornerShape(8.dp))
-                                                .background(MaterialTheme.colorScheme.surfaceVariant),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            IconHelper.FileThumbnail(
-                                                file = uFile,
-                                                iconSize = 28.dp,
-                                                modifier = Modifier.size(28.dp)
-                                            )
-                                        }
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(
-                                                text = record.fileName,
-                                                style = MaterialTheme.typography.bodySmall,
-                                                fontWeight = FontWeight.SemiBold,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                            Text(
-                                                text = "${Formatter.formatFileSize(context, uFile.length)} • $relativeTime",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                        }
-                                        IconButton(
-                                            onClick = {
-                                                val f = File(record.absolutePath)
-                                                if (f.exists()) onOpenFileInStudio(f)
-                                            },
-                                            modifier = Modifier.size(28.dp)
-                                        ) {
-                                            Icon(
-                                                Icons.Default.Edit,
-                                                contentDescription = "Edit",
-                                                tint = MaterialTheme.colorScheme.primary,
-                                                modifier = Modifier.size(16.dp)
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                            repeat(cols - rowItems.size) {
-                                Spacer(modifier = Modifier.weight(1f))
-                            }
-                        }
-                    }
-                }
+            } else {
+                QuickCreatePanel(isSideRail = false)
+                HorizontalDivider(
+                    thickness = 0.5.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)
+                )
+                RecentFilesPane(
+                    isDesktop = false,
+                    availableWidthDp = rootWidth.value.toInt(),
+                    modifier = Modifier.weight(1f)
+                )
             }
         }
+
+        HoverPreviewPopupHost(controller = hoverController)
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun StudioLandingActionCard(
-    title: String,
-    subtitle: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    accentColor: Color,
-    buttonLabel: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
+private fun LandingRecentRow(
+    record: SuiteRecentRecord,
+    uFile: UniversalFile,
+    isDesktop: Boolean,
+    hoverController: HoverPreviewController,
+    onClick: () -> Unit
 ) {
-    OutlinedCard(
+    val context = LocalContext.current
+    var coords by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    val sizeText = remember(uFile.length) { Formatter.formatFileSize(context, uFile.length) }
+    val timeText = remember(record.timestamp) {
+        DateUtils.getRelativeTimeSpanString(record.timestamp, System.currentTimeMillis(), DateUtils.MINUTE_IN_MILLIS).toString()
+    }
+
+    Surface(
         shape = RoundedCornerShape(14.dp),
-        modifier = modifier.clickable { onClick() }
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        tonalElevation = 0.dp,
+        modifier = Modifier
+            .fillMaxWidth()
+            .onGloballyPositioned { coords = it }
+            .hoverPreviewTarget(uFile, hoverController)
+            .clip(RoundedCornerShape(14.dp))
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = {
+                    val pos = coords?.positionInWindow()
+                    hoverController.showImmediately(
+                        uFile,
+                        IntOffset((pos?.x ?: 24f).roundToInt(), (pos?.y ?: 120f).roundToInt())
+                    )
+                }
+            )
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = accentColor.copy(alpha = 0.14f),
-                modifier = Modifier.size(44.dp)
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(icon, contentDescription = title, tint = accentColor, modifier = Modifier.size(24.dp))
-                }
-            }
-            Column(modifier = Modifier.weight(1f)) {
+            Icon(
+                imageVector = IconHelper.getIconForItem(uFile),
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(20.dp)
+            )
+            Spacer(Modifier.width(12.dp))
+            Text(
+                text = record.fileName,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
+            )
+            if (isDesktop) {
                 Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    text = subtitle,
+                    text = timeText,
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
+                    modifier = Modifier.width(110.dp)
                 )
             }
-            FilledTonalButton(
+            Text(
+                text = sizeText,
+                style = MaterialTheme.typography.labelSmall,
+                fontFamily = FontFamily.Monospace,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun LandingRecentTile(
+    record: SuiteRecentRecord,
+    uFile: UniversalFile,
+    hoverController: HoverPreviewController,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    var coords by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    val sizeText = remember(uFile.length) { Formatter.formatFileSize(context, uFile.length) }
+
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        tonalElevation = 0.dp,
+        modifier = modifier
+            .height(96.dp)
+            .onGloballyPositioned { coords = it }
+            .hoverPreviewTarget(uFile, hoverController)
+            .clip(RoundedCornerShape(16.dp))
+            .combinedClickable(
                 onClick = onClick,
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                shape = RoundedCornerShape(10.dp)
-            ) {
-                Text(buttonLabel, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                onLongClick = {
+                    val pos = coords?.positionInWindow()
+                    hoverController.showImmediately(
+                        uFile,
+                        IntOffset((pos?.x ?: 24f).roundToInt(), (pos?.y ?: 120f).roundToInt())
+                    )
+                }
+            )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(12.dp),
+            verticalArrangement = Arrangement.SpaceBetween
+        ) {
+            Icon(
+                imageVector = IconHelper.getIconForItem(uFile),
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(22.dp)
+            )
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    text = record.fileName,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = "${record.extension.uppercase()} • $sizeText",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
     }
