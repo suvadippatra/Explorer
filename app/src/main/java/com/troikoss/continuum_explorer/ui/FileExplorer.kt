@@ -930,12 +930,12 @@ private fun navigateToSection(appState: FileExplorerState, context: Context, sec
             ) {
                 if (!WorkspaceWindowController.launchSeparateDeXWindow(context, isFtpServer = true)) {
                     appState.onOpenInNewTab?.invoke(
-                        UniversalFile(name = "FTP/HTTP Server", isDirectory = true, lastModified = 0, length = 0, provider = LocalProvider, providerId = "ftp_server://")
+                        UniversalFile(name = "Hosting", isDirectory = true, lastModified = 0, length = 0, provider = LocalProvider, providerId = "ftp_server://")
                     ) ?: appState.navigateTo(null, null, libraryItem = LibraryItem.FtpServer)
                 }
             } else {
                 appState.onOpenInNewTab?.invoke(
-                    UniversalFile(name = "FTP/HTTP Server", isDirectory = true, lastModified = 0, length = 0, provider = LocalProvider, providerId = "ftp_server://")
+                    UniversalFile(name = "Hosting", isDirectory = true, lastModified = 0, length = 0, provider = LocalProvider, providerId = "ftp_server://")
                 ) ?: appState.navigateTo(null, null, libraryItem = LibraryItem.FtpServer)
             }
         }

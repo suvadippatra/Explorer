@@ -17,10 +17,12 @@ import android.hardware.display.VirtualDisplay
 import android.media.ImageReader
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
+import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.IBinder
+import android.os.PowerManager
 import android.util.DisplayMetrics
 import android.util.Log
 import android.view.WindowManager
@@ -63,6 +65,8 @@ class ContinuumHubService : Service() {
     private var captureThread: HandlerThread? = null
     private var captureHandler: Handler? = null
     private var lastFrameTimestamp = 0L
+    private var wakeLock: PowerManager.WakeLock? = null
+    private var wifiLock: WifiManager.WifiLock? = null
 
     companion object {
         const val CHANNEL_ID = "ContinuumHubChannel"
@@ -199,7 +203,7 @@ class ContinuumHubService : Service() {
         }
 
         fun startService(context: Context) {
-            ServerManager.startCoordinated(context, startHttp = true, startFtp = true)
+            ServerManager.activateExclusiveMode(context, ActiveHostingMode.FTP)
         }
 
         fun stopService(context: Context) {
@@ -250,6 +254,7 @@ class ContinuumHubService : Service() {
 
             ACTION_STOP_IF_IDLE -> {
                 if (!ServerManager.state.value.isAnyRunning && !isScreenCasting) {
+                    releasePowerAndWifiLocks()
                     stopForeground(STOP_FOREGROUND_REMOVE)
                     stopSelf()
                 }
@@ -258,6 +263,7 @@ class ContinuumHubService : Service() {
             ACTION_STOP -> {
                 stopScreenCastInternal()
                 ServerManager.stopCoordinated(applicationContext, graceful = true, stopForegroundServiceIfIdle = false)
+                releasePowerAndWifiLocks()
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
                 return START_NOT_STICKY
@@ -268,6 +274,7 @@ class ContinuumHubService : Service() {
                 if (ServerManager.state.value.isAnyRunning) {
                     promoteToForeground(includeMediaProjection = false)
                 } else {
+                    releasePowerAndWifiLocks()
                     stopForeground(STOP_FOREGROUND_REMOVE)
                     stopSelf()
                 }
@@ -284,8 +291,8 @@ class ContinuumHubService : Service() {
                 }
                 if (resCode == Activity.RESULT_OK && resData != null) {
                     promoteToForeground(includeMediaProjection = true)
-                    if (!ServerManager.state.value.isHttpRunning) {
-                        ServerManager.startCoordinated(applicationContext, startHttp = true, startFtp = true)
+                    if (!ServerManager.state.value.isHttpTransportRunning && !ServerManager.state.value.isCastingRunning) {
+                        ServerManager.activateExclusiveMode(applicationContext, ActiveHostingMode.HTTP)
                     }
                     startScreenCastInternal(resCode, resData)
                 }
@@ -300,7 +307,7 @@ class ContinuumHubService : Service() {
 
             ACTION_START, null -> {
                 promoteToForeground(includeMediaProjection = isScreenCasting)
-                ServerManager.startCoordinated(applicationContext, startHttp = true, startFtp = true)
+                ServerManager.activateExclusiveMode(applicationContext, ActiveHostingMode.FTP)
             }
         }
 
@@ -315,6 +322,7 @@ class ContinuumHubService : Service() {
     }
 
     private fun promoteToForeground(includeMediaProjection: Boolean) {
+        acquirePowerAndWifiLocks()
         val notification = buildNotification()
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
@@ -473,11 +481,64 @@ class ContinuumHubService : Service() {
         captureHandler = null
     }
 
+    private fun acquirePowerAndWifiLocks() {
+        try {
+            if (wakeLock == null) {
+                val pm = applicationContext.getSystemService(Context.POWER_SERVICE) as? PowerManager
+                wakeLock = pm?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "ContinuumExplorer:HostingWakeLock")?.apply {
+                    setReferenceCounted(false)
+                }
+            }
+            if (wakeLock?.isHeld == false) {
+                wakeLock?.acquire(6L * 60L * 60L * 1000L) // 6-hour safety ceiling
+            }
+        } catch (e: Throwable) {
+            Log.w("ContinuumHubService", "WakeLock acquire skipped: ${e.message}")
+        }
+
+        try {
+            if (wifiLock == null) {
+                val wm = applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+                val lockMode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    WifiManager.WIFI_MODE_FULL_LOW_LATENCY
+                } else {
+                    @Suppress("DEPRECATION")
+                    WifiManager.WIFI_MODE_FULL_HIGH_PERF
+                }
+                wifiLock = wm?.createWifiLock(lockMode, "ContinuumExplorer:HostingWifiLock")?.apply {
+                    setReferenceCounted(false)
+                }
+            }
+            if (wifiLock?.isHeld == false) {
+                wifiLock?.acquire()
+            }
+        } catch (e: Throwable) {
+            Log.w("ContinuumHubService", "WifiLock acquire skipped: ${e.message}")
+        }
+    }
+
+    private fun releasePowerAndWifiLocks() {
+        try {
+            if (wakeLock?.isHeld == true) {
+                wakeLock?.release()
+            }
+        } catch (_: Throwable) {}
+        wakeLock = null
+
+        try {
+            if (wifiLock?.isHeld == true) {
+                wifiLock?.release()
+            }
+        } catch (_: Throwable) {}
+        wifiLock = null
+    }
+
     override fun onDestroy() {
         if (activeServiceInstance === this) {
             activeServiceInstance = null
         }
         stopScreenCastInternal()
+        releasePowerAndWifiLocks()
         ServerManager.stopCoordinated(applicationContext, graceful = true, stopForegroundServiceIfIdle = false)
         super.onDestroy()
     }
@@ -488,10 +549,10 @@ class ContinuumHubService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "Continuum Hub Server",
+                "Hosting",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Runs the local HTTP Web Portal, SyncPlay & FTP Server"
+                description = "Runs FTP Hosting, HTTP Hosting, SyncPlay & OmniOS Casting"
             }
             val manager = getSystemService(NotificationManager::class.java)
             manager?.createNotificationChannel(channel)
@@ -519,18 +580,25 @@ class ContinuumHubService : Service() {
 
         val st = ServerManager.state.value
         val activeProtocols = buildList {
-            if (st.isHttpRunning) add("HTTP :${st.http.port}")
-            if (st.isFtpRunning) add("FTP :${st.ftp.port}")
+            when (st.activeHostingMode) {
+                ActiveHostingMode.CASTING -> if (st.casting.isRunning) add("OmniOS Casting :${st.casting.port}")
+                ActiveHostingMode.HTTP -> if (st.http.isRunning) add("HTTP Hosting :${st.http.port}")
+                ActiveHostingMode.FTP -> {
+                    if (st.ftp.isRunning) add("FTP Hosting :${st.ftp.port}")
+                    if (st.isSyncPlayCompanionActive && st.http.isRunning) add("SyncPlay :${st.http.port}")
+                }
+                ActiveHostingMode.NONE -> Unit
+            }
             if (isScreenCasting) add("Screencast")
         }.joinToString(" • ").ifEmpty { "Ready" }
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Continuum Server Active (${st.ipAddress})")
+            .setContentTitle("Hosting Active (${st.ipAddress})")
             .setContentText(activeProtocols)
             .setSmallIcon(android.R.drawable.stat_sys_upload_done)
             .setContentIntent(pendingOpen)
             .setOngoing(true)
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop All", pendingStop)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop Hosting", pendingStop)
             .build()
     }
 }

@@ -60,7 +60,7 @@ fun ImageFullPageView(file: UniversalFile) {
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF101010))
+            .background(Color(0xFF101216))
             .clipToBounds()
             .pointerInput(file) {
                 detectTransformGestures { _, pan, zoom, _ ->
@@ -109,23 +109,23 @@ fun ImageFullPageView(file: UniversalFile) {
 
         // Floating Image Control Pill
         Surface(
-            color = Color.Black.copy(alpha = 0.72f),
-            shape = RoundedCornerShape(24.dp),
+            color = Color(0xCC16181D),
+            shape = RoundedCornerShape(50),
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(bottom = 18.dp)
+                .padding(bottom = 16.dp)
         ) {
             Row(
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 IconButton(
                     onClick = {
                         scale = (scale - 0.5f).coerceIn(1f, 6f)
                         if (scale <= 1.05f) offset = Offset.Zero
                     },
-                    modifier = Modifier.size(34.dp)
+                    modifier = Modifier.size(32.dp)
                 ) {
                     Icon(Icons.Default.ZoomOut, contentDescription = "Zoom Out", tint = Color.White, modifier = Modifier.size(18.dp))
                 }
@@ -133,17 +133,18 @@ fun ImageFullPageView(file: UniversalFile) {
                     text = "${(scale * 100).toInt()}%",
                     color = Color.White,
                     fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold
+                    fontWeight = FontWeight.SemiBold,
+                    fontFamily = FontFamily.Monospace
                 )
                 IconButton(
                     onClick = { scale = (scale + 0.5f).coerceIn(1f, 6f) },
-                    modifier = Modifier.size(34.dp)
+                    modifier = Modifier.size(32.dp)
                 ) {
                     Icon(Icons.Default.ZoomIn, contentDescription = "Zoom In", tint = Color.White, modifier = Modifier.size(18.dp))
                 }
                 IconButton(
                     onClick = { rotation = (rotation + 90f) % 360f },
-                    modifier = Modifier.size(34.dp)
+                    modifier = Modifier.size(32.dp)
                 ) {
                     Icon(Icons.Default.RotateRight, contentDescription = "Rotate 90°", tint = Color.White, modifier = Modifier.size(18.dp))
                 }
@@ -154,7 +155,7 @@ fun ImageFullPageView(file: UniversalFile) {
                             offset = Offset.Zero
                             rotation = 0f
                         },
-                        modifier = Modifier.size(34.dp)
+                        modifier = Modifier.size(32.dp)
                     ) {
                         Icon(Icons.Default.Refresh, contentDescription = "Reset", tint = Color.White, modifier = Modifier.size(18.dp))
                     }
@@ -166,11 +167,11 @@ fun ImageFullPageView(file: UniversalFile) {
 
 /**
  * Interactive HTML / XHTML Web Previewer with zero stacked top bar.
- * Mode switcher (Web / Split / Source), Desktop Viewport toggle, Dark canvas toggle,
- * and Reload sit cleanly in a borderless tonal bottom bar.
+ * Mode switcher (Web | Split | Source), Desktop Viewport, Dark Canvas, and Reload
+ * sit in a clean 40.dp borderless bottom dock so the viewer strictly has ONE top header.
  */
-@android.annotation.SuppressLint("SetJavaScriptEnabled")
 @OptIn(ExperimentalMaterial3Api::class)
+@android.annotation.SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun HtmlFullPagePreview(
     rawHtml: String,
@@ -179,7 +180,7 @@ fun HtmlFullPagePreview(
     onEditInCodeStudio: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
-    var viewMode by remember { mutableIntStateOf(0) } // 0 = Web, 1 = Split, 2 = Source
+    var viewMode by remember { mutableIntStateOf(0) } // 0 = Rendered Web, 1 = Split View, 2 = Source Code
     var desktopMode by remember { mutableStateOf(false) }
     var darkWebCanvas by remember { mutableStateOf(false) }
     var reloadKey by remember { mutableIntStateOf(0) }
@@ -256,8 +257,11 @@ fun HtmlFullPagePreview(
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.surface)
     ) {
-        // Full-bleed HTML viewport directly beneath the single main top bar
-        Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+        ) {
             when (viewMode) {
                 0 -> RenderHtmlWebView(Modifier.fillMaxSize())
                 1 -> {
@@ -271,10 +275,10 @@ fun HtmlFullPagePreview(
             }
         }
 
-        // Sleek Borderless Tonal Bottom Control Strip (zero second top row!)
+        // Sleek Bottom HTML Controls Dock (zero stacked second top row)
         HorizontalDivider(
             thickness = 0.5.dp,
-            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.28f)
         )
         Surface(
             color = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -287,7 +291,7 @@ fun HtmlFullPagePreview(
                 modifier = Modifier
                     .fillMaxSize()
                     .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 12.dp),
+                    .padding(horizontal = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
@@ -325,7 +329,7 @@ fun HtmlFullPagePreview(
                     Row(
                         modifier = Modifier.padding(horizontal = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         Icon(
                             if (desktopMode) Icons.Default.DesktopWindows else Icons.Default.Smartphone,
@@ -334,7 +338,8 @@ fun HtmlFullPagePreview(
                         )
                         Text(
                             text = if (desktopMode) "Desktop" else "Fit",
-                            style = MaterialTheme.typography.labelSmall
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Medium
                         )
                     }
                 }
@@ -348,8 +353,9 @@ fun HtmlFullPagePreview(
                 ) {
                     Icon(
                         if (darkWebCanvas) Icons.Default.LightMode else Icons.Default.DarkMode,
-                        contentDescription = "Web Theme",
-                        modifier = Modifier.size(16.dp)
+                        contentDescription = "Toggle Web Theme",
+                        tint = if (darkWebCanvas) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(17.dp)
                     )
                 }
 
@@ -357,7 +363,12 @@ fun HtmlFullPagePreview(
                     onClick = { reloadKey++ },
                     modifier = Modifier.size(30.dp)
                 ) {
-                    Icon(Icons.Default.Refresh, contentDescription = "Reload", modifier = Modifier.size(16.dp))
+                    Icon(
+                        Icons.Default.Refresh,
+                        contentDescription = "Reload",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(17.dp)
+                    )
                 }
             }
         }
@@ -366,8 +377,8 @@ fun HtmlFullPagePreview(
 
 /**
  * Full-page Read-Only Document, HTML & Code Viewer.
- * Zero stacked top header or duplicate Edit button — renders content full-bleed
- * with a clean floating bottom-right Rendered/Raw pill when rich preview is supported.
+ * Zero stacked inner top header bar — rich documents float a compact Rendered | Raw pill
+ * at the bottom-right corner.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -411,7 +422,12 @@ fun TextFullPageView(
             rawHtml = textContent ?: "",
             baseFile = file.fileRef,
             fileName = file.name,
-            onEditInCodeStudio = null,
+            onEditInCodeStudio = if (appState != null) {
+                {
+                    appState.viewingFile = file
+                    appState.openInEditMode = true
+                }
+            } else null,
             modifier = Modifier.fillMaxSize()
         )
         return
@@ -456,7 +472,7 @@ fun TextFullPageView(
                         modifier = Modifier
                             .fillMaxSize()
                             .verticalScroll(rememberScrollState())
-                            .padding(horizontal = 20.dp, vertical = 16.dp)
+                            .padding(horizontal = 18.dp, vertical = 14.dp)
                     ) {
                         Text(
                             text = highlighted,
@@ -470,25 +486,24 @@ fun TextFullPageView(
             }
         }
 
-        // Compact Floating Rendered | Raw switcher pill (bottom-right, never stacks a top row)
-        if (!isLoading && supportsRichPreview && !isHtmlFile) {
+        // Compact Floating Mode Pill (Rendered | Raw) — zero stacked top row
+        if (!isLoading && supportsRichPreview) {
             Surface(
                 shape = RoundedCornerShape(50),
                 color = MaterialTheme.colorScheme.surfaceContainerHighest,
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(end = 14.dp, bottom = if (formatType == TextFormatType.CSV && !showRawSource) 54.dp else 14.dp)
+                    .padding(end = 14.dp, bottom = if (formatType == TextFormatType.CSV && !showRawSource) 52.dp else 14.dp)
                     .shadow(6.dp, RoundedCornerShape(50))
             ) {
                 Row(
                     modifier = Modifier.padding(3.dp),
-                    horizontalArrangement = Arrangement.spacedBy(2.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
-                    listOf(false to "Rendered", true to "Raw").forEach { (raw, label) ->
-                        val active = showRawSource == raw
+                    listOf(false to "Rendered", true to "Raw").forEach { (isRaw, label) ->
+                        val active = showRawSource == isRaw
                         Surface(
-                            onClick = { showRawSource = raw },
+                            onClick = { showRawSource = isRaw },
                             shape = RoundedCornerShape(50),
                             color = if (active) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent,
                             contentColor = if (active) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
@@ -513,8 +528,8 @@ fun TextFullPageView(
 }
 
 /**
- * Ultra-Clean Tonal Flat Spreadsheet Table Preview for .csv and .tsv files.
- * Zero stacked top filter bar — filter pill & row stats live neatly in a slim 42.dp bottom bar.
+ * Interactive formatted Spreadsheet Table Preview for .csv and .tsv files
+ * with borderless tonal alternating rows, clickable column sorting, and a sleek bottom filter bar.
  */
 @Composable
 fun CsvInteractiveTablePreview(
@@ -554,8 +569,7 @@ fun CsvInteractiveTablePreview(
                 val vb = b.getOrNull(sCol).orEmpty()
                 val na = va.toDoubleOrNull()
                 val nb = vb.toDoubleOrNull()
-                if (na != null && nb != null) na.compareTo(nb)
-                else va.compareTo(vb, ignoreCase = true)
+                if (na != null && nb != null) na.compareTo(nb) else va.compareTo(vb, ignoreCase = true)
             }
             if (sortAscending) sorted else sorted.reversed()
         }
@@ -575,36 +589,35 @@ fun CsvInteractiveTablePreview(
                 .horizontalScroll(hScroll)
         ) {
             Column(modifier = Modifier.fillMaxHeight()) {
-                // Sticky Tonal Header Row (Clickable for column sorting)
+                // Tonal Flat Sticky Header Row (Clickable for column sorting)
                 Row(
                     modifier = Modifier
-                        .height(36.dp)
-                        .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+                        .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                        .height(36.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Box(
-                        modifier = Modifier.width(48.dp),
+                        modifier = Modifier.width(44.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
                             "#",
-                            fontWeight = FontWeight.Bold,
+                            fontWeight = FontWeight.SemiBold,
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                     for (colIdx in 0 until maxCols) {
-                        VerticalDivider(
-                            thickness = 0.5.dp,
-                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
-                            modifier = Modifier.fillMaxHeight()
-                        )
                         val colTitle = headerRow.getOrNull(colIdx)?.ifBlank { "Col ${colIdx + 1}" } ?: "Col ${colIdx + 1}"
                         val isSorted = sortColumnIndex == colIdx
                         val sortArrow = if (isSorted) (if (sortAscending) " ▲" else " ▼") else ""
+                        VerticalDivider(
+                            thickness = 0.5.dp,
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)
+                        )
                         Box(
                             modifier = Modifier
-                                .width(156.dp)
+                                .width(150.dp)
                                 .fillMaxHeight()
                                 .pointerInput(colIdx) {
                                     detectTapGestures(
@@ -633,22 +646,23 @@ fun CsvInteractiveTablePreview(
                 }
 
                 androidx.compose.foundation.lazy.LazyColumn(
-                    modifier = Modifier.fillMaxHeight(),
-                    contentPadding = PaddingValues(bottom = 12.dp)
+                    modifier = Modifier.fillMaxHeight()
                 ) {
                     items(dataRows.size) { rowIndex ->
                         val row = dataRows[rowIndex]
                         Row(
                             modifier = Modifier
-                                .heightIn(min = 38.dp)
                                 .background(
                                     if (rowIndex % 2 == 0) MaterialTheme.colorScheme.surface
                                     else MaterialTheme.colorScheme.surfaceContainerLow
-                                ),
+                                )
+                                .padding(vertical = 2.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Box(
-                                modifier = Modifier.width(48.dp),
+                                modifier = Modifier
+                                    .width(44.dp)
+                                    .padding(6.dp),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
@@ -659,15 +673,10 @@ fun CsvInteractiveTablePreview(
                                 )
                             }
                             for (colIdx in 0 until maxCols) {
-                                VerticalDivider(
-                                    thickness = 0.5.dp,
-                                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.20f),
-                                    modifier = Modifier.height(38.dp)
-                                )
                                 val cell = row.getOrNull(colIdx).orEmpty()
                                 Box(
                                     modifier = Modifier
-                                        .width(156.dp)
+                                        .width(150.dp)
                                         .padding(horizontal = 10.dp, vertical = 6.dp),
                                     contentAlignment = Alignment.CenterStart
                                 ) {
@@ -685,16 +694,17 @@ fun CsvInteractiveTablePreview(
             }
         }
 
-        // Sleek 42.dp Bottom Table Filter & Stats Strip
+        // Sleek Bottom Filter & Row Count Strip (zero top stacked filter row)
         HorizontalDivider(
             thickness = 0.5.dp,
-            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.28f)
         )
         Surface(
             color = MaterialTheme.colorScheme.surfaceContainerLow,
+            tonalElevation = 0.dp,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(42.dp)
+                .height(44.dp)
         ) {
             Row(
                 modifier = Modifier
@@ -710,13 +720,13 @@ fun CsvInteractiveTablePreview(
                     Text(
                         text = "${dataRows.size} rows × $maxCols cols",
                         style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.SemiBold,
+                        fontWeight = FontWeight.Medium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     if (sortColumnIndex != null) {
                         TextButton(
                             onClick = { sortColumnIndex = null },
-                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
                             modifier = Modifier.height(26.dp)
                         ) {
                             Text("Reset Sort", style = MaterialTheme.typography.labelSmall)
@@ -728,8 +738,8 @@ fun CsvInteractiveTablePreview(
                     value = filterQuery,
                     onValueChange = { filterQuery = it },
                     placeholder = "Filter rows",
-                    modifier = Modifier.widthIn(min = 150.dp, max = 240.dp),
-                    testTagName = "csv_preview_filter"
+                    modifier = Modifier.widthIn(min = 160.dp, max = 240.dp),
+                    testTagName = "csv_preview_filter_input"
                 )
             }
         }
@@ -777,13 +787,21 @@ fun UnsupportedFullPageView(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Icon(
-            Icons.AutoMirrored.Filled.InsertDriveFile,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.size(64.dp)
-        )
-        Spacer(modifier = Modifier.height(14.dp))
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = MaterialTheme.colorScheme.surfaceContainer,
+            modifier = Modifier.size(84.dp)
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    Icons.AutoMirrored.Filled.InsertDriveFile,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(44.dp)
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(16.dp))
         Text(
             text = file.name,
             style = MaterialTheme.typography.titleMedium,
@@ -796,8 +814,8 @@ fun UnsupportedFullPageView(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
-        Spacer(modifier = Modifier.height(22.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Spacer(modifier = Modifier.height(20.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             FilledTonalButton(
                 onClick = {
                     appState.viewingFile = file

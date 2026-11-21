@@ -1,0 +1,51 @@
+/* ==========================================================================
+   OmniOS Bundled Offline Premium Fonts (Zero-Internet LAN / FTP Server Ready)
+   ========================================================================== */
+
+@font-face {
+  font-family: "Inter Local";
+  src: url("../assets/fonts/Inter-Regular.otf") format("opentype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Inter Local";
+  src: url("../assets/fonts/Inter-SemiBold.otf") format("opentype");
+  font-weight: 600 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Outfit Local";
+  src: url("../assets/fonts/outfit-latin-400-normal.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Outfit Local";
+  src: url("../assets/fonts/outfit-latin-600-normal.woff2") format("woff2");
+  font-weight: 600 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Fira Code Local";
+  src: url("../assets/fonts/fira-code-latin-400-normal.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Fira Code Local";
+  src: url("../assets/fonts/fira-code-latin-600-normal.woff2") format("woff2");
+  font-weight: 600 700;
+  font-style: normal;
+  font-display: swap;
+}

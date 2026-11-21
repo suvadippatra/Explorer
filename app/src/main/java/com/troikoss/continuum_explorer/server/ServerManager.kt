@@ -26,7 +26,18 @@ import java.net.NetworkInterface
 import java.util.Collections
 
 /**
- * Lifecycle state for an individual server protocol (HTTP or FTP).
+ * Mutually exclusive hosting mode enforced across the entire application.
+ * Only one hosting mode may be active at any time: FTP Hosting, HTTP Hosting, or OmniOS Casting.
+ */
+enum class ActiveHostingMode {
+    NONE,
+    FTP,
+    HTTP,
+    CASTING
+}
+
+/**
+ * Lifecycle state for an individual server protocol (FTP, HTTP, or OmniOS Casting).
  */
 enum class ProtocolLifecycleState {
     STOPPED,
@@ -37,7 +48,19 @@ enum class ProtocolLifecycleState {
 }
 
 /**
- * Snapshot status for an individual server instance (Ktor HTTP or Apache FTP).
+ * Pluggable lifecycle bridge for the OmniOS Casting Host Engine.
+ * Bound by the OmniOS subsystem so [ServerManager] can orchestrate mutually exclusive
+ * transitions without circular dependencies.
+ */
+interface OmniOSCastingBridge {
+    val isRunning: Boolean
+    suspend fun startOrThrow(context: Context, port: Int)
+    suspend fun stop(graceful: Boolean)
+    fun getActiveConnectionsCount(): Int
+}
+
+/**
+ * Snapshot status for an individual server instance (Apache FTP, Ktor HTTP, or OmniOS Casting).
  */
 data class ProtocolServerStatus(
     val protocolName: String,
@@ -56,62 +79,74 @@ data class ProtocolServerStatus(
 }
 
 /**
- * Unified observable state across Ktor HTTP, Apache FTP, and Screen Mirroring.
+ * Unified observable state across mutually exclusive FTP Hosting, HTTP Hosting, and OmniOS Casting.
  */
 data class UnifiedServerState(
-    val http: ProtocolServerStatus = ProtocolServerStatus(protocolName = "HTTP", port = 8080),
+    val activeHostingMode: ActiveHostingMode = ActiveHostingMode.NONE,
+    val isSyncPlayCompanionActive: Boolean = false,
+    val http: ProtocolServerStatus = ProtocolServerStatus(protocolName = "HTTP", port = ServerManager.DEFAULT_HTTP_PORT),
     val ftp: ProtocolServerStatus = ProtocolServerStatus(protocolName = "FTP", port = 2121),
+    val casting: ProtocolServerStatus = ProtocolServerStatus(protocolName = "OmniOS", port = ServerManager.DEFAULT_CASTING_PORT),
     val ipAddress: String = "127.0.0.1",
     val isScreenCasting: Boolean = false,
     val hubStartedAtMillis: Long = 0L,
     val lastGlobalError: String? = null
 ) {
     val isHttpRunning: Boolean
+        get() = activeHostingMode == ActiveHostingMode.HTTP && http.isRunning
+
+    val isHttpTransportRunning: Boolean
         get() = http.isRunning
 
     val isFtpRunning: Boolean
-        get() = ftp.isRunning
+        get() = activeHostingMode == ActiveHostingMode.FTP && ftp.isRunning
+
+    val isCastingRunning: Boolean
+        get() = activeHostingMode == ActiveHostingMode.CASTING && casting.isRunning
 
     val isAnyRunning: Boolean
-        get() = http.isRunning || ftp.isRunning
+        get() = http.isRunning || ftp.isRunning || casting.isRunning
 
     val isAllRunning: Boolean
         get() = http.isRunning && ftp.isRunning
 
     val isTransitioning: Boolean
-        get() = http.isTransitioning || ftp.isTransitioning
+        get() = http.isTransitioning || ftp.isTransitioning || casting.isTransitioning
 }
 
 /**
- * Central ServerManager responsible for the independent and coordinated startup, shutdown,
- * restart, state monitoring, error handling, and resource cleanup of:
- * - [KtorEmbeddedServer] (Ktor Netty HTTP / WebSocket / Web Portal / SyncPlay server)
- * - [ApacheFtpServerDaemon] (Apache Mina FTP server)
+ * Central ServerManager responsible for strictly mutually exclusive orchestration of:
+ * - [ActiveHostingMode.FTP]: [ApacheFtpServerDaemon] (with optional internal SyncPlay companion transport)
+ * - [ActiveHostingMode.HTTP]: [KtorEmbeddedServer] (Static Website Hosting)
+ * - [ActiveHostingMode.CASTING]: OmniOS Host Engine via [OmniOSCastingBridge]
  *
- * Architectural Separation:
- * This manager coordinates lifecycles asynchronously using structured Kotlin concurrency and
- * [Mutex] synchronization while keeping the underlying HTTP and FTP server implementations
- * completely decoupled.
+ * Starting any hosting mode automatically drains and stops any previously active mode under
+ * [coordinationMutex] to guarantee clean port ownership and predictable power/thermal behavior.
  */
 object ServerManager {
     private const val TAG = "ServerManager"
     const val DEFAULT_HTTP_PORT = 8080
+    const val DEFAULT_CASTING_PORT = 8080
 
     private val supervisorJob = SupervisorJob()
     private val managerScope = CoroutineScope(
-        supervisorJob + Dispatchers.IO + CoroutineName("ContinuumServerManager")
+        supervisorJob + Dispatchers.IO + CoroutineName("HostingServerManager")
     )
 
     // Mutexes prevent race conditions and duplicate server bindings on rapid UI toggles
     private val coordinationMutex = Mutex()
     private val httpMutex = Mutex()
     private val ftpMutex = Mutex()
+    private val castingMutex = Mutex()
 
     @Volatile
     private var ktorServerInstance: KtorEmbeddedServer? = null
 
     @Volatile
     private var ftpServerInstance: ApacheFtpServerDaemon? = null
+
+    @Volatile
+    private var castingBridge: OmniOSCastingBridge? = null
 
     private var monitorJob: Job? = null
 
@@ -123,34 +158,145 @@ object ServerManager {
     val state: StateFlow<UnifiedServerState> = _state.asStateFlow()
 
     /**
-     * Coordinated startup of both Ktor HTTP and Apache FTP servers (or a subset).
-     * Automatically ensures [ContinuumHubService] foreground service is active to comply
-     * with Android 8–15 background execution policies.
+     * Registers the active OmniOS Casting backend engine.
+     */
+    fun registerCastingBridge(bridge: OmniOSCastingBridge) {
+        castingBridge = bridge
+    }
+
+    /**
+     * Strictly activates a single [ActiveHostingMode], shutting down any other active mode first.
+     *
+     * When [mode] is [ActiveHostingMode.FTP] and [withSyncPlayCompanion] is true (e.g., when
+     * SyncPlay is launched from File Manager or FTP Hosting), the internal SyncPlay HTTP/WS
+     * media transport is started alongside FTP without activating HTTP Website Hosting mode.
+     */
+    fun activateExclusiveMode(
+        context: Context,
+        mode: ActiveHostingMode,
+        withSyncPlayCompanion: Boolean = false,
+        castingPort: Int = DEFAULT_CASTING_PORT
+    ) {
+        val appContext = context.applicationContext
+        if (mode != ActiveHostingMode.NONE) {
+            ContinuumHubService.ensureForegroundServiceRunning(appContext)
+        }
+        managerScope.launch {
+            coordinationMutex.withLock {
+                refreshIpAddress()
+                when (mode) {
+                    ActiveHostingMode.NONE -> {
+                        stopCastingInternal(graceful = true)
+                        stopHttpInternal(graceful = true, clearSyncPlay = true)
+                        stopFtpInternal(graceful = true, clearSyncPlay = true)
+                        _state.update {
+                            it.copy(
+                                activeHostingMode = ActiveHostingMode.NONE,
+                                isSyncPlayCompanionActive = false
+                            )
+                        }
+                    }
+
+                    ActiveHostingMode.FTP -> {
+                        val needsClearSync = !withSyncPlayCompanion && _state.value.activeHostingMode != ActiveHostingMode.FTP
+                        if (_state.value.casting.isRunning || _state.value.activeHostingMode == ActiveHostingMode.CASTING) {
+                            stopCastingInternal(graceful = true)
+                        }
+                        if (!withSyncPlayCompanion && _state.value.http.isRunning) {
+                            stopHttpInternal(graceful = true, clearSyncPlay = needsClearSync)
+                        }
+                        _state.update {
+                            it.copy(
+                                activeHostingMode = ActiveHostingMode.FTP,
+                                isSyncPlayCompanionActive = withSyncPlayCompanion
+                            )
+                        }
+                        startFtpInternal(appContext)
+                        if (withSyncPlayCompanion) {
+                            startHttpInternal(appContext)
+                        }
+                        if (!_state.value.ftp.isRunning && (!withSyncPlayCompanion || !_state.value.http.isRunning)) {
+                            _state.update {
+                                it.copy(
+                                    activeHostingMode = ActiveHostingMode.NONE,
+                                    isSyncPlayCompanionActive = false
+                                )
+                            }
+                        }
+                    }
+
+                    ActiveHostingMode.HTTP -> {
+                        if (_state.value.casting.isRunning || _state.value.activeHostingMode == ActiveHostingMode.CASTING) {
+                            stopCastingInternal(graceful = true)
+                        }
+                        if (_state.value.ftp.isRunning || _state.value.activeHostingMode == ActiveHostingMode.FTP) {
+                            stopFtpInternal(graceful = true, clearSyncPlay = true)
+                        }
+                        _state.update {
+                            it.copy(
+                                activeHostingMode = ActiveHostingMode.HTTP,
+                                isSyncPlayCompanionActive = false
+                            )
+                        }
+                        startHttpInternal(appContext)
+                        if (!_state.value.http.isRunning) {
+                            _state.update { it.copy(activeHostingMode = ActiveHostingMode.NONE) }
+                        }
+                    }
+
+                    ActiveHostingMode.CASTING -> {
+                        val preserveSyncPlay = SyncPlayManager.roomState.value.isActive
+                        if (_state.value.http.isRunning) {
+                            stopHttpInternal(graceful = true, clearSyncPlay = !preserveSyncPlay)
+                        }
+                        if (_state.value.ftp.isRunning) {
+                            stopFtpInternal(graceful = true, clearSyncPlay = !preserveSyncPlay)
+                        }
+                        _state.update {
+                            it.copy(
+                                activeHostingMode = ActiveHostingMode.CASTING,
+                                isSyncPlayCompanionActive = false
+                            )
+                        }
+                        startCastingInternal(appContext, castingPort)
+                        if (!_state.value.casting.isRunning) {
+                            _state.update { it.copy(activeHostingMode = ActiveHostingMode.NONE) }
+                        }
+                    }
+                }
+                updateHubTimestampAndServiceState(appContext)
+                if (_state.value.isAnyRunning) {
+                    ensureHealthMonitorRunning(appContext)
+                }
+            }
+        }
+    }
+
+    /**
+     * Compatibility entry point that routes into [activateExclusiveMode]:
+     * - `startFtp = true, startHttp = true` -> FTP Hosting with SyncPlay companion transport.
+     * - `startFtp = true, startHttp = false` -> Exclusive FTP Hosting.
+     * - `startHttp = true, startFtp = false` -> Exclusive HTTP Hosting.
      */
     fun startCoordinated(
         context: Context,
         startHttp: Boolean = true,
         startFtp: Boolean = true
     ) {
-        val appContext = context.applicationContext
-        ContinuumHubService.ensureForegroundServiceRunning(appContext)
-        managerScope.launch {
-            coordinationMutex.withLock {
-                refreshIpAddress()
-                if (startHttp) {
-                    startHttpInternal(appContext)
-                }
-                if (startFtp) {
-                    startFtpInternal(appContext)
-                }
-                updateHubTimestampAndServiceState(appContext)
-                ensureHealthMonitorRunning(appContext)
-            }
+        when {
+            startFtp && startHttp -> activateExclusiveMode(
+                context = context,
+                mode = ActiveHostingMode.FTP,
+                withSyncPlayCompanion = true
+            )
+            startFtp -> activateExclusiveMode(context = context, mode = ActiveHostingMode.FTP)
+            startHttp -> activateExclusiveMode(context = context, mode = ActiveHostingMode.HTTP)
+            else -> stopCoordinated(context = context)
         }
     }
 
     /**
-     * Coordinated graceful shutdown of all running servers.
+     * Coordinated graceful shutdown of whichever hosting mode is active.
      */
     fun stopCoordinated(
         context: Context? = null,
@@ -160,65 +306,83 @@ object ServerManager {
         val appContext = context?.applicationContext
         managerScope.launch {
             coordinationMutex.withLock {
-                stopHttpInternal(graceful = graceful)
-                stopFtpInternal(graceful = graceful)
+                stopCastingInternal(graceful = graceful)
+                stopHttpInternal(graceful = graceful, clearSyncPlay = true)
+                stopFtpInternal(graceful = graceful, clearSyncPlay = true)
+                _state.update {
+                    it.copy(
+                        activeHostingMode = ActiveHostingMode.NONE,
+                        isSyncPlayCompanionActive = false
+                    )
+                }
                 updateHubTimestampAndServiceState(appContext, stopForegroundServiceIfIdle)
             }
         }
     }
 
     /**
-     * Coordinated restart of whichever servers are currently active (or both if none are active),
-     * used when shared folder scope or network settings change.
+     * Restarts whichever exclusive hosting mode is currently active (defaults to FTP Hosting if idle).
      */
     fun restartCoordinated(context: Context) {
         val appContext = context.applicationContext
         ContinuumHubService.ensureForegroundServiceRunning(appContext)
         managerScope.launch {
             coordinationMutex.withLock {
-                val wasHttpActive = _state.value.http.isRunning || _state.value.http.state == ProtocolLifecycleState.ERROR
-                val wasFtpActive = _state.value.ftp.isRunning || _state.value.ftp.state == ProtocolLifecycleState.ERROR
-                val restartHttp = if (!wasHttpActive && !wasFtpActive) true else wasHttpActive
-                val restartFtp = if (!wasHttpActive && !wasFtpActive) true else wasFtpActive
+                val current = _state.value
+                val targetMode = when (current.activeHostingMode) {
+                    ActiveHostingMode.NONE -> ActiveHostingMode.FTP
+                    else -> current.activeHostingMode
+                }
+                val preserveCompanion = targetMode == ActiveHostingMode.FTP && current.isSyncPlayCompanionActive
+                val castingPort = current.casting.port.takeIf { it > 0 } ?: DEFAULT_CASTING_PORT
 
-                if (restartHttp) {
-                    stopHttpInternal(graceful = true)
-                }
-                if (restartFtp) {
-                    stopFtpInternal(graceful = true)
-                }
+                stopCastingInternal(graceful = true)
+                stopHttpInternal(graceful = true, clearSyncPlay = !preserveCompanion)
+                stopFtpInternal(graceful = true, clearSyncPlay = !preserveCompanion)
                 delay(120L)
                 refreshIpAddress()
-                if (restartHttp) {
-                    startHttpInternal(appContext)
+
+                _state.update {
+                    it.copy(
+                        activeHostingMode = targetMode,
+                        isSyncPlayCompanionActive = preserveCompanion
+                    )
                 }
-                if (restartFtp) {
-                    startFtpInternal(appContext)
+                when (targetMode) {
+                    ActiveHostingMode.FTP -> {
+                        startFtpInternal(appContext)
+                        if (preserveCompanion) startHttpInternal(appContext)
+                    }
+                    ActiveHostingMode.HTTP -> startHttpInternal(appContext)
+                    ActiveHostingMode.CASTING -> startCastingInternal(appContext, castingPort)
+                    ActiveHostingMode.NONE -> Unit
                 }
                 updateHubTimestampAndServiceState(appContext)
-                ensureHealthMonitorRunning(appContext)
+                if (_state.value.isAnyRunning) {
+                    ensureHealthMonitorRunning(appContext)
+                }
             }
         }
     }
 
-    // --- INDEPENDENT HTTP SERVER CONTROLS ---
+    // --- EXCLUSIVE HTTP HOSTING CONTROLS ---
 
     fun startHttpServer(context: Context) {
-        val appContext = context.applicationContext
-        ContinuumHubService.ensureForegroundServiceRunning(appContext)
-        managerScope.launch {
-            refreshIpAddress()
-            startHttpInternal(appContext)
-            updateHubTimestampAndServiceState(appContext)
-            ensureHealthMonitorRunning(appContext)
-        }
+        activateExclusiveMode(context, ActiveHostingMode.HTTP)
     }
 
     fun stopHttpServer(context: Context? = null, graceful: Boolean = true) {
         val appContext = context?.applicationContext
         managerScope.launch {
-            stopHttpInternal(graceful = graceful)
-            updateHubTimestampAndServiceState(appContext)
+            coordinationMutex.withLock {
+                stopHttpInternal(graceful = graceful, clearSyncPlay = true)
+                if (_state.value.activeHostingMode == ActiveHostingMode.HTTP) {
+                    _state.update { it.copy(activeHostingMode = ActiveHostingMode.NONE) }
+                } else {
+                    _state.update { it.copy(isSyncPlayCompanionActive = false) }
+                }
+                updateHubTimestampAndServiceState(appContext)
+            }
         }
     }
 
@@ -226,33 +390,55 @@ object ServerManager {
         val appContext = context.applicationContext
         ContinuumHubService.ensureForegroundServiceRunning(appContext)
         managerScope.launch {
-            stopHttpInternal(graceful = true)
-            delay(100L)
-            refreshIpAddress()
-            startHttpInternal(appContext)
-            updateHubTimestampAndServiceState(appContext)
-            ensureHealthMonitorRunning(appContext)
+            coordinationMutex.withLock {
+                stopCastingInternal(graceful = true)
+                stopFtpInternal(graceful = true, clearSyncPlay = true)
+                stopHttpInternal(graceful = true, clearSyncPlay = true)
+                delay(100L)
+                refreshIpAddress()
+                _state.update {
+                    it.copy(
+                        activeHostingMode = ActiveHostingMode.HTTP,
+                        isSyncPlayCompanionActive = false
+                    )
+                }
+                startHttpInternal(appContext)
+                if (!_state.value.http.isRunning) {
+                    _state.update { it.copy(activeHostingMode = ActiveHostingMode.NONE) }
+                }
+                updateHubTimestampAndServiceState(appContext)
+                if (_state.value.isAnyRunning) {
+                    ensureHealthMonitorRunning(appContext)
+                }
+            }
         }
     }
 
-    // --- INDEPENDENT FTP SERVER CONTROLS ---
+    // --- EXCLUSIVE FTP HOSTING CONTROLS ---
 
-    fun startFtpServer(context: Context) {
-        val appContext = context.applicationContext
-        ContinuumHubService.ensureForegroundServiceRunning(appContext)
-        managerScope.launch {
-            refreshIpAddress()
-            startFtpInternal(appContext)
-            updateHubTimestampAndServiceState(appContext)
-            ensureHealthMonitorRunning(appContext)
-        }
+    fun startFtpServer(context: Context, withSyncPlayCompanion: Boolean = false) {
+        activateExclusiveMode(context, ActiveHostingMode.FTP, withSyncPlayCompanion = withSyncPlayCompanion)
     }
 
     fun stopFtpServer(context: Context? = null, graceful: Boolean = true) {
         val appContext = context?.applicationContext
         managerScope.launch {
-            stopFtpInternal(graceful = graceful)
-            updateHubTimestampAndServiceState(appContext)
+            coordinationMutex.withLock {
+                val hadCompanion = _state.value.isSyncPlayCompanionActive
+                stopFtpInternal(graceful = graceful, clearSyncPlay = true)
+                if (hadCompanion) {
+                    stopHttpInternal(graceful = graceful, clearSyncPlay = true)
+                }
+                if (_state.value.activeHostingMode == ActiveHostingMode.FTP) {
+                    _state.update {
+                        it.copy(
+                            activeHostingMode = ActiveHostingMode.NONE,
+                            isSyncPlayCompanionActive = false
+                        )
+                    }
+                }
+                updateHubTimestampAndServiceState(appContext)
+            }
         }
     }
 
@@ -260,12 +446,85 @@ object ServerManager {
         val appContext = context.applicationContext
         ContinuumHubService.ensureForegroundServiceRunning(appContext)
         managerScope.launch {
-            stopFtpInternal(graceful = true)
-            delay(100L)
-            refreshIpAddress()
-            startFtpInternal(appContext)
-            updateHubTimestampAndServiceState(appContext)
-            ensureHealthMonitorRunning(appContext)
+            coordinationMutex.withLock {
+                val keepCompanion = _state.value.isSyncPlayCompanionActive
+                stopCastingInternal(graceful = true)
+                stopFtpInternal(graceful = true, clearSyncPlay = !keepCompanion)
+                if (!keepCompanion && _state.value.http.isRunning) {
+                    stopHttpInternal(graceful = true, clearSyncPlay = true)
+                }
+                delay(100L)
+                refreshIpAddress()
+                _state.update {
+                    it.copy(
+                        activeHostingMode = ActiveHostingMode.FTP,
+                        isSyncPlayCompanionActive = keepCompanion
+                    )
+                }
+                startFtpInternal(appContext)
+                if (keepCompanion && !_state.value.http.isRunning) {
+                    startHttpInternal(appContext)
+                }
+                if (!_state.value.ftp.isRunning) {
+                    _state.update {
+                        it.copy(
+                            activeHostingMode = ActiveHostingMode.NONE,
+                            isSyncPlayCompanionActive = false
+                        )
+                    }
+                }
+                updateHubTimestampAndServiceState(appContext)
+                if (_state.value.isAnyRunning) {
+                    ensureHealthMonitorRunning(appContext)
+                }
+            }
+        }
+    }
+
+    // --- EXCLUSIVE OMNIOS CASTING CONTROLS ---
+
+    fun startCastingServer(context: Context, port: Int = DEFAULT_CASTING_PORT) {
+        activateExclusiveMode(context, ActiveHostingMode.CASTING, castingPort = port)
+    }
+
+    fun stopCastingServer(context: Context? = null, graceful: Boolean = true) {
+        val appContext = context?.applicationContext
+        managerScope.launch {
+            coordinationMutex.withLock {
+                stopCastingInternal(graceful = graceful)
+                if (_state.value.activeHostingMode == ActiveHostingMode.CASTING) {
+                    _state.update { it.copy(activeHostingMode = ActiveHostingMode.NONE) }
+                }
+                updateHubTimestampAndServiceState(appContext)
+            }
+        }
+    }
+
+    fun restartCastingServer(context: Context, port: Int = DEFAULT_CASTING_PORT) {
+        val appContext = context.applicationContext
+        ContinuumHubService.ensureForegroundServiceRunning(appContext)
+        managerScope.launch {
+            coordinationMutex.withLock {
+                stopHttpInternal(graceful = true, clearSyncPlay = false)
+                stopFtpInternal(graceful = true, clearSyncPlay = false)
+                stopCastingInternal(graceful = true)
+                delay(100L)
+                refreshIpAddress()
+                _state.update {
+                    it.copy(
+                        activeHostingMode = ActiveHostingMode.CASTING,
+                        isSyncPlayCompanionActive = false
+                    )
+                }
+                startCastingInternal(appContext, port)
+                if (!_state.value.casting.isRunning) {
+                    _state.update { it.copy(activeHostingMode = ActiveHostingMode.NONE) }
+                }
+                updateHubTimestampAndServiceState(appContext)
+                if (_state.value.isAnyRunning) {
+                    ensureHealthMonitorRunning(appContext)
+                }
+            }
         }
     }
 
@@ -293,7 +552,6 @@ object ServerManager {
             }
 
             try {
-                // Clean up any stale instance first
                 existing?.stop(gracePeriodMillis = 200L, timeoutMillis = 500L)
                 ktorServerInstance = null
 
@@ -317,7 +575,7 @@ object ServerManager {
                     )
                 }
                 ContinuumHubService.syncLegacyStaticFieldsFromManager(_state.value)
-                ContinuumHubService.recordLog("127.0.0.1", "HTTP", "START", "Ktor HTTP/WS Server online on :$DEFAULT_HTTP_PORT")
+                ContinuumHubService.recordLog("127.0.0.1", "HTTP", "START", "HTTP Hosting online on :$DEFAULT_HTTP_PORT")
             } catch (e: Throwable) {
                 Log.e(TAG, "Failed to start Ktor HTTP server", e)
                 ktorServerInstance = null
@@ -336,9 +594,10 @@ object ServerManager {
         }
     }
 
-    private suspend fun stopHttpInternal(graceful: Boolean) {
-        // Every time a server is stopped, clear the previously loaded media file on SyncPlay
-        SyncPlayManager.stopSession(clearMediaHistory = true)
+    private suspend fun stopHttpInternal(graceful: Boolean, clearSyncPlay: Boolean = true) {
+        if (clearSyncPlay) {
+            SyncPlayManager.stopSession(clearMediaHistory = true)
+        }
         httpMutex.withLock {
             val existing = ktorServerInstance
             if (existing == null) {
@@ -366,7 +625,7 @@ object ServerManager {
                 } else {
                     existing.stop(gracePeriodMillis = 100L, timeoutMillis = 400L)
                 }
-                ContinuumHubService.recordLog("127.0.0.1", "HTTP", "STOP", "Ktor HTTP Server stopped cleanly")
+                ContinuumHubService.recordLog("127.0.0.1", "HTTP", "STOP", "HTTP Hosting stopped cleanly")
             } catch (e: Throwable) {
                 Log.w(TAG, "Exception while stopping Ktor HTTP server: ${e.message}")
             } finally {
@@ -444,7 +703,7 @@ object ServerManager {
                     )
                 }
                 ContinuumHubService.syncLegacyStaticFieldsFromManager(_state.value)
-                ContinuumHubService.recordLog("127.0.0.1", "FTP", "START", "Apache FTP Server online on :$ftpPort")
+                ContinuumHubService.recordLog("127.0.0.1", "FTP", "START", "FTP Hosting online on :$ftpPort")
             } catch (e: Throwable) {
                 Log.e(TAG, "Failed to start Apache FTP server on port $ftpPort", e)
                 ftpServerInstance = null
@@ -464,9 +723,10 @@ object ServerManager {
         }
     }
 
-    private suspend fun stopFtpInternal(graceful: Boolean) {
-        // Every time a server is stopped, clear the previously loaded media file on SyncPlay
-        SyncPlayManager.stopSession(clearMediaHistory = true)
+    private suspend fun stopFtpInternal(graceful: Boolean, clearSyncPlay: Boolean = true) {
+        if (clearSyncPlay) {
+            SyncPlayManager.stopSession(clearMediaHistory = true)
+        }
         ftpMutex.withLock {
             val existing = ftpServerInstance
             val ftpPort = SettingsManager.ftpPort.value.coerceIn(1024, 65535)
@@ -492,7 +752,7 @@ object ServerManager {
 
             try {
                 existing.stop(gracePeriodMs = if (graceful) 1500L else 100L)
-                ContinuumHubService.recordLog("127.0.0.1", "FTP", "STOP", "Apache FTP Server stopped cleanly")
+                ContinuumHubService.recordLog("127.0.0.1", "FTP", "STOP", "FTP Hosting stopped cleanly")
             } catch (e: Throwable) {
                 Log.w(TAG, "Exception while stopping Apache FTP server: ${e.message}")
             } finally {
@@ -507,6 +767,119 @@ object ServerManager {
                             activeConnections = 0,
                             hasActiveTransfers = false,
                             errorMessage = null
+                        )
+                    )
+                }
+                ContinuumHubService.syncLegacyStaticFieldsFromManager(_state.value)
+            }
+        }
+    }
+
+    private suspend fun startCastingInternal(appContext: Context, port: Int) {
+        castingMutex.withLock {
+            val bridge = castingBridge
+            val safePort = port.coerceIn(1024, 65535)
+            if (bridge == null) {
+                val errMsg = "OmniOS Casting engine is not registered yet"
+                _state.update {
+                    it.copy(
+                        casting = it.casting.copy(
+                            state = ProtocolLifecycleState.ERROR,
+                            port = safePort,
+                            errorMessage = errMsg
+                        ),
+                        lastGlobalError = errMsg
+                    )
+                }
+                ContinuumHubService.syncLegacyStaticFieldsFromManager(_state.value)
+                return
+            }
+
+            if (bridge.isRunning) {
+                return
+            }
+
+            _state.update {
+                it.copy(
+                    casting = it.casting.copy(
+                        state = ProtocolLifecycleState.STARTING,
+                        port = safePort,
+                        errorMessage = null
+                    )
+                )
+            }
+
+            try {
+                bridge.startOrThrow(appContext, safePort)
+                val now = System.currentTimeMillis()
+                _state.update {
+                    it.copy(
+                        casting = ProtocolServerStatus(
+                            protocolName = "OmniOS",
+                            state = ProtocolLifecycleState.RUNNING,
+                            port = safePort,
+                            startedAtMillis = now,
+                            activeConnections = bridge.getActiveConnectionsCount(),
+                            hasActiveTransfers = bridge.getActiveConnectionsCount() > 0,
+                            errorMessage = null
+                        ),
+                        lastGlobalError = null
+                    )
+                }
+                ContinuumHubService.syncLegacyStaticFieldsFromManager(_state.value)
+                ContinuumHubService.recordLog("127.0.0.1", "CAST", "START", "OmniOS Casting online on :$safePort")
+            } catch (e: Throwable) {
+                Log.e(TAG, "Failed to start OmniOS Casting server on port $safePort", e)
+                val errMsg = e.localizedMessage ?: "Failed to bind OmniOS port $safePort"
+                _state.update {
+                    it.copy(
+                        casting = it.casting.copy(
+                            state = ProtocolLifecycleState.ERROR,
+                            port = safePort,
+                            errorMessage = errMsg
+                        ),
+                        lastGlobalError = "Casting Error: $errMsg"
+                    )
+                }
+                ContinuumHubService.syncLegacyStaticFieldsFromManager(_state.value)
+            }
+        }
+    }
+
+    private suspend fun stopCastingInternal(graceful: Boolean) {
+        castingMutex.withLock {
+            val bridge = castingBridge
+            val currentPort = _state.value.casting.port.takeIf { it > 0 } ?: DEFAULT_CASTING_PORT
+            if (bridge == null || !bridge.isRunning) {
+                _state.update {
+                    it.copy(
+                        casting = ProtocolServerStatus(
+                            protocolName = "OmniOS",
+                            state = ProtocolLifecycleState.STOPPED,
+                            port = currentPort
+                        )
+                    )
+                }
+                ContinuumHubService.syncLegacyStaticFieldsFromManager(_state.value)
+                return
+            }
+
+            _state.update {
+                it.copy(casting = it.casting.copy(state = ProtocolLifecycleState.STOPPING))
+            }
+
+            try {
+                bridge.stop(graceful = graceful)
+                ContinuumHubService.recordLog("127.0.0.1", "CAST", "STOP", "OmniOS Casting stopped cleanly")
+            } catch (e: Throwable) {
+                Log.w(TAG, "Exception while stopping OmniOS Casting server: ${e.message}")
+            } finally {
+                _state.update {
+                    it.copy(
+                        casting = ProtocolServerStatus(
+                            protocolName = "OmniOS",
+                            state = ProtocolLifecycleState.STOPPED,
+                            port = currentPort
                         )
                     )
                 }
@@ -542,10 +915,7 @@ object ServerManager {
                         val firstParent = File(items.first().absolutePath).parentFile
                         firstParent?.takeIf { it.exists() } ?: uploadDropzone
                     }
-                    else -> {
-                        // Hosted without a file or folder: serve isolated upload/dropzone folder
-                        uploadDropzone
-                    }
+                    else -> uploadDropzone
                 }
             }
             FtpHostedMode.FULL_STORAGE -> Environment.getExternalStorageDirectory()
@@ -591,13 +961,20 @@ object ServerManager {
                 val httpConn = ktorServerInstance?.getActiveRequestsCount() ?: 0
                 val ftpConn = ftpServerInstance?.getActiveConnectionsCount() ?: 0
                 val ftpTrans = ftpServerInstance?.hasActiveTransfers() ?: false
+                val castConn = castingBridge?.getActiveConnectionsCount() ?: 0
 
-                // Detect unexpected daemon crash and reflect in state
                 val ftpAlive = ftpServerInstance?.isRunning ?: false
                 val updatedFtpState = if (s.ftp.state == ProtocolLifecycleState.RUNNING && !ftpAlive) {
                     ProtocolLifecycleState.ERROR
                 } else {
                     s.ftp.state
+                }
+
+                val castAlive = castingBridge?.isRunning ?: false
+                val updatedCastState = if (s.casting.state == ProtocolLifecycleState.RUNNING && !castAlive) {
+                    ProtocolLifecycleState.ERROR
+                } else {
+                    s.casting.state
                 }
 
                 _state.update { current ->
@@ -612,6 +989,12 @@ object ServerManager {
                             activeConnections = ftpConn,
                             hasActiveTransfers = ftpTrans,
                             errorMessage = if (updatedFtpState == ProtocolLifecycleState.ERROR) "FTP daemon stopped unexpectedly" else current.ftp.errorMessage
+                        ),
+                        casting = current.casting.copy(
+                            state = updatedCastState,
+                            activeConnections = castConn,
+                            hasActiveTransfers = castConn > 0,
+                            errorMessage = if (updatedCastState == ProtocolLifecycleState.ERROR) "OmniOS host stopped unexpectedly" else current.casting.errorMessage
                         )
                     )
                 }

@@ -153,7 +153,7 @@ fun SettingsScreen(onBack: () -> Unit) {
             SettingsMasterCategory(1, context.getString(R.string.settings_appearance), "Themes, fonts & bars", Icons.Default.Palette),
             SettingsMasterCategory(2, "Editors & Handlers", "Windows & file viewers", Icons.Default.Apps),
             SettingsMasterCategory(3, "Storage & Files", "Delete, drag & archives", Icons.Default.Folder),
-            SettingsMasterCategory(4, "Server Hub", "HTTP, FTP & SyncPlay", Icons.Default.Router),
+            SettingsMasterCategory(4, "Hosting", "FTP, HTTP & Casting", Icons.Default.Router),
             SettingsMasterCategory(5, "Diagnostics", "Memory, shortcuts & about", Icons.Default.Info),
             SettingsMasterCategory(6, "Help Guide", "Quick reference & credits", Icons.Default.HelpOutline)
         )
@@ -673,24 +673,25 @@ fun SettingsScreen(onBack: () -> Unit) {
 
                         Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                             PixelCategoryCard(
-                                title = "Server Hub & Modes",
+                                title = "Hosting & Modes",
                                 icon = Icons.Default.Router
                             ) {
                                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                    // Independent FTP Server Switch
+                                    // Exclusive FTP Hosting Switch
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.SpaceBetween
                                     ) {
                                         Column(modifier = Modifier.weight(1f)) {
-                                            Text("FTP Server (:$ftpPortVal)", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-                                            Text(
-                                                if (hubState.isFtpRunning) "ftp://${hubState.ipAddress}:${hubState.ftp.port}"
-                                                else "Host files, folders, or upload dropzone over FTP",
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
+                                            Text("FTP Hosting (:$ftpPortVal)", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                                            if (hubState.isFtpRunning) {
+                                                Text(
+                                                    "ftp://${hubState.ipAddress}:${hubState.ftp.port}",
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
                                         }
                                         Switch(
                                             checked = hubState.isFtpRunning,
@@ -703,20 +704,21 @@ fun SettingsScreen(onBack: () -> Unit) {
 
                                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
 
-                                    // Independent HTTP Website Server Switch
+                                    // Exclusive HTTP Hosting Switch
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.SpaceBetween
                                     ) {
                                         Column(modifier = Modifier.weight(1f)) {
-                                            Text("HTTP Website & Sync Host (:8080)", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-                                            Text(
-                                                if (hubState.isHttpRunning) "http://${hubState.ipAddress}:${hubState.http.port}"
-                                                else "Host unzipped website folders, HTML files, or SyncPlay room",
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
+                                            Text("HTTP Hosting (:8080)", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                                            if (hubState.isHttpRunning) {
+                                                Text(
+                                                    "http://${hubState.ipAddress}:${hubState.http.port}",
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
                                         }
                                         Switch(
                                             checked = hubState.isHttpRunning,
@@ -746,7 +748,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                                     ) {
                                         Icon(Icons.Default.Router, contentDescription = null, modifier = Modifier.size(18.dp))
                                         Spacer(Modifier.width(8.dp))
-                                        Text("Open Server Hub Dashboard", fontWeight = FontWeight.SemiBold)
+                                        Text("Open Hosting Dashboard", fontWeight = FontWeight.SemiBold)
                                     }
                                 }
                             }

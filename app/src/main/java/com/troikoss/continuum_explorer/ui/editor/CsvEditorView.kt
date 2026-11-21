@@ -18,23 +18,21 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.troikoss.continuum_explorer.ui.components.suite.SingleRowCommandBar
 import com.troikoss.continuum_explorer.ui.components.suite.SlimStatusStrip
 import com.troikoss.continuum_explorer.ui.components.suite.TonalSearchPill
 import java.io.File
 
 /**
- * Desktop-First Ultra-Clean Tonal Flat CSV / TSV Table Studio.
- * - Strict single 48.dp Command Bar (Grid/Raw segmented switch, + Row, + Col, inline filter, Save).
- * - Borderless tonal alternating rows with subtle 0.5.dp column hairlines.
- * - Inline bottom cell-formula editor bar when a cell is selected (no blocking modal popup).
- * - Quiet 26.dp SlimStatusStrip at the bottom.
+ * Desktop-First Ultra-Clean Tonal Flat CSV / TSV Spreadsheet Table Studio.
+ * - Strict single 48.dp Command Bar (zero stacked filter/action rows).
+ * - Borderless tonal alternating rows with whisper-quiet vertical column guides.
+ * - Inline bottom cell/formula bar when a cell is selected.
+ * - Quiet 26.dp bottom status strip.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -54,7 +52,8 @@ fun CsvEditorView(
 
     var isGridView by remember { mutableStateOf(true) }
     var filterQuery by remember { mutableStateOf("") }
-    var showMobileSearch by remember { mutableStateOf(false) }
+    var showCompactFilter by remember { mutableStateOf(false) }
+    var showMoreMenu by remember { mutableStateOf(false) }
 
     val delimiter = remember(rawText) {
         val firstLine = rawText.lineSequence().firstOrNull().orEmpty()
@@ -85,20 +84,33 @@ fun CsvEditorView(
     }
 
     var selectedCell by remember { mutableStateOf<Pair<Int, Int>?>(null) }
-    var editingCellText by remember { mutableStateOf("") }
+    var selectedCellText by remember { mutableStateOf("") }
 
-    fun commitCellEdit() {
+    fun commitSelectedCell() {
         val (r, c) = selectedCell ?: return
         val newRows = csvRows.mapIndexed { rIdx, row ->
             if (rIdx == r) {
                 val mutableRow = row.toMutableList()
                 while (mutableRow.size <= c) mutableRow.add("")
-                mutableRow[c] = editingCellText
+                mutableRow[c] = selectedCellText
                 mutableRow
             } else row
         }
         syncToRawText(newRows)
         selectedCell = null
+    }
+
+    fun addRow() {
+        val colCount = csvRows.firstOrNull()?.size ?: 3
+        val newRows = csvRows.toMutableList()
+        newRows.add(List(colCount) { "" })
+        syncToRawText(newRows)
+    }
+
+    fun addColumn() {
+        val newRows = csvRows.map { row -> row + "" }.toMutableList()
+        if (newRows.isEmpty()) newRows.add(listOf(""))
+        syncToRawText(newRows)
     }
 
     val handleExit = {
@@ -109,19 +121,13 @@ fun CsvEditorView(
         }
     }
 
-    BackHandler {
-        if (selectedCell != null) {
-            selectedCell = null
-        } else {
-            handleExit()
-        }
-    }
+    BackHandler { handleExit() }
 
     if (showUnsavedDialog) {
         AlertDialog(
             onDismissRequest = { showUnsavedDialog = false },
             icon = { Icon(Icons.Default.TableChart, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
-            title = { Text("Unsaved Table Changes", fontWeight = FontWeight.Bold) },
+            title = { Text("Unsaved Changes", fontWeight = FontWeight.Bold) },
             text = { Text("Save your changes to \"${file.name}\" before leaving Table Studio?") },
             confirmButton = {
                 Button(
@@ -154,10 +160,11 @@ fun CsvEditorView(
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.surface)
     ) {
-        val isWide = maxWidth >= 700.dp
+        val isLargeScreen = maxWidth >= 700.dp
+        val isFullScreen by com.troikoss.continuum_explorer.managers.SettingsManager.isFullScreenTabBarHidden
 
         Column(modifier = Modifier.fillMaxSize()) {
-            // Strict Single 48.dp Command Bar (zero stacked action bar underneath)
+            // Strict Single 48.dp Command Bar
             SingleRowCommandBar(
                 navigationContent = {
                     IconButton(
@@ -189,10 +196,7 @@ fun CsvEditorView(
                         listOf(true to "Grid", false to "Raw").forEachIndexed { idx, (grid, label) ->
                             SegmentedButton(
                                 selected = isGridView == grid,
-                                onClick = {
-                                    isGridView = grid
-                                    if (!grid) selectedCell = null
-                                },
+                                onClick = { isGridView = grid },
                                 shape = SegmentedButtonDefaults.itemShape(index = idx, count = 2),
                                 icon = {},
                                 colors = SegmentedButtonDefaults.colors(
@@ -215,78 +219,63 @@ fun CsvEditorView(
                 },
                 actionsContent = {
                     if (isGridView) {
-                        if (isWide) {
-                            FilledTonalButton(
-                                onClick = {
-                                    val colCount = csvRows.firstOrNull()?.size ?: 3
-                                    syncToRawText(csvRows + listOf(List(colCount) { "" }))
-                                },
-                                shape = RoundedCornerShape(50),
-                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
-                                modifier = Modifier.height(30.dp)
-                            ) {
-                                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
-                                Spacer(modifier = Modifier.width(3.dp))
-                                Text("Row", style = MaterialTheme.typography.labelSmall)
-                            }
-                            FilledTonalButton(
-                                onClick = {
-                                    val newRows = csvRows.map { row -> row + "" }.toMutableList()
-                                    if (newRows.isEmpty()) newRows.add(listOf(""))
-                                    syncToRawText(newRows)
-                                },
-                                shape = RoundedCornerShape(50),
-                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
-                                modifier = Modifier.height(30.dp)
-                            ) {
-                                Icon(Icons.Default.ViewColumn, contentDescription = null, modifier = Modifier.size(14.dp))
-                                Spacer(modifier = Modifier.width(3.dp))
-                                Text("Col", style = MaterialTheme.typography.labelSmall)
-                            }
+                        if (isLargeScreen) {
                             TonalSearchPill(
                                 value = filterQuery,
                                 onValueChange = { filterQuery = it },
-                                placeholder = "Filter cells",
-                                modifier = Modifier.width(160.dp),
+                                placeholder = "Filter",
+                                modifier = Modifier.width(156.dp),
                                 testTagName = "csv_filter_input"
                             )
+                            Surface(
+                                onClick = { addRow() },
+                                shape = RoundedCornerShape(50),
+                                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                modifier = Modifier.height(32.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(3.dp)
+                                ) {
+                                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
+                                    Text("Row", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Medium)
+                                }
+                            }
+                            Surface(
+                                onClick = { addColumn() },
+                                shape = RoundedCornerShape(50),
+                                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                modifier = Modifier.height(32.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(3.dp)
+                                ) {
+                                    Icon(Icons.Default.ViewColumn, contentDescription = null, modifier = Modifier.size(14.dp))
+                                    Text("Col", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Medium)
+                                }
+                            }
                         } else {
                             IconButton(
-                                onClick = {
-                                    val colCount = csvRows.firstOrNull()?.size ?: 3
-                                    syncToRawText(csvRows + listOf(List(colCount) { "" }))
-                                },
-                                modifier = Modifier.size(34.dp)
-                            ) {
-                                Icon(Icons.Default.Add, contentDescription = "Add Row", modifier = Modifier.size(18.dp))
-                            }
-                            IconButton(
-                                onClick = {
-                                    val newRows = csvRows.map { row -> row + "" }.toMutableList()
-                                    if (newRows.isEmpty()) newRows.add(listOf(""))
-                                    syncToRawText(newRows)
-                                },
-                                modifier = Modifier.size(34.dp)
-                            ) {
-                                Icon(Icons.Default.ViewColumn, contentDescription = "Add Column", modifier = Modifier.size(18.dp))
-                            }
-                            IconButton(
-                                onClick = { showMobileSearch = !showMobileSearch },
+                                onClick = { showCompactFilter = !showCompactFilter },
                                 modifier = Modifier.size(34.dp)
                             ) {
                                 Icon(
                                     Icons.Default.Search,
                                     contentDescription = "Filter",
-                                    tint = if (showMobileSearch || filterQuery.isNotEmpty()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    tint = if (showCompactFilter || filterQuery.isNotEmpty()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.size(18.dp)
                                 )
                             }
                         }
                     }
 
-                    if (isWide) {
+                    if (isLargeScreen) {
                         FilledTonalButton(
                             onClick = {
+                                commitSelectedCell()
                                 onSave()
                                 lastSavedText = rawText
                             },
@@ -303,6 +292,7 @@ fun CsvEditorView(
                     } else {
                         IconButton(
                             onClick = {
+                                commitSelectedCell()
                                 onSave()
                                 lastSavedText = rawText
                             },
@@ -318,10 +308,59 @@ fun CsvEditorView(
                             )
                         }
                     }
+
+                    Box {
+                        IconButton(onClick = { showMoreMenu = true }, modifier = Modifier.size(34.dp)) {
+                            Icon(
+                                Icons.Default.MoreVert,
+                                contentDescription = "More Options",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(19.dp)
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = showMoreMenu,
+                            onDismissRequest = { showMoreMenu = false }
+                        ) {
+                            if (!isLargeScreen && isGridView) {
+                                DropdownMenuItem(
+                                    text = { Text("Add Row") },
+                                    leadingIcon = { Icon(Icons.Default.Add, contentDescription = null) },
+                                    onClick = { showMoreMenu = false; addRow() }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Add Column") },
+                                    leadingIcon = { Icon(Icons.Default.ViewColumn, contentDescription = null) },
+                                    onClick = { showMoreMenu = false; addColumn() }
+                                )
+                                HorizontalDivider()
+                            }
+                            DropdownMenuItem(
+                                text = { Text(if (isFullScreen) "Show Tab Bar" else "Full Screen") },
+                                leadingIcon = {
+                                    Icon(
+                                        if (isFullScreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
+                                        contentDescription = null
+                                    )
+                                },
+                                onClick = {
+                                    showMoreMenu = false
+                                    com.troikoss.continuum_explorer.managers.SettingsManager.toggleFullScreenTabBar()
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Close Editor", color = MaterialTheme.colorScheme.error) },
+                                leadingIcon = {
+                                    Icon(Icons.Default.Close, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                                },
+                                onClick = { showMoreMenu = false; handleExit() }
+                            )
+                        }
+                    }
                 }
             )
 
-            // Main Table or Raw View
+            // Main Table / Raw Workspace
             Box(
                 modifier = Modifier
                     .weight(1f)
@@ -345,38 +384,38 @@ fun CsvEditorView(
                     ) {
                         LazyColumn(
                             modifier = Modifier.fillMaxHeight(),
-                            contentPadding = PaddingValues(bottom = 16.dp)
+                            contentPadding = PaddingValues(bottom = 24.dp)
                         ) {
-                            // Column Letters Header Row (pure tonal fill, subtle column hairlines)
+                            // Tonal Flat Column Letters Header
                             item {
                                 Row(
                                     modifier = Modifier
-                                        .height(34.dp)
-                                        .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+                                        .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                                        .height(34.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Box(
-                                        modifier = Modifier.width(46.dp),
+                                        modifier = Modifier.width(44.dp),
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Text(
-                                            text = "#",
+                                            "#",
+                                            fontWeight = FontWeight.SemiBold,
                                             style = MaterialTheme.typography.labelSmall,
-                                            fontWeight = FontWeight.Bold,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                     }
                                     for (colIndex in 0 until maxCols) {
                                         VerticalDivider(
                                             thickness = 0.5.dp,
-                                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.28f),
-                                            modifier = Modifier.fillMaxHeight()
+                                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)
                                         )
                                         Box(
                                             modifier = Modifier
                                                 .width(148.dp)
+                                                .fillMaxHeight()
                                                 .padding(horizontal = 10.dp),
-                                            contentAlignment = Alignment.Center
+                                            contentAlignment = Alignment.CenterStart
                                         ) {
                                             Text(
                                                 text = getColName(colIndex),
@@ -390,22 +429,23 @@ fun CsvEditorView(
                                 }
                             }
 
-                            // Data Rows (Ultra-Clean Alternating Tonal Flat)
+                            // Borderless Tonal Alternating Rows
                             itemsIndexed(visibleRows, key = { _, pair -> pair.first }) { _, (rowIndex, row) ->
                                 val isHeaderRow = rowIndex == 0
-                                val rowBg = when {
-                                    isHeaderRow -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.35f)
-                                    rowIndex % 2 == 0 -> MaterialTheme.colorScheme.surface
-                                    else -> MaterialTheme.colorScheme.surfaceContainerLow
-                                }
                                 Row(
                                     modifier = Modifier
-                                        .height(40.dp)
-                                        .background(rowBg),
+                                        .background(
+                                            when {
+                                                isHeaderRow -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.35f)
+                                                rowIndex % 2 == 0 -> MaterialTheme.colorScheme.surface
+                                                else -> MaterialTheme.colorScheme.surfaceContainerLow
+                                            }
+                                        )
+                                        .height(38.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Box(
-                                        modifier = Modifier.width(46.dp),
+                                        modifier = Modifier.width(44.dp),
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Text(
@@ -420,22 +460,24 @@ fun CsvEditorView(
                                     for (colIndex in 0 until maxCols) {
                                         VerticalDivider(
                                             thickness = 0.5.dp,
-                                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.22f),
-                                            modifier = Modifier.fillMaxHeight()
+                                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.18f)
                                         )
                                         val cellText = row.getOrNull(colIndex) ?: ""
-                                        val isCellSelected = selectedCell == Pair(rowIndex, colIndex)
+                                        val isSelected = selectedCell?.first == rowIndex && selectedCell?.second == colIndex
                                         Box(
                                             modifier = Modifier
                                                 .width(148.dp)
                                                 .fillMaxHeight()
                                                 .background(
-                                                    if (isCellSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
-                                                    else androidx.compose.ui.graphics.Color.Transparent
+                                                    if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.72f)
+                                                    else MaterialTheme.colorScheme.surface.copy(alpha = 0f)
                                                 )
                                                 .clickable {
+                                                    if (selectedCell != null && selectedCell != Pair(rowIndex, colIndex)) {
+                                                        commitSelectedCell()
+                                                    }
                                                     selectedCell = Pair(rowIndex, colIndex)
-                                                    editingCellText = cellText
+                                                    selectedCellText = cellText
                                                 }
                                                 .padding(horizontal = 10.dp),
                                             contentAlignment = Alignment.CenterStart
@@ -443,9 +485,12 @@ fun CsvEditorView(
                                             Text(
                                                 text = cellText.ifEmpty { "—" },
                                                 style = MaterialTheme.typography.bodySmall,
-                                                fontWeight = if (isHeaderRow || isCellSelected) FontWeight.SemiBold else FontWeight.Normal,
-                                                color = if (cellText.isEmpty()) MaterialTheme.colorScheme.outline.copy(alpha = 0.45f)
-                                                else MaterialTheme.colorScheme.onSurface,
+                                                fontWeight = if (isHeaderRow || isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                                                color = when {
+                                                    isSelected -> MaterialTheme.colorScheme.onPrimaryContainer
+                                                    cellText.isEmpty() -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+                                                    else -> MaterialTheme.colorScheme.onSurface
+                                                },
                                                 maxLines = 1,
                                                 overflow = TextOverflow.Ellipsis
                                             )
@@ -474,37 +519,21 @@ fun CsvEditorView(
                         }
                     }
 
-                    // Mobile floating filter pill (never stacks a second header bar)
-                    if (!isWide && showMobileSearch) {
-                        Surface(
-                            shape = RoundedCornerShape(14.dp),
-                            color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                            shadowElevation = 6.dp,
+                    // Floating compact filter pill on narrow screens
+                    if (!isLargeScreen && showCompactFilter) {
+                        TonalSearchPill(
+                            value = filterQuery,
+                            onValueChange = { filterQuery = it },
+                            placeholder = "Filter cells",
                             modifier = Modifier
                                 .align(Alignment.TopEnd)
                                 .padding(10.dp)
-                                .width(220.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(6.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                TonalSearchPill(
-                                    value = filterQuery,
-                                    onValueChange = { filterQuery = it },
-                                    placeholder = "Filter cells",
-                                    modifier = Modifier.weight(1f),
-                                    testTagName = "csv_filter_input"
-                                )
-                                IconButton(onClick = { showMobileSearch = false }, modifier = Modifier.size(28.dp)) {
-                                    Icon(Icons.Default.Close, contentDescription = "Close Filter", modifier = Modifier.size(16.dp))
-                                }
-                            }
-                        }
+                                .width(220.dp),
+                            testTagName = "csv_filter_input"
+                        )
                     }
                 } else {
-                    // Clean Borderless Raw CSV Source Editor
+                    // Clean borderless Raw CSV Editor
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
@@ -518,10 +547,8 @@ fun CsvEditorView(
                                 onContentChange(it)
                                 csvRows = parseCsvQuotesAware(it, delimiter)
                             },
-                            textStyle = TextStyle(
+                            textStyle = MaterialTheme.typography.bodyMedium.copy(
                                 fontFamily = FontFamily.Monospace,
-                                fontSize = 13.sp,
-                                lineHeight = 20.sp,
                                 color = MaterialTheme.colorScheme.onSurface
                             ),
                             cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
@@ -533,82 +560,79 @@ fun CsvEditorView(
                 }
             }
 
-            // Inline Bottom Cell-Formula Edit Bar (replaces blocking modal dialog)
+            // Inline Bottom Formula / Cell Edit Strip (appears only when a cell is tapped)
             selectedCell?.let { (r, c) ->
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    HorizontalDivider(
-                        thickness = 0.5.dp,
-                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.30f)
-                    )
-                    Surface(
-                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                HorizontalDivider(
+                    thickness = 0.5.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.30f)
+                )
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceContainer,
+                    tonalElevation = 0.dp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                ) {
+                    Row(
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .height(48.dp)
+                            .fillMaxSize()
+                            .padding(horizontal = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(horizontal = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer
                         ) {
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = MaterialTheme.colorScheme.primaryContainer
+                            Text(
+                                text = "${getColName(c)}${r + 1}",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
+                        }
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(34.dp)
+                        ) {
+                            Box(
+                                contentAlignment = Alignment.CenterStart,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(horizontal = 10.dp)
                             ) {
-                                Text(
-                                    text = "${getColName(c)}${r + 1}",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    fontFamily = FontFamily.Monospace,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                BasicTextField(
+                                    value = selectedCellText,
+                                    onValueChange = { selectedCellText = it },
+                                    singleLine = true,
+                                    textStyle = MaterialTheme.typography.bodySmall.copy(
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    ),
+                                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("csv_cell_edit_input")
                                 )
                             }
-                            Surface(
-                                shape = RoundedCornerShape(10.dp),
-                                color = MaterialTheme.colorScheme.surface,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(34.dp)
-                            ) {
-                                Box(
-                                    contentAlignment = Alignment.CenterStart,
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .padding(horizontal = 10.dp)
-                                ) {
-                                    BasicTextField(
-                                        value = editingCellText,
-                                        onValueChange = { editingCellText = it },
-                                        singleLine = true,
-                                        textStyle = MaterialTheme.typography.bodySmall.copy(
-                                            color = MaterialTheme.colorScheme.onSurface
-                                        ),
-                                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .testTag("csv_cell_edit_input")
-                                    )
-                                }
-                            }
-                            FilledTonalButton(
-                                onClick = { commitCellEdit() },
-                                shape = RoundedCornerShape(50),
-                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
-                                modifier = Modifier.height(32.dp)
-                            ) {
-                                Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(15.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Apply", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold)
-                            }
-                            IconButton(
-                                onClick = { selectedCell = null },
-                                modifier = Modifier.size(30.dp)
-                            ) {
-                                Icon(Icons.Default.Close, contentDescription = "Cancel", modifier = Modifier.size(16.dp))
-                            }
+                        }
+                        FilledTonalButton(
+                            onClick = { commitSelectedCell() },
+                            shape = RoundedCornerShape(50),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                            modifier = Modifier.height(32.dp)
+                        ) {
+                            Text("Apply", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold)
+                        }
+                        IconButton(
+                            onClick = { selectedCell = null },
+                            modifier = Modifier.size(30.dp)
+                        ) {
+                            Icon(Icons.Default.Close, contentDescription = "Cancel", modifier = Modifier.size(16.dp))
                         }
                     }
                 }
@@ -616,8 +640,9 @@ fun CsvEditorView(
 
             // Quiet 26.dp Desktop Status Strip
             SlimStatusStrip(
-                leftText = "${csvRows.size} rows × $maxCols cols" + if (filterQuery.isNotEmpty()) " • Filtered" else "",
-                rightText = "${if (delimiter == '\t') "TSV" else if (delimiter == ';') "CSV (;)" else "CSV"} • ${if (isModified) "Modified" else "Saved"}"
+                leftText = "${csvRows.size} rows × $maxCols cols • ${if (delimiter == '\t') "TSV" else "CSV"}" +
+                    if (isModified) " • Modified" else " • Saved",
+                rightText = selectedCell?.let { (r, c) -> "${getColName(c)}${r + 1}" } ?: "UTF-8"
             )
         }
     }

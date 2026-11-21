@@ -3,6 +3,7 @@ package com.troikoss.continuum_explorer.ui.converter
 import android.os.Environment
 import android.widget.Toast
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -12,11 +13,13 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.troikoss.continuum_explorer.managers.SettingsManager
 import com.troikoss.continuum_explorer.ui.components.InAppFilePickerDialog
 import com.troikoss.continuum_explorer.ui.components.suite.SingleRowCommandBar
@@ -27,16 +30,16 @@ import kotlinx.coroutines.launch
 import java.io.File
 import kotlin.math.roundToInt
 
-private enum class ConverterTopTab(val label: String) {
-    QUICK_PRESETS("Presets"),
-    SINGLE_FILE("Convert"),
-    BATCH_CONVERT("Batch")
+private enum class ConverterMode(val label: String) {
+    PRESETS("Presets"),
+    CONVERT("Convert"),
+    BATCH("Batch")
 }
 
 /**
- * Desktop-First Ultra-Clean Tonal Flat File Converter.
- * - Single 48.dp Command Bar with M3 SingleChoiceSegmentedButtonRow (`Presets` | `Convert` | `Batch`).
- * - True 2-Pane Desktop Workbenches across all 3 modes via `ConverterDesktopPanes.kt` (zero OutlinedCards).
+ * Ultra-Clean Tonal Flat Material 3 File Converter Screen.
+ * - Single 48dp Command Bar with M3 SingleChoiceSegmentedButtonRow (`Presets` | `Convert` | `Batch`)
+ * - 2-Pane Desktop Workbenches (`ConverterDesktopPanes.kt`) with responsive mobile stacking
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -51,9 +54,10 @@ fun FileConverterScreen(
     val scope = rememberCoroutineScope()
     val isFullScreen by SettingsManager.isFullScreenTabBarHidden
 
-    var activeTab by remember { mutableStateOf(ConverterTopTab.QUICK_PRESETS) }
+    var activeMode by remember { mutableStateOf(ConverterMode.PRESETS) }
+    var showOverflowMenu by remember { mutableStateOf(false) }
 
-    // Output Destination
+    // Shared Output Destination
     var destinationMode by remember { mutableStateOf(OutputDestinationMode.CONVERTED_SUBFOLDER) }
     var customOutputFolder by remember {
         mutableStateOf(
@@ -69,7 +73,7 @@ fun FileConverterScreen(
     var presetSubMode by remember { mutableIntStateOf(0) }
     var selectedStudentPreset by remember { mutableStateOf(StudentPresetType.PASSPORT_PHOTO_STANDARD) }
     var studentSourceFile by remember { mutableStateOf<File?>(null) }
-    var customMinKb by remember { mutableFloatStateOf(15f) }
+    var customMinKb by remember { mutableFloatStateOf(20f) }
     var customMaxKb by remember { mutableFloatStateOf(48f) }
     var customWidthInput by remember { mutableStateOf("200") }
     var customHeightInput by remember { mutableStateOf("230") }
@@ -87,11 +91,13 @@ fun FileConverterScreen(
 
     // Single File State
     var singleItem by remember { mutableStateOf<ConverterQueueItem?>(null) }
+    var singleTick by remember { mutableIntStateOf(0) }
     var showSingleFilePicker by remember { mutableStateOf(false) }
     var singleConverting by remember { mutableStateOf(false) }
 
     // Batch Queue State
     val batchQueue = remember { mutableStateListOf<ConverterQueueItem>() }
+    var batchTick by remember { mutableIntStateOf(0) }
     var showBatchFilePicker by remember { mutableStateOf(false) }
     var isBatchRunning by remember { mutableStateOf(false) }
     var globalTargetFormat by remember { mutableStateOf<String?>(null) }
@@ -100,10 +106,9 @@ fun FileConverterScreen(
         val initFiles = (appState?.converterInitialFiles?.toList().orEmpty() + initialFiles).distinctBy { it.absolutePath }
         if (initFiles.isNotEmpty()) {
             if (initFiles.size == 1) {
-                val first = initFiles.first()
-                FileConverterDispatcher.createQueueItem(first)?.let {
+                FileConverterDispatcher.createQueueItem(initFiles.first())?.let {
                     singleItem = it
-                    activeTab = ConverterTopTab.SINGLE_FILE
+                    activeMode = ConverterMode.CONVERT
                 }
             } else {
                 initFiles.forEach { f ->
@@ -111,7 +116,7 @@ fun FileConverterScreen(
                         FileConverterDispatcher.createQueueItem(f)?.let { batchQueue.add(it) }
                     }
                 }
-                activeTab = ConverterTopTab.BATCH_CONVERT
+                activeMode = ConverterMode.BATCH
             }
             appState?.converterInitialFiles?.clear()
         }
@@ -130,10 +135,10 @@ fun FileConverterScreen(
         enhanceSignatureInk = selectedStudentPreset.highContrastSignature
     }
 
-    // File Pickers
+    // Pickers
     if (showStudentImagePicker) {
         InAppFilePickerDialog(
-            title = "Select Photo or Signature",
+            title = "Select Image",
             selectFolders = false,
             allowedExtensions = setOf("jpg", "jpeg", "png", "webp", "bmp"),
             onDismiss = { showStudentImagePicker = false },
@@ -148,7 +153,7 @@ fun FileConverterScreen(
 
     if (showPdfFilePicker) {
         InAppFilePickerDialog(
-            title = "Select PDF Document",
+            title = "Select PDF",
             selectFolders = false,
             allowedExtensions = setOf("pdf"),
             onDismiss = { showPdfFilePicker = false },
@@ -163,28 +168,33 @@ fun FileConverterScreen(
 
     if (showSingleFilePicker) {
         InAppFilePickerDialog(
-            title = "Select File to Convert",
+            title = "Select File",
             selectFolders = false,
             onDismiss = { showSingleFilePicker = false },
             onSelected = { file ->
                 showSingleFilePicker = false
                 val item = FileConverterDispatcher.createQueueItem(file)
-                if (item != null) singleItem = item
-                else Toast.makeText(context, ".${file.extension} is not supported", Toast.LENGTH_SHORT).show()
+                if (item != null) {
+                    singleItem = item
+                } else {
+                    Toast.makeText(context, "Unsupported format: .${file.extension}", Toast.LENGTH_SHORT).show()
+                }
             }
         )
     }
 
     if (showBatchFilePicker) {
         InAppFilePickerDialog(
-            title = "Add Files to Queue",
+            title = "Add Files",
             selectFolders = false,
             allowMultiSelect = true,
             onDismiss = { showBatchFilePicker = false },
             onSelected = { file ->
                 showBatchFilePicker = false
                 FileConverterDispatcher.createQueueItem(file)?.let { item ->
-                    if (batchQueue.none { it.sourceFile.absolutePath == file.absolutePath }) batchQueue.add(item)
+                    if (batchQueue.none { it.sourceFile.absolutePath == file.absolutePath }) {
+                        batchQueue.add(item)
+                    }
                 }
             },
             onMultipleSelected = { files ->
@@ -220,10 +230,12 @@ fun FileConverterScreen(
             .background(MaterialTheme.colorScheme.surface)
     ) {
         val isWide = maxWidth >= 740.dp
+        val isCompactBar = maxWidth < 560.dp
 
         Column(modifier = Modifier.fillMaxSize()) {
-            // Strict Single 48.dp Command Bar
+            // Unified 48dp Single-Row Command Bar with Segmented Mode Switcher
             SingleRowCommandBar(
+                modifier = Modifier.testTag("converter_command_bar"),
                 navigationContent = {
                     IconButton(
                         onClick = onBack,
@@ -231,93 +243,177 @@ fun FileConverterScreen(
                             .size(36.dp)
                             .testTag("converter_back_button")
                     ) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", modifier = Modifier.size(20.dp))
-                    }
-                },
-                titleContent = {
-                    if (isWide) {
-                        Text(
-                            text = "Converter",
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 1
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back",
+                            tint = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.size(20.dp)
                         )
                     }
                 },
+                titleContent = {
+                    Text(
+                        text = "Converter",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1
+                    )
+                },
                 centerContent = {
-                    SingleChoiceSegmentedButtonRow(modifier = Modifier.height(32.dp)) {
-                        ConverterTopTab.entries.forEachIndexed { idx, tab ->
-                            SegmentedButton(
-                                selected = activeTab == tab,
-                                onClick = { activeTab = tab },
-                                shape = SegmentedButtonDefaults.itemShape(index = idx, count = ConverterTopTab.entries.size),
-                                icon = {},
-                                colors = SegmentedButtonDefaults.colors(
-                                    activeContainerColor = MaterialTheme.colorScheme.secondaryContainer,
-                                    activeContentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                                    inactiveContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                    inactiveContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    activeBorderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
-                                    inactiveBorderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)
-                                ),
-                                modifier = Modifier.testTag("converter_tab_${tab.name.lowercase()}")
-                            ) {
-                                Text(
-                                    text = tab.label,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = if (activeTab == tab) FontWeight.SemiBold else FontWeight.Medium
-                                )
+                    if (!isCompactBar) {
+                        SingleChoiceSegmentedButtonRow(
+                            modifier = Modifier
+                                .height(32.dp)
+                                .testTag("converter_mode_segmented")
+                        ) {
+                            ConverterMode.entries.forEachIndexed { idx, mode ->
+                                SegmentedButton(
+                                    selected = activeMode == mode,
+                                    onClick = { activeMode = mode },
+                                    shape = SegmentedButtonDefaults.itemShape(index = idx, count = ConverterMode.entries.size),
+                                    icon = {},
+                                    modifier = Modifier.height(32.dp)
+                                ) {
+                                    Text(
+                                        text = mode.label,
+                                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.5.sp),
+                                        maxLines = 1
+                                    )
+                                }
                             }
                         }
                     }
                 },
                 actionsContent = {
-                    if (isWide) {
+                    if (!isCompactBar) {
                         Surface(
-                            onClick = { showCustomFolderPicker = true },
-                            shape = RoundedCornerShape(50),
+                            shape = RoundedCornerShape(999.dp),
                             color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                            modifier = Modifier.height(30.dp)
+                            modifier = Modifier
+                                .height(30.dp)
+                                .clip(RoundedCornerShape(999.dp))
+                                .clickable { showCustomFolderPicker = true }
+                                .testTag("converter_output_folder_pill")
                         ) {
                             Row(
                                 modifier = Modifier.padding(horizontal = 10.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(5.dp)
                             ) {
-                                Icon(Icons.Default.Folder, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(14.dp))
+                                Icon(
+                                    imageVector = Icons.Default.Folder,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(14.dp)
+                                )
                                 Text(
-                                    text = if (destinationMode == OutputDestinationMode.CUSTOM_FOLDER) customOutputFolder.name else "Converted/",
+                                    text = when (destinationMode) {
+                                        OutputDestinationMode.CONVERTED_SUBFOLDER -> "/Converted"
+                                        OutputDestinationMode.SAME_AS_SOURCE -> "Same Folder"
+                                        OutputDestinationMode.CUSTOM_FOLDER -> customOutputFolder.name
+                                    },
                                     style = MaterialTheme.typography.labelSmall,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
                             }
                         }
-                    } else {
-                        IconButton(onClick = { showCustomFolderPicker = true }, modifier = Modifier.size(34.dp)) {
-                            Icon(Icons.Default.Folder, contentDescription = "Output Folder", modifier = Modifier.size(18.dp))
-                        }
                     }
 
-                    IconButton(onClick = { SettingsManager.toggleFullScreenTabBar() }, modifier = Modifier.size(34.dp)) {
-                        Icon(
-                            if (isFullScreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
-                            contentDescription = "Full Screen",
-                            tint = if (isFullScreen) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(18.dp)
-                        )
+                    Box {
+                        IconButton(
+                            onClick = { showOverflowMenu = true },
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(Icons.Default.MoreVert, contentDescription = "More", modifier = Modifier.size(19.dp))
+                        }
+                        DropdownMenu(
+                            expanded = showOverflowMenu,
+                            onDismissRequest = { showOverflowMenu = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Output: /Converted") },
+                                leadingIcon = {
+                                    Icon(
+                                        if (destinationMode == OutputDestinationMode.CONVERTED_SUBFOLDER) Icons.Default.Check else Icons.Default.Folder,
+                                        contentDescription = null
+                                    )
+                                },
+                                onClick = {
+                                    showOverflowMenu = false
+                                    destinationMode = OutputDestinationMode.CONVERTED_SUBFOLDER
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Output: Same Folder") },
+                                leadingIcon = {
+                                    Icon(
+                                        if (destinationMode == OutputDestinationMode.SAME_AS_SOURCE) Icons.Default.Check else Icons.Default.FolderOpen,
+                                        contentDescription = null
+                                    )
+                                },
+                                onClick = {
+                                    showOverflowMenu = false
+                                    destinationMode = OutputDestinationMode.SAME_AS_SOURCE
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Choose Output Folder") },
+                                leadingIcon = { Icon(Icons.Default.CreateNewFolder, contentDescription = null) },
+                                onClick = {
+                                    showOverflowMenu = false
+                                    showCustomFolderPicker = true
+                                }
+                            )
+                            HorizontalDivider()
+                            DropdownMenuItem(
+                                text = { Text(if (isFullScreen) "Show Tab Bar" else "Fullscreen") },
+                                leadingIcon = {
+                                    Icon(
+                                        if (isFullScreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
+                                        contentDescription = null
+                                    )
+                                },
+                                onClick = {
+                                    showOverflowMenu = false
+                                    SettingsManager.toggleFullScreenTabBar()
+                                }
+                            )
+                        }
                     }
                 }
             )
 
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-            ) {
-                when (activeTab) {
-                    ConverterTopTab.QUICK_PRESETS -> {
+            // Mobile mode segmented strip when top bar is narrow
+            if (isCompactBar) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.surfaceContainerLow)
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth().height(34.dp)) {
+                        ConverterMode.entries.forEachIndexed { idx, mode ->
+                            SegmentedButton(
+                                selected = activeMode == mode,
+                                onClick = { activeMode = mode },
+                                shape = SegmentedButtonDefaults.itemShape(index = idx, count = ConverterMode.entries.size),
+                                icon = {},
+                                modifier = Modifier.height(34.dp)
+                            ) {
+                                Text(mode.label, style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Active Workbench Body
+            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                when (activeMode) {
+                    ConverterMode.PRESETS -> {
                         ConverterPresetsWorkbench(
                             isWide = isWide,
                             presetSubMode = presetSubMode,
@@ -327,34 +423,31 @@ fun FileConverterScreen(
                                 presetErrorText = null
                             },
                             selectedStudentPreset = selectedStudentPreset,
-                            onStudentPresetChange = { selectedStudentPreset = it },
+                            onSelectStudentPreset = { selectedStudentPreset = it },
                             studentSourceFile = studentSourceFile,
                             onPickStudentImage = { showStudentImagePicker = true },
                             customMinKb = customMinKb,
+                            onMinKbChange = { customMinKb = it },
                             customMaxKb = customMaxKb,
                             onMaxKbChange = { customMaxKb = it },
                             customWidthInput = customWidthInput,
-                            onWidthChange = { customWidthInput = it },
+                            onWidthInputChange = { customWidthInput = it },
                             customHeightInput = customHeightInput,
-                            onHeightChange = { customHeightInput = it },
+                            onHeightInputChange = { customHeightInput = it },
                             enhanceSignatureInk = enhanceSignatureInk,
                             onEnhanceInkChange = { enhanceSignatureInk = it },
                             pdfSourceFile = pdfSourceFile,
                             onPickPdf = { showPdfFilePicker = true },
                             selectedPdfCompression = selectedPdfCompression,
-                            onPdfCompressionChange = { selectedPdfCompression = it },
+                            onSelectPdfCompression = { selectedPdfCompression = it },
                             pdfTargetMaxKb = pdfTargetMaxKb,
                             onPdfTargetMaxKbChange = { pdfTargetMaxKb = it },
                             presetProcessing = presetProcessing,
                             presetProgressText = presetProgressText,
                             presetOutputResult = presetOutputResult,
                             presetErrorText = presetErrorText,
-                            onRunImageCompress = {
-                                val src = studentSourceFile
-                                if (src == null || !src.exists()) {
-                                    Toast.makeText(context, "Pick an image first", Toast.LENGTH_SHORT).show()
-                                    return@ConverterPresetsWorkbench
-                                }
+                            onRunImagePreset = {
+                                val src = studentSourceFile ?: return@ConverterPresetsWorkbench
                                 presetProcessing = true
                                 presetErrorText = null
                                 presetOutputResult = null
@@ -382,11 +475,7 @@ fun FileConverterScreen(
                                 }
                             },
                             onRunPdfCompress = {
-                                val src = pdfSourceFile
-                                if (src == null || !src.exists()) {
-                                    Toast.makeText(context, "Select a PDF first", Toast.LENGTH_SHORT).show()
-                                    return@ConverterPresetsWorkbench
-                                }
+                                val src = pdfSourceFile ?: return@ConverterPresetsWorkbench
                                 presetProcessing = true
                                 presetErrorText = null
                                 presetOutputResult = null
@@ -407,67 +496,103 @@ fun FileConverterScreen(
                                     )
                                     presetProcessing = false
                                     res.onSuccess { presetOutputResult = it }
-                                        .onFailure { presetErrorText = it.message ?: "PDF compression failed" }
+                                        .onFailure { presetErrorText = it.message ?: "Compression failed" }
                                 }
                             },
                             onOpenOutput = { out -> appState?.open(out.toUniversal()) }
                         )
                     }
 
-                    ConverterTopTab.SINGLE_FILE -> {
-                        ConverterSingleFileWorkbench(
-                            isWide = isWide,
-                            singleItem = singleItem,
-                            singleConverting = singleConverting,
-                            onPickFile = { showSingleFilePicker = true },
-                            onConvert = { current ->
-                                singleConverting = true
-                                current.status = ConversionJobStatus.CONVERTING
-                                current.errorMessage = null
-                                scope.launch {
-                                    val res = FileConverterDispatcher.convertSingleItem(
-                                        context = context,
-                                        item = current,
-                                        destinationMode = destinationMode,
-                                        customFolder = customOutputFolder,
-                                        onProgress = { p, msg ->
-                                            current.progress = p
-                                            current.statusDetail = msg
+                    ConverterMode.CONVERT -> {
+                        key(singleTick) {
+                            ConverterSingleFileWorkbench(
+                                isWide = isWide,
+                                singleItem = singleItem,
+                                singleConverting = singleConverting,
+                                onPickFile = { showSingleFilePicker = true },
+                                onTargetFormatChange = { fmt ->
+                                    singleItem?.targetFormat = fmt
+                                    singleTick++
+                                },
+                                onImageQualityChange = { q ->
+                                    singleItem?.let { it.tuning = it.tuning.copy(imageQuality = q) }
+                                    singleTick++
+                                },
+                                onConvert = {
+                                    val current = singleItem ?: return@ConverterSingleFileWorkbench
+                                    singleConverting = true
+                                    current.status = ConversionStatus.CONVERTING
+                                    current.errorMessage = null
+                                    singleTick++
+                                    scope.launch {
+                                        val res = FileConverterDispatcher.convertSingleItem(
+                                            context = context,
+                                            item = current,
+                                            destinationMode = destinationMode,
+                                            customFolder = customOutputFolder,
+                                            onProgress = { p, msg ->
+                                                current.progress = p
+                                                current.statusDetail = msg
+                                                singleTick++
+                                            }
+                                        )
+                                        singleConverting = false
+                                        res.onSuccess { out ->
+                                            current.outputFile = out
+                                            current.status = ConversionStatus.COMPLETED
+                                        }.onFailure { err ->
+                                            current.status = ConversionStatus.FAILED
+                                            current.errorMessage = err.message ?: "Conversion failed"
                                         }
-                                    )
-                                    singleConverting = false
-                                    res.onSuccess { out ->
-                                        current.outputFile = out
-                                        current.status = ConversionJobStatus.COMPLETED
-                                    }.onFailure { err ->
-                                        current.status = ConversionJobStatus.FAILED
-                                        current.errorMessage = err.message ?: "Conversion failed"
+                                        singleTick++
                                     }
-                                }
-                            },
-                            onOpenOutput = { out -> appState?.open(out.toUniversal()) }
-                        )
+                                },
+                                onOpenOutput = { out -> appState?.open(out.toUniversal()) }
+                            )
+                        }
                     }
 
-                    ConverterTopTab.BATCH_CONVERT -> {
-                        ConverterBatchWorkbench(
-                            isWide = isWide,
-                            batchQueue = batchQueue,
-                            isBatchRunning = isBatchRunning,
-                            globalTargetFormat = globalTargetFormat,
-                            onGlobalTargetSelected = { fmt ->
-                                globalTargetFormat = fmt
-                                batchQueue.forEach { item ->
-                                    if (fmt in item.availableTargets) item.targetFormat = fmt
-                                }
-                            },
-                            onAddFiles = { showBatchFilePicker = true },
-                            onClearQueue = {
-                                batchQueue.clear()
-                                globalTargetFormat = null
-                            },
-                            onCombineToPdf = {
-                                if (batchQueue.size >= 2) {
+                    ConverterMode.BATCH -> {
+                        val commonTargets = remember(batchQueue.size, batchTick) {
+                            if (batchQueue.isEmpty()) emptyList()
+                            else batchQueue.map { it.availableTargets.toSet() }
+                                .reduceOrNull { acc, set -> acc.intersect(set) }
+                                ?.toList()
+                                .orEmpty()
+                        }
+                        val allAreImages = remember(batchQueue.size) {
+                            batchQueue.isNotEmpty() && batchQueue.all { it.category == ConversionCategory.IMAGE }
+                        }
+
+                        key(batchTick) {
+                            ConverterBatchWorkbench(
+                                isWide = isWide,
+                                batchQueue = batchQueue.toList(),
+                                commonTargets = commonTargets,
+                                allAreImages = allAreImages,
+                                globalTargetFormat = globalTargetFormat,
+                                isBatchRunning = isBatchRunning,
+                                onAddFiles = { showBatchFilePicker = true },
+                                onClearQueue = {
+                                    batchQueue.clear()
+                                    globalTargetFormat = null
+                                    batchTick++
+                                },
+                                onSelectGlobalTarget = { target ->
+                                    globalTargetFormat = target
+                                    batchQueue.forEach { it.targetFormat = target }
+                                    batchTick++
+                                },
+                                onItemTargetChange = { item, fmt ->
+                                    item.targetFormat = fmt
+                                    batchTick++
+                                },
+                                onRemoveItem = { item ->
+                                    batchQueue.remove(item)
+                                    batchTick++
+                                },
+                                onCombineToPdf = {
+                                    if (batchQueue.size < 2) return@ConverterBatchWorkbench
                                     isBatchRunning = true
                                     scope.launch {
                                         val first = batchQueue.first().sourceFile
@@ -490,36 +615,38 @@ fun FileConverterScreen(
                                             Toast.makeText(context, "Error: ${err.message}", Toast.LENGTH_SHORT).show()
                                         }
                                     }
-                                }
-                            },
-                            onConvertAll = {
-                                isBatchRunning = true
-                                scope.launch {
-                                    for (item in batchQueue) {
-                                        item.status = ConversionJobStatus.CONVERTING
-                                        val res = FileConverterDispatcher.convertSingleItem(
-                                            context = context,
-                                            item = item,
-                                            destinationMode = destinationMode,
-                                            customFolder = customOutputFolder,
-                                            onProgress = { p, msg ->
-                                                item.progress = p
-                                                item.statusDetail = msg
+                                },
+                                onConvertAll = {
+                                    isBatchRunning = true
+                                    scope.launch {
+                                        for (item in batchQueue) {
+                                            item.status = ConversionStatus.CONVERTING
+                                            batchTick++
+                                            val res = FileConverterDispatcher.convertSingleItem(
+                                                context = context,
+                                                item = item,
+                                                destinationMode = destinationMode,
+                                                customFolder = customOutputFolder,
+                                                onProgress = { p, msg ->
+                                                    item.progress = p
+                                                    item.statusDetail = msg
+                                                }
+                                            )
+                                            res.onSuccess { out ->
+                                                item.outputFile = out
+                                                item.status = ConversionStatus.COMPLETED
+                                            }.onFailure { err ->
+                                                item.status = ConversionStatus.FAILED
+                                                item.errorMessage = err.message
                                             }
-                                        )
-                                        res.onSuccess { out ->
-                                            item.outputFile = out
-                                            item.status = ConversionJobStatus.COMPLETED
-                                        }.onFailure { err ->
-                                            item.status = ConversionJobStatus.FAILED
-                                            item.errorMessage = err.message
+                                            batchTick++
                                         }
+                                        isBatchRunning = false
                                     }
-                                    isBatchRunning = false
-                                }
-                            },
-                            onOpenOutput = { out -> appState?.open(out.toUniversal()) }
-                        )
+                                },
+                                onOpenOutput = { out -> appState?.open(out.toUniversal()) }
+                            )
+                        }
                     }
                 }
             }

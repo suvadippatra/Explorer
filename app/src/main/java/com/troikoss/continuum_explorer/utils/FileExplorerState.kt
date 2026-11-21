@@ -296,7 +296,7 @@ class FileExplorerState(
             } else if (libraryItem == LibraryItem.VibeArea) {
                 "My suite"
             } else if (libraryItem == LibraryItem.FtpServer) {
-                "FTP/HTTP Server"
+                "Hosting"
             } else if (libraryItem == LibraryItem.ExternalFtp) {
                 "External FTP"
             } else if (libraryItem == LibraryItem.Gallery) {

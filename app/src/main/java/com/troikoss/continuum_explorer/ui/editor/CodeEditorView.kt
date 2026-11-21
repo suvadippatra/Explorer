@@ -42,10 +42,10 @@ import java.io.File
 
 /**
  * Desktop-First Ultra-Clean Tonal Flat Code Studio Editor.
- * - Strict single 48.dp Command Bar (no stacked Find/Replace or metadata bars).
+ * - Strict single 48.dp Command Bar (no stacked Find/Replace or metadata rows).
  * - Floating top-right Tonal Find & Replace card.
- * - 1:1 TextLayoutResult-synchronized line numbers + Live HTML5 Split/Preview.
- * - Quiet 26.dp SlimStatusStrip at the bottom.
+ * - 1:1 TextLayoutResult-synchronized line numbers & live HTML5 Split/Preview.
+ * - Quiet 26.dp bottom status strip for language, lines, chars, and font zoom.
  */
 @SuppressLint("SetJavaScriptEnabled")
 @OptIn(ExperimentalMaterial3Api::class)
@@ -69,8 +69,10 @@ fun CodeEditorView(
     var showSearch by remember { mutableStateOf(false) }
     var fontSizeSp by remember { mutableIntStateOf(13) }
     var wordWrapEnabled by remember { mutableStateOf(true) }
+    var showMoreMenu by remember { mutableStateOf(false) }
 
     val ext = remember(file.name) { file.extension.lowercase() }
+    val langLabel = remember(ext) { ext.uppercase().ifEmpty { "CODE" } }
     val isHtmlFile = remember(ext) { ext in listOf("html", "htm", "xhtml") }
     // 0 = Code Only, 1 = Split Code + HTML Preview, 2 = Full HTML Preview
     var htmlPreviewMode by remember(file.absolutePath) { mutableIntStateOf(0) }
@@ -107,9 +109,7 @@ fun CodeEditorView(
         }
     }
 
-    BackHandler {
-        handleExit()
-    }
+    BackHandler { handleExit() }
 
     if (showUnsavedDialog) {
         AlertDialog(
@@ -146,10 +146,11 @@ fun CodeEditorView(
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.surface)
     ) {
-        val isWide = maxWidth >= 640.dp
+        val isLargeScreen = maxWidth >= 640.dp
+        val isFullScreen by com.troikoss.continuum_explorer.managers.SettingsManager.isFullScreenTabBarHidden
 
         Column(modifier = Modifier.fillMaxSize()) {
-            // Strict Single 48.dp Command Bar
+            // Strict Single 48.dp Tonal Flat Command Bar
             SingleRowCommandBar(
                 navigationContent = {
                     IconButton(
@@ -167,30 +168,24 @@ fun CodeEditorView(
                     }
                 },
                 titleContent = {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Text(
-                            text = if (isModified) "${file.name} •" else file.name,
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f, fill = false)
-                        )
-                    }
+                    Text(
+                        text = if (isModified) "${file.name} •" else file.name,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 },
                 centerContent = {
-                    if (isHtmlFile && isWide) {
-                        val labels = listOf("Code", "Split", "Preview")
+                    if (isHtmlFile && isLargeScreen) {
+                        val modes = listOf("Code", "Split", "Preview")
                         SingleChoiceSegmentedButtonRow(modifier = Modifier.height(32.dp)) {
-                            labels.forEachIndexed { idx, label ->
+                            modes.forEachIndexed { idx, label ->
                                 SegmentedButton(
                                     selected = htmlPreviewMode == idx,
                                     onClick = { htmlPreviewMode = idx },
-                                    shape = SegmentedButtonDefaults.itemShape(index = idx, count = labels.size),
+                                    shape = SegmentedButtonDefaults.itemShape(index = idx, count = modes.size),
                                     icon = {},
                                     colors = SegmentedButtonDefaults.colors(
                                         activeContainerColor = MaterialTheme.colorScheme.secondaryContainer,
@@ -204,7 +199,8 @@ fun CodeEditorView(
                                     Text(
                                         text = label,
                                         style = MaterialTheme.typography.labelSmall,
-                                        fontWeight = if (htmlPreviewMode == idx) FontWeight.SemiBold else FontWeight.Medium
+                                        fontWeight = if (htmlPreviewMode == idx) FontWeight.SemiBold else FontWeight.Medium,
+                                        maxLines = 1
                                     )
                                 }
                             }
@@ -212,23 +208,24 @@ fun CodeEditorView(
                     }
                 },
                 actionsContent = {
-                    if (isHtmlFile && !isWide) {
+                    if (isHtmlFile && !isLargeScreen) {
                         IconButton(
                             onClick = { htmlPreviewMode = (htmlPreviewMode + 1) % 3 },
                             modifier = Modifier.size(34.dp)
                         ) {
                             Icon(
                                 imageVector = when (htmlPreviewMode) {
-                                    0 -> Icons.Default.VerticalSplit
-                                    1 -> Icons.Default.Web
+                                    0 -> Icons.Default.Web
+                                    1 -> Icons.Default.VerticalSplit
                                     else -> Icons.Default.Code
                                 },
-                                contentDescription = "Switch HTML Mode",
+                                contentDescription = "Switch HTML View",
                                 tint = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.size(18.dp)
                             )
                         }
                     }
+
                     IconButton(
                         onClick = { wordWrapEnabled = !wordWrapEnabled },
                         modifier = Modifier.size(34.dp)
@@ -240,6 +237,7 @@ fun CodeEditorView(
                             modifier = Modifier.size(18.dp)
                         )
                     }
+
                     IconButton(
                         onClick = { showSearch = !showSearch },
                         modifier = Modifier
@@ -253,7 +251,8 @@ fun CodeEditorView(
                             modifier = Modifier.size(18.dp)
                         )
                     }
-                    if (isWide) {
+
+                    if (isLargeScreen) {
                         FilledTonalButton(
                             onClick = {
                                 onSave()
@@ -287,6 +286,45 @@ fun CodeEditorView(
                             )
                         }
                     }
+
+                    Box {
+                        IconButton(onClick = { showMoreMenu = true }, modifier = Modifier.size(34.dp)) {
+                            Icon(
+                                Icons.Default.MoreVert,
+                                contentDescription = "More Options",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(19.dp)
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = showMoreMenu,
+                            onDismissRequest = { showMoreMenu = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text(if (isFullScreen) "Show Tab Bar" else "Full Screen") },
+                                leadingIcon = {
+                                    Icon(
+                                        if (isFullScreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
+                                        contentDescription = null
+                                    )
+                                },
+                                onClick = {
+                                    showMoreMenu = false
+                                    com.troikoss.continuum_explorer.managers.SettingsManager.toggleFullScreenTabBar()
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Close Editor", color = MaterialTheme.colorScheme.error) },
+                                leadingIcon = {
+                                    Icon(Icons.Default.Close, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                                },
+                                onClick = {
+                                    showMoreMenu = false
+                                    handleExit()
+                                }
+                            )
+                        }
+                    }
                 }
             )
 
@@ -310,9 +348,9 @@ fun CodeEditorView(
                         Box(
                             modifier = Modifier
                                 .width(gutterWidthDp)
-                                .heightIn(min = totalHeightDp + 24.dp)
+                                .heightIn(min = totalHeightDp + 20.dp)
                                 .background(Color(0xFF252526))
-                                .padding(vertical = 12.dp)
+                                .padding(vertical = 10.dp)
                         ) {
                             Canvas(
                                 modifier = Modifier
@@ -408,7 +446,7 @@ fun CodeEditorView(
                 )
             }
 
-            // Main Workspace Area + Floating Top-Right Find Overlay
+            // Full-bleed Code Workspace + Floating Find/Replace Overlay
             Box(
                 modifier = Modifier
                     .weight(1f)
@@ -433,7 +471,13 @@ fun CodeEditorView(
                         replaceQuery = replaceQuery,
                         onReplaceChange = { replaceQuery = it },
                         matchCountLabel = if (searchQuery.isNotEmpty()) "$matchCount" else null,
-                        onFindNext = null,
+                        onFindNext = {
+                            if (searchQuery.isNotEmpty() && matchCount > 0) {
+                                val updated = textValue.replaceFirst(searchQuery, replaceQuery, ignoreCase = true)
+                                textValue = updated
+                                onContentChange(updated)
+                            }
+                        },
                         onReplaceAll = {
                             if (searchQuery.isNotEmpty() && matchCount > 0) {
                                 val updated = textValue.replace(searchQuery, replaceQuery, ignoreCase = true)
@@ -451,8 +495,7 @@ fun CodeEditorView(
 
             // Quiet 26.dp Desktop Status Strip
             SlimStatusStrip(
-                leftText = "${file.extension.uppercase().ifEmpty { "CODE" }} • $lineCount lines • $charCount chars" +
-                    if (isModified) " • Modified" else " • Saved",
+                leftText = "$langLabel • UTF-8 • $lineCount lines • $charCount chars" + if (isModified) " • Modified" else " • Saved",
                 centerContent = {
                     Text(
                         text = "A-",
@@ -479,7 +522,7 @@ fun CodeEditorView(
                             .padding(horizontal = 4.dp)
                     )
                 },
-                rightText = if (wordWrapEnabled) "WRAP • UTF-8" else "NO-WRAP • UTF-8"
+                rightText = if (wordWrapEnabled) "Wrap" else "No Wrap"
             )
         }
     }

@@ -6,22 +6,21 @@ import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextLayoutResult
@@ -35,6 +34,9 @@ import com.troikoss.continuum_explorer.data.db.SuiteActivityType
 import com.troikoss.continuum_explorer.data.db.SuiteRecentDatabase
 import com.troikoss.continuum_explorer.model.UniversalFile
 import com.troikoss.continuum_explorer.ui.components.InAppFilePickerDialog
+import com.troikoss.continuum_explorer.ui.components.suite.SlimStatusStrip
+import com.troikoss.continuum_explorer.ui.components.suite.TonalFloatingFindOverlay
+import com.troikoss.continuum_explorer.ui.components.suite.TonalVerticalPaneDivider
 import com.troikoss.continuum_explorer.utils.FileExplorerState
 import com.troikoss.continuum_explorer.utils.GlobalEvents
 import com.troikoss.continuum_explorer.utils.getUriForUniversalFile
@@ -46,8 +48,12 @@ import java.io.File
 
 /**
  * Markor-powered Document, Markdown, Todo.txt, Org-Mode, AsciiDoc & CSV Editor Engine.
- * Features 1:1 TextLayoutResult-synchronized line numbers that stay aligned even when long lines soft-wrap,
- * Triple-Line Menu sidebar toggle in the header, and gesture/tab-close exit.
+ * Ultra-Clean Tonal Flat layout:
+ * - Single 48dp command bar at top (`TextEditorTopBar`)
+ * - Floating top-right Find & Replace overlay (`TonalFloatingFindOverlay`)
+ * - 1:1 TextLayoutResult-synchronized line numbers even under soft wrapping
+ * - Toggleable borderless tonal bottom formatting dock (`EditorActionBar`)
+ * - Slim 26dp bottom status strip (`SlimStatusStrip`)
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -88,8 +94,6 @@ fun MarkorTextEngine(
 ) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
-    val configuration = LocalConfiguration.current
-    val isLargeScreen = configuration.screenWidthDp >= 600
     val coroutineScope = rememberCoroutineScope()
 
     val fileRef = remember(file) {
@@ -140,17 +144,17 @@ fun MarkorTextEngine(
 
     var showPathInfoDialog by remember { mutableStateOf(false) }
     var showMoveFilePicker by remember { mutableStateOf(false) }
+    var isFormatDockVisible by remember { mutableStateOf(true) }
     var jumpLineInput by remember { mutableStateOf("") }
     var lastBackPressMs by remember { mutableLongStateOf(0L) }
 
-    // Allow system Back gesture to close the editing page cleanly
     BackHandler(enabled = onExitEditor != null) {
         val now = System.currentTimeMillis()
         if (now - lastBackPressMs < 2000L) {
             onExitEditor?.invoke()
         } else {
             lastBackPressMs = now
-            Toast.makeText(context, "Swipe/press back again or close tab to exit editor", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "Press back again to close editor", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -213,7 +217,7 @@ fun MarkorTextEngine(
     if (showPathInfoDialog) {
         AlertDialog(
             onDismissRequest = { showPathInfoDialog = false },
-            title = { Text("File Details", fontWeight = FontWeight.Bold) },
+            title = { Text("Details", fontWeight = FontWeight.Bold) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("Name: ${file.name}", style = MaterialTheme.typography.bodySmall)
@@ -256,7 +260,7 @@ fun MarkorTextEngine(
                 OutlinedTextField(
                     value = jumpLineInput,
                     onValueChange = { jumpLineInput = it.filter { ch -> ch.isDigit() } },
-                    label = { Text("Line Number (1 - ${stateController.stats.lineCount.coerceAtLeast(1)})") },
+                    label = { Text("Line (1 - ${stateController.stats.lineCount.coerceAtLeast(1)})") },
                     singleLine = true,
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.fillMaxWidth()
@@ -268,9 +272,7 @@ fun MarkorTextEngine(
                     stateController.jumpToLine(line)
                     stateController.showJumpToLineDialog = false
                     jumpLineInput = ""
-                }) {
-                    Text("Jump")
-                }
+                }) { Text("Jump") }
             },
             dismissButton = {
                 TextButton(onClick = { stateController.showJumpToLineDialog = false }) { Text("Cancel") }
@@ -284,202 +286,229 @@ fun MarkorTextEngine(
         TextFormatType.ASCIIDOC
     )
 
-    Column(
+    BoxWithConstraints(
         modifier = modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.surface)
     ) {
-        TextEditorTopBar(
-            fileName = file.name,
-            isMarkdown = isMarkdownLike,
-            displayMode = stateController.displayMode,
-            isLargeScreen = isLargeScreen,
-            onMenuClick = onMenuClick,
-            onModeChange = { stateController.displayMode = it },
-            onUndo = { stateController.undo() },
-            onRedo = { stateController.redo() },
-            onSave = { saveDocument() },
-            onShare = { shareDocument() },
-            onOpenExternal = { openExternalApp() },
-            onViewPath = { showPathInfoDialog = true },
-            onChangePath = { showMoveFilePicker = true },
-            onToggleToc = if (isMarkdownLike) {
-                { stateController.showTocDrawer = !stateController.showTocDrawer }
-            } else null,
-            onCloseEditor = onExitEditor
-        )
+        val isLargeScreen = maxWidth >= 600.dp
 
-        // Search & Replace Bar
-        if (stateController.isSearchActive) {
-            Surface(
-                color = MaterialTheme.colorScheme.surfaceContainerLow,
-                tonalElevation = 1.dp,
-                modifier = Modifier.fillMaxWidth()
+        Column(modifier = Modifier.fillMaxSize()) {
+            // Single 48dp Command Bar
+            TextEditorTopBar(
+                fileName = file.name,
+                isMarkdown = isMarkdownLike,
+                displayMode = stateController.displayMode,
+                isLargeScreen = isLargeScreen,
+                onMenuClick = onMenuClick,
+                onModeChange = { stateController.displayMode = it },
+                onUndo = { stateController.undo() },
+                onRedo = { stateController.redo() },
+                onSave = { saveDocument() },
+                onShare = { shareDocument() },
+                onOpenExternal = { openExternalApp() },
+                onViewPath = { showPathInfoDialog = true },
+                onChangePath = { showMoveFilePicker = true },
+                onToggleToc = if (isMarkdownLike) {
+                    { stateController.showTocDrawer = !stateController.showTocDrawer }
+                } else null,
+                onToggleSearch = { stateController.isSearchActive = !stateController.isSearchActive },
+                isSearchActive = stateController.isSearchActive,
+                onToggleFormatDock = { isFormatDockVisible = !isFormatDockVisible },
+                isFormatDockVisible = isFormatDockVisible,
+                onCloseEditor = onExitEditor
+            )
+
+            // Main Editor / Preview / Split / CSV Grid / Todo.txt Workspace
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
             ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 10.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    OutlinedTextField(
-                        value = stateController.searchQuery,
-                        onValueChange = { stateController.performSearch(it) },
-                        placeholder = { Text("Find...", fontSize = 12.sp) },
-                        singleLine = true,
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.weight(1f)
-                    )
-                    OutlinedTextField(
-                        value = stateController.replaceQuery,
-                        onValueChange = { stateController.replaceQuery = it },
-                        placeholder = { Text("Replace...", fontSize = 12.sp) },
-                        singleLine = true,
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.weight(1f)
-                    )
-                    IconButton(onClick = { stateController.findNext() }, modifier = Modifier.size(32.dp)) {
-                        Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Next")
+                when {
+                    isLoading -> {
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator()
+                        }
                     }
-                    TextButton(onClick = { stateController.replaceAll() }) {
-                        Text("All", style = MaterialTheme.typography.labelSmall)
-                    }
-                    IconButton(onClick = { stateController.isSearchActive = false }, modifier = Modifier.size(32.dp)) {
-                        Icon(Icons.Default.Close, contentDescription = "Close Search")
-                    }
-                }
-            }
-        }
 
-        // Format Action Bar
-        EditorActionBar(
-            formatType = stateController.formatType,
-            onFormatClick = { prefix, suffix, placeholder ->
-                stateController.applyWrapFormat(prefix, suffix, placeholder)
-            },
-            onInsertText = { stateController.insertTextAtCursor(it) },
-            onUndo = { stateController.undo() },
-            onRedo = { stateController.redo() },
-            onCopy = { stateController.copySelectedText(clipboard) },
-            onCut = { stateController.cutSelectedText(clipboard) },
-            onPaste = { stateController.pasteFromClipboard(clipboard) },
-            onIndent = { stateController.indent() },
-            onUnindent = { stateController.unindent() },
-            onToggleSearch = { stateController.isSearchActive = !stateController.isSearchActive },
-            onJumpToLineClick = { stateController.showJumpToLineDialog = true },
-            onFormatAlignTable = { stateController.formatAlignCsv() },
-            onToggleCsvGrid = { stateController.showCsvGrid = !stateController.showCsvGrid },
-            onToggleTodoInteractive = { stateController.showTodoInteractive = !stateController.showTodoInteractive },
-            isTodoInteractive = stateController.showTodoInteractive
-        )
-
-        HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
-
-        // Main Editor / Preview / Split / CSV Grid / Todo.txt Content
-        Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-            when {
-                isLoading -> {
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator()
-                    }
-                }
-                stateController.showCsvGrid -> {
-                    CsvGridEditor(
-                        rawCsvText = stateController.textContent,
-                        onSaveCsv = { updated ->
-                            stateController.updateTextString(updated)
-                            saveDocument()
-                        },
-                        onCloseGrid = { stateController.showCsvGrid = false },
-                        modifier = Modifier.fillMaxSize()
-                    )
-                }
-                stateController.formatType == TextFormatType.TODO_TXT && stateController.showTodoInteractive -> {
-                    TodoTxtInteractiveView(
-                        rawText = stateController.textContent,
-                        onTextChange = { updated -> stateController.updateTextString(updated) },
-                        modifier = Modifier.fillMaxSize()
-                    )
-                }
-                stateController.displayMode == TextDisplayMode.PREVIEW -> {
-                    DocumentPreviewEngine(
-                        rawText = stateController.textContent,
-                        formatType = stateController.formatType,
-                        cursorLine = stateController.stats.currentLine,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                }
-                stateController.displayMode == TextDisplayMode.SPLIT -> {
-                    Row(modifier = Modifier.fillMaxSize()) {
-                        SynchronizedLineNumberTextEditor(
-                            textFieldValue = stateController.textFieldValue,
-                            onValueChange = { stateController.updateText(it) },
-                            fontSizeSp = stateController.fontSizeSp,
-                            fontFamily = FontFamily.Monospace,
-                            syntaxHighlighter = syntaxHighlighter,
-                            currentCursorLine = stateController.stats.currentLine,
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxHeight()
+                    stateController.showCsvGrid -> {
+                        CsvGridEditor(
+                            rawCsvText = stateController.textContent,
+                            onSaveCsv = { updated ->
+                                stateController.updateTextString(updated)
+                                saveDocument()
+                            },
+                            onCloseGrid = { stateController.showCsvGrid = false },
+                            modifier = Modifier.fillMaxSize()
                         )
-                        VerticalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outlineVariant)
+                    }
+
+                    stateController.formatType == TextFormatType.TODO_TXT && stateController.showTodoInteractive -> {
+                        TodoTxtInteractiveView(
+                            rawText = stateController.textContent,
+                            onTextChange = { updated -> stateController.updateTextString(updated) },
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+
+                    stateController.displayMode == TextDisplayMode.PREVIEW -> {
                         DocumentPreviewEngine(
                             rawText = stateController.textContent,
                             formatType = stateController.formatType,
                             cursorLine = stateController.stats.currentLine,
-                            modifier = Modifier.weight(1f).fillMaxHeight()
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+
+                    stateController.displayMode == TextDisplayMode.SPLIT -> {
+                        Row(modifier = Modifier.fillMaxSize()) {
+                            SynchronizedLineNumberTextEditor(
+                                textFieldValue = stateController.textFieldValue,
+                                onValueChange = { stateController.updateText(it) },
+                                fontSizeSp = stateController.fontSizeSp,
+                                fontFamily = FontFamily.Monospace,
+                                syntaxHighlighter = syntaxHighlighter,
+                                currentCursorLine = stateController.stats.currentLine,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxHeight()
+                            )
+                            TonalVerticalPaneDivider()
+                            DocumentPreviewEngine(
+                                rawText = stateController.textContent,
+                                formatType = stateController.formatType,
+                                cursorLine = stateController.stats.currentLine,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxHeight()
+                            )
+                        }
+                    }
+
+                    else -> {
+                        SynchronizedLineNumberTextEditor(
+                            textFieldValue = stateController.textFieldValue,
+                            onValueChange = { stateController.updateText(it) },
+                            fontSizeSp = stateController.fontSizeSp,
+                            fontFamily = if (stateController.formatType == TextFormatType.PLAIN_TEXT) FontFamily.Default else FontFamily.Monospace,
+                            syntaxHighlighter = syntaxHighlighter,
+                            currentCursorLine = stateController.stats.currentLine,
+                            modifier = Modifier.fillMaxSize()
                         )
                     }
                 }
-                else -> {
-                    SynchronizedLineNumberTextEditor(
-                        textFieldValue = stateController.textFieldValue,
-                        onValueChange = { stateController.updateText(it) },
-                        fontSizeSp = stateController.fontSizeSp,
-                        fontFamily = if (stateController.formatType == TextFormatType.PLAIN_TEXT) FontFamily.Default else FontFamily.Monospace,
-                        syntaxHighlighter = syntaxHighlighter,
-                        currentCursorLine = stateController.stats.currentLine,
-                        modifier = Modifier.fillMaxSize()
+
+                // Floating Find & Replace card in top-right (zero vertical bar stacking)
+                if (stateController.isSearchActive) {
+                    val matchCount = remember(stateController.searchQuery, stateController.textContent) {
+                        val q = stateController.searchQuery
+                        if (q.isEmpty()) null
+                        else {
+                            var count = 0
+                            var idx = stateController.textContent.indexOf(q, 0, ignoreCase = true)
+                            while (idx >= 0) {
+                                count++
+                                idx = stateController.textContent.indexOf(q, idx + q.length, ignoreCase = true)
+                            }
+                            "$count"
+                        }
+                    }
+                    TonalFloatingFindOverlay(
+                        searchQuery = stateController.searchQuery,
+                        onSearchChange = { stateController.performSearch(it) },
+                        replaceQuery = stateController.replaceQuery,
+                        onReplaceChange = { stateController.replaceQuery = it },
+                        matchCountLabel = matchCount,
+                        onFindNext = { stateController.findNext() },
+                        onReplaceAll = { stateController.replaceAll() },
+                        onClose = { stateController.isSearchActive = false },
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(10.dp)
                     )
+                }
+
+                if (stateController.showTocDrawer) {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.CenterEnd
+                    ) {
+                        MarkdownTocDrawerContent(
+                            rawMarkdown = stateController.textContent,
+                            onHeaderClick = { item ->
+                                stateController.jumpToCharOffset(item.charOffset)
+                                stateController.showTocDrawer = false
+                            },
+                            onClose = { stateController.showTocDrawer = false }
+                        )
+                    }
                 }
             }
 
-            if (stateController.showTocDrawer) {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.CenterEnd
-                ) {
-                    MarkdownTocDrawerContent(
-                        rawMarkdown = stateController.textContent,
-                        onHeaderClick = { item ->
-                            stateController.jumpToCharOffset(item.charOffset)
-                            stateController.showTocDrawer = false
-                        },
-                        onClose = { stateController.showTocDrawer = false }
+            // Bottom Formatting Dock (only when editing & toggled visible)
+            if (isFormatDockVisible && stateController.displayMode != TextDisplayMode.PREVIEW && !stateController.showCsvGrid) {
+                EditorActionBar(
+                    formatType = stateController.formatType,
+                    onFormatClick = { prefix, suffix, placeholder ->
+                        stateController.applyWrapFormat(prefix, suffix, placeholder)
+                    },
+                    onInsertText = { stateController.insertTextAtCursor(it) },
+                    onUndo = { stateController.undo() },
+                    onRedo = { stateController.redo() },
+                    onCopy = { stateController.copySelectedText(clipboard) },
+                    onCut = { stateController.cutSelectedText(clipboard) },
+                    onPaste = { stateController.pasteFromClipboard(clipboard) },
+                    onIndent = { stateController.indent() },
+                    onUnindent = { stateController.unindent() },
+                    onToggleSearch = { stateController.isSearchActive = !stateController.isSearchActive },
+                    onJumpToLineClick = { stateController.showJumpToLineDialog = true },
+                    onFormatAlignTable = { stateController.formatAlignCsv() },
+                    onToggleCsvGrid = { stateController.showCsvGrid = !stateController.showCsvGrid },
+                    onToggleTodoInteractive = { stateController.showTodoInteractive = !stateController.showTodoInteractive },
+                    isTodoInteractive = stateController.showTodoInteractive,
+                    showTopBarDuplicates = false
+                )
+            }
+
+            // Unified 26dp Slim Status Strip
+            SlimStatusStrip(
+                leftText = "Ln ${stateController.stats.currentLine}/${stateController.stats.lineCount} • ${stateController.stats.wordCount} words • ${stateController.stats.charCount} chars",
+                rightText = "${stateController.formatType.displayName} • UTF-8",
+                centerContent = {
+                    Text(
+                        text = "A-",
+                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp, fontWeight = FontWeight.SemiBold),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .clickable { if (stateController.fontSizeSp > 10f) stateController.fontSizeSp -= 1f }
+                            .padding(horizontal = 4.dp, vertical = 2.dp)
+                    )
+                    Text(
+                        text = "${stateController.fontSizeSp.toInt()}sp",
+                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, fontFamily = FontFamily.Monospace),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = "A+",
+                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp, fontWeight = FontWeight.SemiBold),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .clickable { if (stateController.fontSizeSp < 30f) stateController.fontSizeSp += 1f }
+                            .padding(horizontal = 4.dp, vertical = 2.dp)
                     )
                 }
-            }
+            )
         }
-
-        TextEditorFooter(
-            stats = stateController.stats,
-            fontSizeSp = stateController.fontSizeSp,
-            onFontSizeDecrease = {
-                if (stateController.fontSizeSp > 10f) stateController.fontSizeSp -= 1f
-            },
-            onFontSizeIncrease = {
-                if (stateController.fontSizeSp < 30f) stateController.fontSizeSp += 1f
-            }
-        )
     }
 }
 
 /**
  * Synchronized Line-Number + BasicTextField Pane.
- * Uses [TextLayoutResult] (`onTextLayout`) to measure the exact Y-coordinate (`getLineTop`) and baseline
- * of every logical line's first visual line. Even when long paragraphs soft-wrap across multiple rows,
- * each line number is rendered at the exact vertical offset of its corresponding text line.
+ * Uses [TextLayoutResult] (`onTextLayout`) to measure the exact baseline Y-coordinate
+ * of every logical line's first visual line so line numbers stay 1:1 aligned even when paragraphs soft-wrap.
  */
 @Composable
 private fun SynchronizedLineNumberTextEditor(
@@ -513,7 +542,7 @@ private fun SynchronizedLineNumberTextEditor(
         ((gutterDigits * (fontSizeSp * 0.65f)) + 20f).dp
     }
 
-    val numberColorArgb = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f).toArgb()
+    val numberColorArgb = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f).toArgb()
     val activeNumberColorArgb = MaterialTheme.colorScheme.primary.toArgb()
     val gutterBgColor = MaterialTheme.colorScheme.surfaceContainerLow
 
@@ -522,7 +551,6 @@ private fun SynchronizedLineNumberTextEditor(
             .fillMaxSize()
             .verticalScroll(verticalScroll)
     ) {
-        // 1:1 TextLayoutResult-Synchronized Line Number Gutter
         val totalTextHeightDp = with(density) {
             (textLayoutResult?.size?.height ?: 0).toDp().coerceAtLeast(240.dp)
         }
@@ -572,16 +600,17 @@ private fun SynchronizedLineNumberTextEditor(
             }
         }
 
-        VerticalDivider(
-            thickness = 0.5.dp,
-            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
+        Box(
+            modifier = Modifier
+                .width(0.5.dp)
+                .heightIn(min = totalTextHeightDp + 28.dp)
+                .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f))
         )
 
-        // Editor Text Field
         Box(
             modifier = Modifier
                 .weight(1f)
-                .padding(horizontal = 12.dp, vertical = 14.dp)
+                .padding(horizontal = 14.dp, vertical = 14.dp)
         ) {
             BasicTextField(
                 value = textFieldValue,

@@ -51,23 +51,36 @@ fun HelpDocumentationSection(
     var selectedCategory by remember { mutableStateOf("All") }
 
     val categories = remember {
-        listOf("All", "Server", "Desktop & UI", "Media", "Studios", "Converter", "Open Source")
+        listOf("All", "Hosting", "Desktop & UI", "Media", "Studios", "Converter", "Open Source")
     }
 
     val sections = remember {
         listOf(
             HelpGuideSection(
-                id = "unified_server_and_syncplay",
-                category = "Server",
-                title = "FTP Mode vs. HTTP Website Host",
-                badge = "Server Hub",
+                id = "hosting_ftp_http",
+                category = "Hosting",
+                title = "Hosting: FTP & HTTP Modes",
+                badge = "Hosting",
                 icon = Icons.Default.Sync,
                 items = listOf(
-                    HelpTopicItem("Coordinated FTP & SyncPlay", "Starting SyncPlay from any video/audio file automatically launches both FTP (:2121) and HTTP (:8080) and stages the file in the FTP bucket; toggling FTP Off or tapping Stop Server cleanly stops both."),
-                    HelpTopicItem("Compact 2-Row SyncPlay Controls", "Host transport buttons (Play/Pause, -10s, +10s, Unload, Stop Server) and speed buttons (0.75x–2.0x) fit without horizontal scrolling."),
-                    HelpTopicItem("Mode 2: HTTP Website Host", "Host an unzipped website directory (HTML/CSS/JS/assets) or a single HTML file as a live web server with in-app WebView preview."),
-                    HelpTopicItem("SyncPlay Party & Mandatory PIN", "Host-controlled watch/listen space with mandatory 6-digit Room Passcode, smooth ±3% playbackRate drift micro-nudging, and auto history wipe on stop."),
-                    HelpTopicItem("Network Firewall & Sandbox", "Canonical path traversal protection, executable upload blocker, Untrusted Wi-Fi PIN gate, and isolated ContinuumSuite/MiniAppsSandbox workspace.")
+                    HelpTopicItem("Exclusive Hosting Modes", "Only one mode runs at a time (FTP Hosting, HTTP Hosting, or Casting). Starting a mode automatically stops any other active mode."),
+                    HelpTopicItem("FTP Hosting (:2121)", "Share selected files/folders or full storage over FTP, configure anonymous or user/password access, and set an isolated uploads folder."),
+                    HelpTopicItem("HTTP Hosting (:8080)", "Host an unzipped website directory (HTML/CSS/JS/assets) or single HTML file with live in-app preview and optional PIN gate."),
+                    HelpTopicItem("SyncPlay Party", "Launching SyncPlay from File Manager opens immediately via FTP Hosting; you can also run SyncPlay from either FTP Hosting or Casting with mandatory 6-digit PIN and frame-accurate transport.")
+                )
+            ),
+            HelpGuideSection(
+                id = "hosting_casting_omnios",
+                category = "Hosting",
+                title = "Casting & Receiver Mode",
+                badge = "OmniOS",
+                icon = Icons.Default.Cast,
+                items = listOf(
+                    HelpTopicItem("Built-In Screen & Web Cast", "Cast OmniOS directly onto the current device screen or open the LAN Web Cast URL in any browser with zero approval barrier."),
+                    HelpTopicItem("Wired & Wireless Cast", "Project directly to USB-C DisplayPort / HDMI monitors via secondary Presentation (or USB adb reverse) and launch Android Miracast Wireless Display with no extra approval."),
+                    HelpTopicItem("Same App (LAN) & Receiver Mode", "Switch between Host and Receiver roles with auto LAN NSD discovery, manual IP, and two-way QR (Show QR / Scan QR). App-to-App Cast asks permission on the Receiver before filling the display edge-to-edge with touch support."),
+                    HelpTopicItem("Admin Console & Shared Files", "Toggle My Suite mini-apps (Markdown, Code, Table, Photo, File Converter, File Manager) and Desktop apps live, share selected files/folders for receiver download, and adjust touch gate, tri-route audio, brightness, and desktop style."),
+                    HelpTopicItem("Locked SyncPlay Window", "Active SyncPlay media in Casting opens as a fullscreen OmniOS window that receivers can minimize to multitask but cannot close.")
                 )
             ),
             HelpGuideSection(
@@ -80,7 +93,7 @@ fun HelpDocumentationSection(
                     HelpTopicItem("Persistent Sidebar on New Windows", "Sidebar stays visible on new windows and folder navigation; auto-hides by default only inside Mini-App Create/Edit mode (toggleable via Triple-Line Menu button)."),
                     HelpTopicItem("Interactive 3D Picture Wall", "Tap the 3D Wall icon in Gallery to switch between the 3D Perspective Matrix Wall and 360° 3D Cylinder Ring with touch pan, tilt, pinch-zoom, and frustum culling."),
                     HelpTopicItem("Zero-Lag Hardware Thumbnails", "220x220 downsampled hardware-bitmap Coil requests + O(1) concurrent album preview cache + O(N) grouping pass."),
-                    HelpTopicItem("Clean Minimalist Headers", "Decorative leading title icons removed; Mini-App editors use the Triple-Line Menu icon to toggle the sidebar and system Back gesture to exit.")
+                    HelpTopicItem("Clean Minimalist Headers", "Single-row tonal command bars with minimalist single-line headings and system Back gesture support.")
                 )
             ),
             HelpGuideSection(
@@ -104,7 +117,7 @@ fun HelpDocumentationSection(
                 icon = Icons.Default.Html,
                 items = listOf(
                     HelpTopicItem("1:1 Synchronized Line Numbers", "Markdown Studio and Code Studio use TextLayoutResult baseline coordinates so soft-wrapped lines never desynchronize line numbers."),
-                    HelpTopicItem("Photo Studio + Canvas Layering", "Edit existing photos or frame/composite multiple images on White, Dark, Black, or Cream 1:1 / 16:9 canvases (`ImageStudioCanvasView.kt`)."),
+                    HelpTopicItem("Photo Studio + Canvas Layering", "Edit existing photos or frame/composite multiple images on White, Dark, Black, or Cream 1:1 / 16:9 canvases."),
                     HelpTopicItem("HTML5 Previewer", "Rendered WebView + Raw HTML source inspector with DOM Console Overlay."),
                     HelpTopicItem("Table Studio", "Interactive CSV/TSV spreadsheet grid with column/row insertion and Triple-Line Menu sidebar toggle.")
                 )
@@ -132,8 +145,9 @@ fun HelpDocumentationSection(
                     HelpTopicItem("Markor (Apache 2.0)", "Markdown, Todo.txt, Org-Mode & AsciiDoc text engine by Gregor Santner."),
                     HelpTopicItem("PhotoEditor (MIT)", "Canvas brush, filter matrix, canvas framing & sticker layers by Burhanuddin Rashid."),
                     HelpTopicItem("CoilCompose & Media3 (Apache 2.0)", "Downsampled hardware-bitmap loader, 3D Gallery Wall textures & ExoPlayer DSP."),
-                    HelpTopicItem("Ktor & Apache FtpServer (Apache 2.0)", "Embedded HTTP Website/SyncPlay server & RFC-959 FTP daemon."),
-                    HelpTopicItem("Google Fonts, PDFBox, POI & ZXing", "Offline typography, PDF/Office engines & QR generator (Apache 2.0 / OFL 1.1).")
+                    HelpTopicItem("Ktor, OkHttp & Apache FtpServer (Apache 2.0)", "Embedded HTTP/WebSocket OmniOS & SyncPlay server, LAN invite client & RFC-959 FTP daemon."),
+                    HelpTopicItem("CameraX, ML Kit & ZXing Core (Apache 2.0)", "On-device two-way QR scanning and ISO/IEC 18004 QR code generation."),
+                    HelpTopicItem("Google Fonts, PDFBox & Apache POI", "Offline typography and PDF/Office engines (Apache 2.0 / OFL 1.1).")
                 )
             )
         )

@@ -20,6 +20,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -29,6 +30,8 @@ import androidx.compose.ui.unit.sp
 import androidx.exifinterface.media.ExifInterface
 import com.troikoss.continuum_explorer.managers.SettingsManager
 import com.troikoss.continuum_explorer.model.UniversalFile
+import com.troikoss.continuum_explorer.ui.components.suite.SingleRowCommandBar
+import com.troikoss.continuum_explorer.ui.components.suite.SlimStatusStrip
 import com.troikoss.continuum_explorer.ui.editor.NativeImageViewerEditor
 import com.troikoss.continuum_explorer.ui.editor.pdf.PdfViewerEngine
 import com.troikoss.continuum_explorer.ui.editor.text.MarkorTextEngine
@@ -54,14 +57,9 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * Modular Full-Page File Viewer & Editor Router.
- * Displays top bar information and actions in logical order:
- * 1. File Name & Format/Size Subtitle
- * 2. Edit Option (for supported editable files)
- * 3. Metadata View / Edit Option (Inline Rename, EXIF Tag Editor, Checksums, Attributes)
- * 4. Delete Action (with confirmation)
- * 5. Share & Open External
- * 6. Full-Screen Toggle (Hides/Shows Top TabBar)
+ * Unified Ultra-Clean Tonal Flat Full-Page File Viewer & Editor Router.
+ * Enforces the Strict Single 48.dp Command Bar rule on top with passive file metadata
+ * tucked cleanly into a quiet 26.dp bottom status strip and on-demand Metadata dialog.
  */
 @Composable
 fun ViewOnlyFileViewer(
@@ -81,7 +79,6 @@ fun ViewOnlyFileViewer(
     var currentFile by remember(file) { mutableStateOf(file) }
     val ext = remember(currentFile.name) { currentFile.name.substringAfterLast('.', "").lowercase() }
 
-    // Remember whether this viewer tab was launched directly into Edit Mode (e.g. from 3-dot Edit or My Suite)
     val launchedDirectlyInEdit = remember(file) { startInEditMode || appState.openInEditMode }
     var isEditing by remember(file, startInEditMode, appState.openInEditMode) {
         mutableStateOf(startInEditMode || appState.openInEditMode)
@@ -102,6 +99,7 @@ fun ViewOnlyFileViewer(
 
     var showMetadataDialog by remember { mutableStateOf(false) }
     var showDeleteConfirmDialog by remember { mutableStateOf(false) }
+    var showOverflowMenu by remember { mutableStateOf(false) }
     val isFullScreen by SettingsManager.isFullScreenTabBarHidden
 
     if (isApk) {
@@ -131,7 +129,7 @@ fun ViewOnlyFileViewer(
         }
     }
 
-    // If in Edit Mode, delegate directly to CSV Studio, Code Studio, Markor Studio, or PhotoEditor Studio
+    // Active Edit Mode routing to the 4 Studio Editors
     if (isEditing) {
         val localEditFile = currentFile.fileRef ?: (currentFile.absolutePath.takeIf { it.startsWith("/") }?.let { File(it) })
         LaunchedEffect(currentFile.absolutePath) {
@@ -228,22 +226,35 @@ fun ViewOnlyFileViewer(
     val formattedSize = remember(currentFile.length) {
         if (currentFile.length > 0) Formatter.formatFileSize(context, currentFile.length) else "0 B"
     }
-
-    var showMoreActionsMenu by remember { mutableStateOf(false) }
+    val parentFolder = remember(currentFile.absolutePath) {
+        val raw = currentFile.fileRef?.parent ?: currentFile.absolutePath.substringBeforeLast('/', "")
+        raw.replace("/storage/emulated/0", "Internal").ifBlank { "Storage" }
+    }
+    val formattedModified = remember(currentFile.lastModified) {
+        if (currentFile.lastModified > 0L) {
+            SimpleDateFormat("MMM d, HH:mm", Locale.getDefault()).format(Date(currentFile.lastModified))
+        } else ""
+    }
 
     Column(
         modifier = modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.surface)
     ) {
-        // Strict Single 48.dp Command Bar (no 2-line subtitle; Video renders its own player bar)
+        // Strict Single 48.dp Command Bar (Video renders its own dedicated overlay bar)
         if (!isVideo) {
-            com.troikoss.continuum_explorer.ui.components.suite.SingleRowCommandBar(
+            SingleRowCommandBar(
                 navigationContent = {
-                    IconButton(onClick = onClose, modifier = Modifier.size(36.dp)) {
+                    IconButton(
+                        onClick = onClose,
+                        modifier = Modifier
+                            .size(36.dp)
+                            .testTag("viewer_back_button")
+                    ) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Back",
+                            tint = MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.size(20.dp)
                         )
                     }
@@ -259,6 +270,7 @@ fun ViewOnlyFileViewer(
                     )
                 },
                 actionsContent = {
+                    // Contextual Primary Action (Edit or Browse)
                     if (isText || isImage) {
                         FilledTonalButton(
                             onClick = {
@@ -267,7 +279,9 @@ fun ViewOnlyFileViewer(
                             },
                             shape = RoundedCornerShape(50),
                             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
-                            modifier = Modifier.height(32.dp)
+                            modifier = Modifier
+                                .height(32.dp)
+                                .testTag("viewer_edit_button")
                         ) {
                             Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(15.dp))
                             Spacer(modifier = Modifier.width(4.dp))
@@ -287,7 +301,9 @@ fun ViewOnlyFileViewer(
                             },
                             shape = RoundedCornerShape(50),
                             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
-                            modifier = Modifier.height(32.dp)
+                            modifier = Modifier
+                                .height(32.dp)
+                                .testTag("viewer_browse_archive_button")
                         ) {
                             Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(15.dp))
                             Spacer(modifier = Modifier.width(4.dp))
@@ -297,19 +313,23 @@ fun ViewOnlyFileViewer(
 
                     IconButton(
                         onClick = { showMetadataDialog = true },
-                        modifier = Modifier.size(34.dp)
+                        modifier = Modifier
+                            .size(34.dp)
+                            .testTag("viewer_info_button")
                     ) {
                         Icon(
                             Icons.Default.Info,
-                            contentDescription = "Metadata",
+                            contentDescription = "File Info",
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(19.dp)
                         )
                     }
 
                     IconButton(
                         onClick = { shareFiles(context, scope, listOf(currentFile)) },
-                        modifier = Modifier.size(34.dp)
+                        modifier = Modifier
+                            .size(34.dp)
+                            .testTag("viewer_share_button")
                     ) {
                         Icon(
                             Icons.Default.Share,
@@ -333,25 +353,25 @@ fun ViewOnlyFileViewer(
 
                     Box {
                         IconButton(
-                            onClick = { showMoreActionsMenu = true },
+                            onClick = { showOverflowMenu = true },
                             modifier = Modifier.size(34.dp)
                         ) {
                             Icon(
                                 Icons.Default.MoreVert,
-                                contentDescription = "More Actions",
+                                contentDescription = "More Options",
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(19.dp)
                             )
                         }
                         DropdownMenu(
-                            expanded = showMoreActionsMenu,
-                            onDismissRequest = { showMoreActionsMenu = false }
+                            expanded = showOverflowMenu,
+                            onDismissRequest = { showOverflowMenu = false }
                         ) {
                             DropdownMenuItem(
                                 text = { Text("Open External") },
                                 leadingIcon = { Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null) },
                                 onClick = {
-                                    showMoreActionsMenu = false
+                                    showOverflowMenu = false
                                     val uri = getUriForUniversalFile(context, currentFile)
                                     if (uri != null) {
                                         val intent = Intent(Intent.ACTION_VIEW).apply {
@@ -374,7 +394,7 @@ fun ViewOnlyFileViewer(
                                     )
                                 },
                                 onClick = {
-                                    showMoreActionsMenu = false
+                                    showOverflowMenu = false
                                     showDeleteConfirmDialog = true
                                 }
                             )
@@ -384,7 +404,12 @@ fun ViewOnlyFileViewer(
             )
         }
 
-        Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+        // Main Viewer Content Area (Zero stacked inner detail headers)
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+        ) {
             when {
                 isPdf -> {
                     PdfViewerEngine(
@@ -433,13 +458,11 @@ fun ViewOnlyFileViewer(
             }
         }
 
+        // Quiet 26.dp Bottom Metadata Status Strip (replaces top 2nd detail rows)
         if (!isVideo && !isAudio) {
-            val parentLabel = remember(currentFile.absolutePath) {
-                currentFile.fileRef?.parentFile?.name ?: currentFile.absolutePath.substringBeforeLast('/').substringAfterLast('/', "")
-            }
-            com.troikoss.continuum_explorer.ui.components.suite.SlimStatusStrip(
-                leftText = "${ext.uppercase().ifEmpty { "FILE" }} • $formattedSize",
-                rightText = parentLabel
+            SlimStatusStrip(
+                leftText = "${ext.uppercase().ifEmpty { "FILE" }} • $formattedSize • $parentFolder",
+                rightText = formattedModified
             )
         }
     }
@@ -450,9 +473,7 @@ fun ViewOnlyFileViewer(
             onDismissRequest = { showDeleteConfirmDialog = false },
             icon = { Icon(Icons.Default.DeleteForever, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
             title = { Text("Delete File?", fontWeight = FontWeight.Bold) },
-            text = {
-                Text("Are you sure you want to delete \"${currentFile.name}\"?")
-            },
+            text = { Text("Delete \"${currentFile.name}\"?") },
             confirmButton = {
                 Button(
                     onClick = {
@@ -477,14 +498,10 @@ fun ViewOnlyFileViewer(
                         }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-                ) {
-                    Text("Delete")
-                }
+                ) { Text("Delete") }
             },
             dismissButton = {
-                TextButton(onClick = { showDeleteConfirmDialog = false }) {
-                    Text("Cancel")
-                }
+                TextButton(onClick = { showDeleteConfirmDialog = false }) { Text("Cancel") }
             }
         )
     }
@@ -541,7 +558,6 @@ private fun FileMetadataEditorDialog(
     LaunchedEffect(fileRef) {
         withContext(Dispatchers.IO) {
             if (fileRef != null && fileRef.exists()) {
-                // Load EXIF if applicable
                 if (canEditExif) {
                     runCatching {
                         val exif = ExifInterface(fileRef.absolutePath)
@@ -554,7 +570,6 @@ private fun FileMetadataEditorDialog(
                         hasGps = exif.latLong != null
                     }
                 }
-                // Compute Checksums (up to 64 MB for instant responsiveness)
                 if (fileRef.length() <= 64 * 1024 * 1024) {
                     runCatching {
                         val md5 = MessageDigest.getInstance("MD5")
@@ -599,7 +614,7 @@ private fun FileMetadataEditorDialog(
         title = {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Icon(Icons.Default.Info, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                Text("File Metadata & Properties", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                Text("File Info", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
             }
         },
         text = {
@@ -610,8 +625,7 @@ private fun FileMetadataEditorDialog(
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                // 1. Inline Rename & Extension Edit
-                Text("File Name & Extension", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                Text("Name", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                 OutlinedTextField(
                     value = renameInput,
                     onValueChange = { renameInput = it },
@@ -629,25 +643,12 @@ private fun FileMetadataEditorDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                HorizontalDivider()
+                HorizontalDivider(thickness = 0.5.dp)
 
-                // 2. Storage Attributes & Copyable Paths / Checksums
-                Text("Storage & Checksums", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-
-                MetadataRowItem(
-                    label = "Path",
-                    value = fullPath,
-                    onCopy = { onCopyText("Path", fullPath) }
-                )
-                MetadataRowItem(
-                    label = "Size",
-                    value = formattedSize,
-                    onCopy = { onCopyText("Size", formattedSize) }
-                )
-                MetadataRowItem(
-                    label = "Modified",
-                    value = formattedDate
-                )
+                Text("Properties", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                MetadataRowItem(label = "Path", value = fullPath, onCopy = { onCopyText("Path", fullPath) })
+                MetadataRowItem(label = "Size", value = formattedSize, onCopy = { onCopyText("Size", formattedSize) })
+                MetadataRowItem(label = "Modified", value = formattedDate)
                 if (fileRef != null) {
                     val perms = buildString {
                         append(if (fileRef.canRead()) "r" else "-")
@@ -657,29 +658,17 @@ private fun FileMetadataEditorDialog(
                     }
                     MetadataRowItem(label = "Permissions", value = perms)
                 }
-                MetadataRowItem(
-                    label = "MD5",
-                    value = md5Hash,
-                    monospace = true,
-                    onCopy = { onCopyText("MD5", md5Hash) }
-                )
-                MetadataRowItem(
-                    label = "SHA-256",
-                    value = sha256Hash,
-                    monospace = true,
-                    onCopy = { onCopyText("SHA-256", sha256Hash) }
-                )
+                MetadataRowItem(label = "MD5", value = md5Hash, monospace = true, onCopy = { onCopyText("MD5", md5Hash) })
+                MetadataRowItem(label = "SHA-256", value = sha256Hash, monospace = true, onCopy = { onCopyText("SHA-256", sha256Hash) })
 
-                // 3. Editable EXIF Tags (for JPEG / PNG / WebP)
                 if (canEditExif) {
-                    HorizontalDivider()
-                    Text("Editable Image EXIF Tags", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                    HorizontalDivider(thickness = 0.5.dp)
+                    Text("EXIF Tags", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
 
                     OutlinedTextField(
                         value = exifArtist,
                         onValueChange = { exifArtist = it },
-                        label = { Text("Artist / Author") },
-                        leadingIcon = { Icon(Icons.Default.Person, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                        label = { Text("Artist") },
                         shape = RoundedCornerShape(12.dp),
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
@@ -688,7 +677,6 @@ private fun FileMetadataEditorDialog(
                         value = exifCopyright,
                         onValueChange = { exifCopyright = it },
                         label = { Text("Copyright") },
-                        leadingIcon = { Icon(Icons.Default.Copyright, contentDescription = null, modifier = Modifier.size(18.dp)) },
                         shape = RoundedCornerShape(12.dp),
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
@@ -696,8 +684,7 @@ private fun FileMetadataEditorDialog(
                     OutlinedTextField(
                         value = exifDescription,
                         onValueChange = { exifDescription = it },
-                        label = { Text("Description / Caption") },
-                        leadingIcon = { Icon(Icons.Default.Notes, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                        label = { Text("Caption") },
                         shape = RoundedCornerShape(12.dp),
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
@@ -706,7 +693,7 @@ private fun FileMetadataEditorDialog(
                         OutlinedTextField(
                             value = exifMake,
                             onValueChange = { exifMake = it },
-                            label = { Text("Camera Make") },
+                            label = { Text("Make") },
                             shape = RoundedCornerShape(12.dp),
                             singleLine = true,
                             modifier = Modifier.weight(1f)
@@ -714,7 +701,7 @@ private fun FileMetadataEditorDialog(
                         OutlinedTextField(
                             value = exifModel,
                             onValueChange = { exifModel = it },
-                            label = { Text("Camera Model") },
+                            label = { Text("Model") },
                             shape = RoundedCornerShape(12.dp),
                             singleLine = true,
                             modifier = Modifier.weight(1f)
@@ -722,7 +709,7 @@ private fun FileMetadataEditorDialog(
                     }
 
                     if (hasGps) {
-                        OutlinedButton(
+                        FilledTonalButton(
                             onClick = {
                                 scope.launch(Dispatchers.IO) {
                                     runCatching {
@@ -734,7 +721,7 @@ private fun FileMetadataEditorDialog(
                                         hasGps = false
                                     }
                                     withContext(Dispatchers.Main) {
-                                        Toast.makeText(context, "GPS location stripped from image", Toast.LENGTH_SHORT).show()
+                                        Toast.makeText(context, "GPS location stripped", Toast.LENGTH_SHORT).show()
                                     }
                                 }
                             },
@@ -742,7 +729,7 @@ private fun FileMetadataEditorDialog(
                         ) {
                             Icon(Icons.Default.LocationOff, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Strip GPS Location Metadata")
+                            Text("Strip GPS Metadata")
                         }
                     }
                 }
@@ -752,10 +739,9 @@ private fun FileMetadataEditorDialog(
             Button(
                 onClick = {
                     scope.launch(Dispatchers.IO) {
-                        var activeRef = fileRef
+                        val activeRef = fileRef
                         val newName = renameInput.trim()
 
-                        // Save EXIF changes first
                         if (canEditExif && activeRef != null && activeRef.exists()) {
                             runCatching {
                                 val exif = ExifInterface(activeRef.absolutePath)
@@ -768,7 +754,6 @@ private fun FileMetadataEditorDialog(
                             }
                         }
 
-                        // Apply rename if modified
                         var renamedFile: File? = null
                         if (activeRef != null && activeRef.exists() && newName.isNotEmpty() && newName != file.name) {
                             val target = File(activeRef.parentFile ?: Environment.getExternalStorageDirectory(), newName)
@@ -780,7 +765,7 @@ private fun FileMetadataEditorDialog(
                         withContext(Dispatchers.Main) {
                             if (renamedFile != null) {
                                 onFileRenamed(renamedFile.toUniversal())
-                                Toast.makeText(context, "Saved metadata & renamed to ${renamedFile.name}", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, "Renamed to ${renamedFile.name}", Toast.LENGTH_SHORT).show()
                             } else {
                                 Toast.makeText(context, "Metadata saved", Toast.LENGTH_SHORT).show()
                             }
@@ -788,14 +773,10 @@ private fun FileMetadataEditorDialog(
                         }
                     }
                 }
-            ) {
-                Text("Save Changes")
-            }
+            ) { Text("Save") }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Close")
-            }
+            TextButton(onClick = onDismiss) { Text("Close") }
         },
         shape = RoundedCornerShape(16.dp)
     )

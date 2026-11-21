@@ -79,6 +79,7 @@ import androidx.compose.material3.NavigationDrawerItemDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -1621,8 +1622,7 @@ private fun StorageFolderTreeItem(
 }
 
 /**
- * Custom navigation item for FTP Server showing status and live running uptime,
- * placed between Internal Storage and Vibe Area in the sidebar.
+ * Navigation item for Hosting showing active mode status dot.
  */
 @Composable
 private fun NavFtpItem(
@@ -1630,25 +1630,12 @@ private fun NavFtpItem(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var isRunning by remember { mutableStateOf(ContinuumHubService.isRunning) }
-    var activePort by remember { mutableStateOf(ContinuumHubService.activeFtpPort) }
-    var uptimeText by remember { mutableStateOf("00:00:00") }
-
-    LaunchedEffect(Unit) {
-        while (true) {
-            isRunning = ContinuumHubService.isRunning
-            activePort = ContinuumHubService.activeFtpPort
-            if (isRunning && ContinuumHubService.startTimeMillis > 0L) {
-                val elapsedSec = ((System.currentTimeMillis() - ContinuumHubService.startTimeMillis) / 1000L).coerceAtLeast(0L)
-                val hours = elapsedSec / 3600
-                val mins = (elapsedSec % 3600) / 60
-                val secs = elapsedSec % 60
-                uptimeText = String.format("%02d:%02d:%02d", hours, mins, secs)
-            } else {
-                uptimeText = "Stopped"
-            }
-            delay(1000L)
-        }
+    val hostingState by com.troikoss.continuum_explorer.server.ServerManager.state.collectAsState()
+    val isRunning = hostingState.isAnyRunning || hostingState.isScreenCasting
+    val activeDotColor = when (hostingState.activeHostingMode) {
+        com.troikoss.continuum_explorer.server.ActiveHostingMode.CASTING -> MaterialTheme.colorScheme.tertiary
+        com.troikoss.continuum_explorer.server.ActiveHostingMode.HTTP -> MaterialTheme.colorScheme.secondary
+        else -> MaterialTheme.colorScheme.primary
     }
 
     val selected = appState.libraryItem == LibraryItem.FtpServer
@@ -1661,7 +1648,7 @@ private fun NavFtpItem(
                     modifier = Modifier.padding(vertical = 4.dp)
                 ) {
                     Text(
-                        text = "FTP/HTTP Server",
+                        text = "Hosting",
                         style = MaterialTheme.typography.labelLarge.copy(
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Medium
@@ -1675,7 +1662,7 @@ private fun NavFtpItem(
                             modifier = Modifier
                                 .size(7.dp)
                                 .clip(CircleShape)
-                                .background(Color.Red)
+                                .background(activeDotColor)
                         )
                     }
                 }

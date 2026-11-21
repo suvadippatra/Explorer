@@ -148,7 +148,7 @@ open class ViewAreaWindow @JvmOverloads constructor(
     private val btnHubService: ImageButton = ImageButton(context).apply {
         setBackgroundColor(Color.TRANSPARENT)
         setColorFilter(Color.parseColor("#4CAF50"))
-        contentDescription = "Continuum Hub Server"
+        contentDescription = "Hosting"
         setImageResource(com.troikoss.continuum_explorer.R.drawable.ic_network_server)
         layoutParams = LinearLayout.LayoutParams(dpToPx(36), dpToPx(36)).apply {
             marginStart = dpToPx(4)
@@ -272,18 +272,18 @@ open class ViewAreaWindow @JvmOverloads constructor(
         if (ContinuumHubService.isRunning) {
             ContinuumHubService.stopService(context)
             btnHubService.setColorFilter(Color.parseColor("#757575"))
-            Toast.makeText(context, "Continuum Hub Servers Stopped", Toast.LENGTH_SHORT).show()
-            updateStatus("Servers Stopped")
+            Toast.makeText(context, "Hosting Stopped", Toast.LENGTH_SHORT).show()
+            updateStatus("Hosting Stopped")
         } else {
             ContinuumHubService.startService(context)
             btnHubService.setColorFilter(Color.parseColor("#00E676"))
             val ip = ContinuumHubService.serverIpAddress
             Toast.makeText(
                 context,
-                "Continuum Hub Online: http://$ip:8080 (FTP: 2121)",
+                "Hosting Online: ftp://$ip:${ContinuumHubService.activeFtpPort}",
                 Toast.LENGTH_LONG
             ).show()
-            updateStatus("Hub Online: http://$ip:8080")
+            updateStatus("Hosting Online: $ip")
         }
     }
 

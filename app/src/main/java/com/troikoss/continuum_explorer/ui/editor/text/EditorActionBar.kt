@@ -1,5 +1,6 @@
 package com.troikoss.continuum_explorer.ui.editor.text
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -12,7 +13,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -20,10 +22,9 @@ import java.text.SimpleDateFormat
 import java.util.*
 
 /**
- * Format-Specific Action Bar (EditorActionBar) docked above the soft keyboard.
- * Dynamically adapts to the active document format (Markdown, Todo.txt, CSV, Structured Config, Plain text).
+ * Borderless Tonal Flat Formatting Dock placed at the bottom of Markdown & Text Studio.
+ * Omits Undo/Redo/Search duplicates by default since those live in the unified top command bar.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EditorActionBar(
     formatType: TextFormatType,
@@ -46,6 +47,7 @@ fun EditorActionBar(
     onAddCsvColumn: (() -> Unit)? = null,
     onDeleteCsvRow: (() -> Unit)? = null,
     onDeleteCsvColumn: (() -> Unit)? = null,
+    showTopBarDuplicates: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     var showPriorityDialog by remember { mutableStateOf(false) }
@@ -61,7 +63,6 @@ fun EditorActionBar(
 
     var showHeaderMenu by remember { mutableStateOf(false) }
 
-    // Link insertion dialog
     if (showLinkDialog) {
         AlertDialog(
             onDismissRequest = { showLinkDialog = false },
@@ -71,7 +72,7 @@ fun EditorActionBar(
                     OutlinedTextField(
                         value = linkTitle,
                         onValueChange = { linkTitle = it },
-                        label = { Text("Link Text / Title") },
+                        label = { Text("Title") },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -92,9 +93,7 @@ fun EditorActionBar(
                     showLinkDialog = false
                     linkTitle = ""
                     linkUrl = "https://"
-                }) {
-                    Text("Insert")
-                }
+                }) { Text("Insert") }
             },
             dismissButton = {
                 TextButton(onClick = { showLinkDialog = false }) { Text("Cancel") }
@@ -102,28 +101,21 @@ fun EditorActionBar(
         )
     }
 
-    // Priority dialog for Todo.txt
     if (showPriorityDialog) {
         AlertDialog(
             onDismissRequest = { showPriorityDialog = false },
-            title = { Text("Select Priority Level", fontWeight = FontWeight.Bold) },
+            title = { Text("Priority", fontWeight = FontWeight.Bold) },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf(
-                        "A" to "Highest / Critical",
-                        "B" to "High",
-                        "C" to "Medium",
-                        "D" to "Low",
-                        "E" to "Lowest"
-                    ).forEach { (prio, desc) ->
-                        OutlinedButton(
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf("A", "B", "C", "D", "E").forEach { prio ->
+                        FilledTonalButton(
                             onClick = {
                                 onInsertText("($prio) ")
                                 showPriorityDialog = false
                             },
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text("($prio) - $desc", fontWeight = FontWeight.SemiBold)
+                            Text("($prio)", fontWeight = FontWeight.SemiBold)
                         }
                     }
                 }
@@ -134,16 +126,15 @@ fun EditorActionBar(
         )
     }
 
-    // +Project Tagger Dialog
     if (showProjectDialog) {
         AlertDialog(
             onDismissRequest = { showProjectDialog = false },
-            title = { Text("Add Project Tag", fontWeight = FontWeight.Bold) },
+            title = { Text("Project Tag", fontWeight = FontWeight.Bold) },
             text = {
                 OutlinedTextField(
                     value = projectName,
                     onValueChange = { projectName = it },
-                    label = { Text("Project Name") },
+                    label = { Text("Project") },
                     singleLine = true,
                     prefix = { Text("+") },
                     modifier = Modifier.fillMaxWidth()
@@ -152,14 +143,10 @@ fun EditorActionBar(
             confirmButton = {
                 Button(onClick = {
                     val tag = projectName.trim().removePrefix("+")
-                    if (tag.isNotBlank()) {
-                        onInsertText(" +$tag ")
-                    }
+                    if (tag.isNotBlank()) onInsertText(" +$tag ")
                     showProjectDialog = false
                     projectName = ""
-                }) {
-                    Text("Add")
-                }
+                }) { Text("Add") }
             },
             dismissButton = {
                 TextButton(onClick = { showProjectDialog = false }) { Text("Cancel") }
@@ -167,16 +154,15 @@ fun EditorActionBar(
         )
     }
 
-    // @Context Tagger Dialog
     if (showContextDialog) {
         AlertDialog(
             onDismissRequest = { showContextDialog = false },
-            title = { Text("Add Context Tag", fontWeight = FontWeight.Bold) },
+            title = { Text("Context Tag", fontWeight = FontWeight.Bold) },
             text = {
                 OutlinedTextField(
                     value = contextName,
                     onValueChange = { contextName = it },
-                    label = { Text("Context Name") },
+                    label = { Text("Context") },
                     singleLine = true,
                     prefix = { Text("@") },
                     modifier = Modifier.fillMaxWidth()
@@ -185,14 +171,10 @@ fun EditorActionBar(
             confirmButton = {
                 Button(onClick = {
                     val tag = contextName.trim().removePrefix("@")
-                    if (tag.isNotBlank()) {
-                        onInsertText(" @$tag ")
-                    }
+                    if (tag.isNotBlank()) onInsertText(" @$tag ")
                     showContextDialog = false
                     contextName = ""
-                }) {
-                    Text("Add")
-                }
+                }) { Text("Add") }
             },
             dismissButton = {
                 TextButton(onClick = { showContextDialog = false }) { Text("Cancel") }
@@ -200,304 +182,202 @@ fun EditorActionBar(
         )
     }
 
-    Surface(
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
-        tonalElevation = 2.dp,
-        modifier = modifier.fillMaxWidth()
-    ) {
-        Row(
+    Column(modifier = modifier.fillMaxWidth()) {
+        HorizontalDivider(
+            thickness = 0.5.dp,
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+        )
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 6.dp, vertical = 4.dp)
-                .horizontalScroll(rememberScrollState()),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                .height(40.dp)
         ) {
-            IconButton(onClick = onUndo, modifier = Modifier.size(32.dp)) {
-                Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = "Undo", modifier = Modifier.size(16.dp))
-            }
-            IconButton(onClick = onRedo, modifier = Modifier.size(32.dp)) {
-                Icon(Icons.AutoMirrored.Filled.Redo, contentDescription = "Redo", modifier = Modifier.size(16.dp))
-            }
-            IconButton(onClick = onCopy, modifier = Modifier.size(32.dp)) {
-                Icon(Icons.Default.ContentCopy, contentDescription = "Copy", modifier = Modifier.size(16.dp))
-            }
-            IconButton(onClick = onCut, modifier = Modifier.size(32.dp)) {
-                Icon(Icons.Default.ContentCut, contentDescription = "Cut", modifier = Modifier.size(16.dp))
-            }
-            IconButton(onClick = onPaste, modifier = Modifier.size(32.dp)) {
-                Icon(Icons.Default.ContentPaste, contentDescription = "Paste", modifier = Modifier.size(16.dp))
-            }
-            IconButton(onClick = onIndent, modifier = Modifier.size(32.dp)) {
-                Icon(Icons.Default.FormatIndentIncrease, contentDescription = "Indent", modifier = Modifier.size(16.dp))
-            }
-            IconButton(onClick = onUnindent, modifier = Modifier.size(32.dp)) {
-                Icon(Icons.Default.FormatIndentDecrease, contentDescription = "Unindent", modifier = Modifier.size(16.dp))
-            }
-            IconButton(onClick = onToggleSearch, modifier = Modifier.size(32.dp)) {
-                Icon(Icons.Default.Search, contentDescription = "Search / Replace", modifier = Modifier.size(16.dp))
-            }
-            IconButton(onClick = onJumpToLineClick, modifier = Modifier.size(32.dp)) {
-                Icon(Icons.Default.PinDrop, contentDescription = "Jump to line", modifier = Modifier.size(16.dp))
-            }
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 8.dp)
+                    .horizontalScroll(rememberScrollState()),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp)
+            ) {
+                if (showTopBarDuplicates) {
+                    IconButton(onClick = onUndo, modifier = Modifier.size(30.dp)) {
+                        Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = "Undo", modifier = Modifier.size(16.dp))
+                    }
+                    IconButton(onClick = onRedo, modifier = Modifier.size(30.dp)) {
+                        Icon(Icons.AutoMirrored.Filled.Redo, contentDescription = "Redo", modifier = Modifier.size(16.dp))
+                    }
+                    IconButton(onClick = onToggleSearch, modifier = Modifier.size(30.dp)) {
+                        Icon(Icons.Default.Search, contentDescription = "Find", modifier = Modifier.size(16.dp))
+                    }
+                }
 
-            VerticalDivider(modifier = Modifier.height(20.dp).padding(horizontal = 2.dp))
+                IconButton(onClick = onCopy, modifier = Modifier.size(30.dp)) {
+                    Icon(Icons.Default.ContentCopy, contentDescription = "Copy", modifier = Modifier.size(15.dp))
+                }
+                IconButton(onClick = onCut, modifier = Modifier.size(30.dp)) {
+                    Icon(Icons.Default.ContentCut, contentDescription = "Cut", modifier = Modifier.size(15.dp))
+                }
+                IconButton(onClick = onPaste, modifier = Modifier.size(30.dp)) {
+                    Icon(Icons.Default.ContentPaste, contentDescription = "Paste", modifier = Modifier.size(15.dp))
+                }
+                IconButton(onClick = onIndent, modifier = Modifier.size(30.dp)) {
+                    Icon(Icons.Default.FormatIndentIncrease, contentDescription = "Indent", modifier = Modifier.size(15.dp))
+                }
+                IconButton(onClick = onUnindent, modifier = Modifier.size(30.dp)) {
+                    Icon(Icons.Default.FormatIndentDecrease, contentDescription = "Unindent", modifier = Modifier.size(15.dp))
+                }
+                IconButton(onClick = onJumpToLineClick, modifier = Modifier.size(30.dp)) {
+                    Icon(Icons.Default.PinDrop, contentDescription = "Jump to Line", modifier = Modifier.size(15.dp))
+                }
 
-            when (formatType) {
-                TextFormatType.MARKDOWN, TextFormatType.ORG, TextFormatType.ASCIIDOC -> {
-                    // Header dropdown / levels
-                    Box {
-                        AssistChip(
-                            onClick = { showHeaderMenu = true },
-                            label = { Text("H▾", fontWeight = FontWeight.Bold) }
-                        )
-                        DropdownMenu(
-                            expanded = showHeaderMenu,
-                            onDismissRequest = { showHeaderMenu = false }
-                        ) {
-                            (1..6).forEach { level ->
-                                DropdownMenuItem(
-                                    text = { Text("H$level Heading", fontWeight = if (level <= 2) FontWeight.Bold else FontWeight.Normal) },
-                                    onClick = {
-                                        onFormatClick("#".repeat(level) + " ", "", "Heading $level")
-                                        showHeaderMenu = false
-                                    }
-                                )
+                VerticalDivider(
+                    modifier = Modifier
+                        .height(18.dp)
+                        .padding(horizontal = 2.dp),
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                )
+
+                when (formatType) {
+                    TextFormatType.MARKDOWN, TextFormatType.ORG, TextFormatType.ASCIIDOC -> {
+                        Box {
+                            TonalFormatPill(label = "H▾", bold = true, onClick = { showHeaderMenu = true })
+                            DropdownMenu(
+                                expanded = showHeaderMenu,
+                                onDismissRequest = { showHeaderMenu = false }
+                            ) {
+                                (1..6).forEach { level ->
+                                    DropdownMenuItem(
+                                        text = { Text("H$level", fontWeight = if (level <= 2) FontWeight.Bold else FontWeight.Normal) },
+                                        onClick = {
+                                            onFormatClick("#".repeat(level) + " ", "", "Heading $level")
+                                            showHeaderMenu = false
+                                        }
+                                    )
+                                }
                             }
                         }
-                    }
-
-                    AssistChip(
-                        onClick = { onFormatClick("**", "**", "bold") },
-                        label = { Text("B", fontWeight = FontWeight.ExtraBold) }
-                    )
-                    AssistChip(
-                        onClick = { onFormatClick("*", "*", "italic") },
-                        label = { Text("I", fontWeight = FontWeight.Bold, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic) }
-                    )
-                    AssistChip(
-                        onClick = { onFormatClick("~~", "~~", "strikethrough") },
-                        label = { Text("S", fontWeight = FontWeight.Bold) }
-                    )
-                    AssistChip(
-                        onClick = { onFormatClick("- [ ] ", "", "Task") },
-                        label = { Text("☑ Task") }
-                    )
-                    AssistChip(
-                        onClick = { onFormatClick("- ", "", "Item") },
-                        label = { Text("• List") }
-                    )
-                    AssistChip(
-                        onClick = { onFormatClick("1. ", "", "Item") },
-                        label = { Text("1. Num") }
-                    )
-                    AssistChip(
-                        onClick = { onFormatClick("> ", "", "Quote") },
-                        label = { Text("❝ Quote") }
-                    )
-                    AssistChip(
-                        onClick = { onFormatClick("`", "`", "code") },
-                        label = { Text("‹› Code") }
-                    )
-                    AssistChip(
-                        onClick = { onFormatClick("```\n", "\n```", "code block") },
-                        label = { Text("``` Block") }
-                    )
-                    AssistChip(
-                        onClick = { showLinkDialog = true },
-                        label = { Text("🔗 Link") }
-                    )
-                    AssistChip(
-                        onClick = { onFormatClick("![", "](https://example.com/image.png)", "Image Alt") },
-                        label = { Text("🖼 Image") }
-                    )
-                    AssistChip(
-                        onClick = {
-                            onInsertText("\n| Column 1 | Column 2 | Column 3 |\n| --- | --- | --- |\n| Data 1 | Data 2 | Data 3 |\n")
-                        },
-                        label = { Text("⊞ Table") }
-                    )
-                    AssistChip(
-                        onClick = { onFormatClick("$$ ", " $$", "E = mc^2") },
-                        label = { Text("∑ Math") }
-                    )
-                    AssistChip(
-                        onClick = {
-                            onInsertText("\n```mermaid\ngraph TD\n    A[Start] --> B[Complete]\n```\n")
-                        },
-                        label = { Text("◇ Mermaid") }
-                    )
-                    AssistChip(
-                        onClick = { onInsertText("\n---\n") },
-                        label = { Text("― Rule") }
-                    )
-                    AssistChip(
-                        onClick = {
+                        TonalFormatPill("B", bold = true) { onFormatClick("**", "**", "bold") }
+                        TonalFormatPill("I", italic = true) { onFormatClick("*", "*", "italic") }
+                        TonalFormatPill("S") { onFormatClick("~~", "~~", "strike") }
+                        TonalFormatPill("Task") { onFormatClick("- [ ] ", "", "Task") }
+                        TonalFormatPill("List") { onFormatClick("- ", "", "Item") }
+                        TonalFormatPill("1. List") { onFormatClick("1. ", "", "Item") }
+                        TonalFormatPill("Quote") { onFormatClick("> ", "", "Quote") }
+                        TonalFormatPill("Code") { onFormatClick("`", "`", "code") }
+                        TonalFormatPill("Block") { onFormatClick("```\n", "\n```", "code") }
+                        TonalFormatPill("Link") { showLinkDialog = true }
+                        TonalFormatPill("Image") { onFormatClick("![", "](https://example.com/image.png)", "Alt") }
+                        TonalFormatPill("Table") {
+                            onInsertText("\n| Col 1 | Col 2 | Col 3 |\n| --- | --- | --- |\n| A | B | C |\n")
+                        }
+                        TonalFormatPill("Math") { onFormatClick("$$ ", " $$", "E = mc^2") }
+                        TonalFormatPill("Mermaid") {
+                            onInsertText("\n```mermaid\ngraph TD\n    A[Start] --> B[End]\n```\n")
+                        }
+                        TonalFormatPill("Rule") { onInsertText("\n---\n") }
+                        TonalFormatPill("Date") {
                             val today = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
                             onInsertText(today)
-                        },
-                        label = { Text("📅 Date") }
-                    )
-                }
-
-                TextFormatType.TODO_TXT -> {
-                    if (onToggleTodoInteractive != null) {
-                        Button(
-                            onClick = onToggleTodoInteractive,
-                            modifier = Modifier.height(32.dp),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
-                        ) {
-                            Icon(
-                                if (isTodoInteractive) Icons.Default.Code else Icons.Default.Checklist,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                if (isTodoInteractive) "Raw Text" else "Task Board",
-                                style = MaterialTheme.typography.labelMedium
-                            )
                         }
                     }
-                    AssistChip(
-                        onClick = { showPriorityDialog = true },
-                        label = { Text("(A) Priority", fontWeight = FontWeight.Bold) },
-                        leadingIcon = { Icon(Icons.Default.Flag, contentDescription = null, modifier = Modifier.size(16.dp), tint = Color(0xFFE53935)) }
-                    )
-                    AssistChip(
-                        onClick = {
+
+                    TextFormatType.TODO_TXT -> {
+                        if (onToggleTodoInteractive != null) {
+                            TonalFormatPill(
+                                label = if (isTodoInteractive) "Raw" else "Board",
+                                highlighted = true,
+                                onClick = onToggleTodoInteractive
+                            )
+                        }
+                        TonalFormatPill("(A) Priority", bold = true) { showPriorityDialog = true }
+                        TonalFormatPill("Done") {
                             val today = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
                             onInsertText("x $today ")
-                        },
-                        label = { Text("x Complete") },
-                        leadingIcon = { Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(16.dp), tint = Color(0xFF388E3C)) }
-                    )
-                    AssistChip(
-                        onClick = { showProjectDialog = true },
-                        label = { Text("+ Project") }
-                    )
-                    AssistChip(
-                        onClick = { showContextDialog = true },
-                        label = { Text("@ Context") }
-                    )
-                    AssistChip(
-                        onClick = {
+                        }
+                        TonalFormatPill("+Project") { showProjectDialog = true }
+                        TonalFormatPill("@Context") { showContextDialog = true }
+                        TonalFormatPill("Today") {
                             val today = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
                             onInsertText("$today ")
-                        },
-                        label = { Text("📅 Today") }
-                    )
-                    AssistChip(
-                        onClick = {
-                            val calendar = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, 1) }
-                            val tomorrow = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(calendar.time)
-                            onInsertText("$tomorrow ")
-                        },
-                        label = { Text("📅 Tomorrow") }
-                    )
-                    AssistChip(
-                        onClick = {
-                            val calendar = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, 7) }
-                            val due = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(calendar.time)
+                        }
+                        TonalFormatPill("Due +7d") {
+                            val cal = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, 7) }
+                            val due = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(cal.time)
                             onInsertText("due:$due ")
-                        },
-                        label = { Text("⏱ Due") }
-                    )
-                }
-
-                TextFormatType.CSV -> {
-                    if (onToggleCsvGrid != null) {
-                        Button(
-                            onClick = onToggleCsvGrid,
-                            modifier = Modifier.height(32.dp),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
-                        ) {
-                            Icon(Icons.Default.GridView, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Visual Grid", style = MaterialTheme.typography.labelMedium)
                         }
                     }
 
-                    AssistChip(
-                        onClick = { onAddCsvColumn?.invoke() ?: onInsertText(",NewCol") },
-                        label = { Text("+ Column") },
-                        leadingIcon = { Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp)) }
-                    )
-                    AssistChip(
-                        onClick = { onAddCsvRow?.invoke() ?: onInsertText("\n") },
-                        label = { Text("+ Row") },
-                        leadingIcon = { Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp)) }
-                    )
-                    AssistChip(
-                        onClick = { onDeleteCsvColumn?.invoke() },
-                        label = { Text("- Column") }
-                    )
-                    AssistChip(
-                        onClick = { onDeleteCsvRow?.invoke() },
-                        label = { Text("- Row") }
-                    )
-                    if (onFormatAlignTable != null) {
-                        AssistChip(
-                            onClick = onFormatAlignTable,
-                            label = { Text("⊞ Align Table") },
-                            leadingIcon = { Icon(Icons.Default.FormatAlignJustify, contentDescription = null, modifier = Modifier.size(14.dp)) }
-                        )
+                    TextFormatType.CSV -> {
+                        if (onToggleCsvGrid != null) {
+                            TonalFormatPill("Grid", highlighted = true, onClick = onToggleCsvGrid)
+                        }
+                        TonalFormatPill("+ Col") { onAddCsvColumn?.invoke() ?: onInsertText(",Col") }
+                        TonalFormatPill("+ Row") { onAddCsvRow?.invoke() ?: onInsertText("\n") }
+                        TonalFormatPill("- Col") { onDeleteCsvColumn?.invoke() }
+                        TonalFormatPill("- Row") { onDeleteCsvRow?.invoke() }
+                        if (onFormatAlignTable != null) {
+                            TonalFormatPill("Align", onClick = onFormatAlignTable)
+                        }
+                        TonalFormatPill("Comma") { onInsertText(", ") }
+                        TonalFormatPill("Tab") { onInsertText("\t") }
                     }
-                    AssistChip(
-                        onClick = { onInsertText(", ") },
-                        label = { Text("Comma ,") }
-                    )
-                    AssistChip(
-                        onClick = { onInsertText("\t") },
-                        label = { Text("Tab \\t") }
-                    )
-                }
 
-                TextFormatType.STRUCTURED_CONFIG -> {
-                    AssistChip(
-                        onClick = { onInsertText("  ") },
-                        label = { Text("Indent ⇥") }
-                    )
-                    AssistChip(
-                        onClick = { onFormatClick("\"", "\"", "string") },
-                        label = { Text("\"\" Quotes") }
-                    )
-                    AssistChip(
-                        onClick = { onFormatClick("[", "]", "item") },
-                        label = { Text("[] Brackets") }
-                    )
-                    AssistChip(
-                        onClick = { onFormatClick("{", "}", "key: value") },
-                        label = { Text("{} Braces") }
-                    )
-                    AssistChip(
-                        onClick = { onFormatClick("# ", "", "comment") },
-                        label = { Text("# Comment") }
-                    )
-                }
+                    TextFormatType.STRUCTURED_CONFIG -> {
+                        TonalFormatPill("Tab") { onInsertText("  ") }
+                        TonalFormatPill("\"\"") { onFormatClick("\"", "\"", "value") }
+                        TonalFormatPill("[]") { onFormatClick("[", "]", "item") }
+                        TonalFormatPill("{}") { onFormatClick("{", "}", "key: value") }
+                        TonalFormatPill("#") { onFormatClick("# ", "", "comment") }
+                    }
 
-                TextFormatType.PLAIN_TEXT -> {
-                    AssistChip(
-                        onClick = { onInsertText("  ") },
-                        label = { Text("Tab ⇥") }
-                    )
-                    AssistChip(
-                        onClick = {
+                    TextFormatType.PLAIN_TEXT -> {
+                        TonalFormatPill("Tab") { onInsertText("  ") }
+                        TonalFormatPill("Timestamp") {
                             val now = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date())
                             onInsertText(now)
-                        },
-                        label = { Text("🕒 Timestamp") }
-                    )
-                    AssistChip(
-                        onClick = { onFormatClick("\"", "\"", "quote") },
-                        label = { Text("\"\" Quote") }
-                    )
-                    AssistChip(
-                        onClick = { onFormatClick("(", ")", "note") },
-                        label = { Text("() Paren") }
-                    )
+                        }
+                        TonalFormatPill("\"\"") { onFormatClick("\"", "\"", "quote") }
+                        TonalFormatPill("()") { onFormatClick("(", ")", "note") }
+                    }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun TonalFormatPill(
+    label: String,
+    bold: Boolean = false,
+    italic: Boolean = false,
+    highlighted: Boolean = false,
+    onClick: () -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = if (highlighted) MaterialTheme.colorScheme.secondaryContainer
+        else MaterialTheme.colorScheme.surfaceContainerHigh,
+        modifier = Modifier
+            .height(28.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick)
+    ) {
+        Box(
+            modifier = Modifier.padding(horizontal = 10.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall.copy(
+                    fontSize = 11.5.sp,
+                    fontWeight = if (bold || highlighted) FontWeight.Bold else FontWeight.Medium,
+                    fontStyle = if (italic) FontStyle.Italic else FontStyle.Normal
+                ),
+                color = if (highlighted) MaterialTheme.colorScheme.onSecondaryContainer
+                else MaterialTheme.colorScheme.onSurface
+            )
         }
     }
 }

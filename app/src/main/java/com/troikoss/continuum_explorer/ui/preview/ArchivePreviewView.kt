@@ -33,8 +33,8 @@ import java.io.File
 
 /**
  * Ultra-Clean Tonal Flat Archive Browser & Extraction Previewer.
- * Zero duplicate stacked top summary header (the single 48.dp Command Bar handles title & Browse).
- * Entries fill the viewport immediately; search, stats, and Extract sit in a sleek 44.dp bottom bar.
+ * Eliminates the duplicate top summary card so ViewOnlyFileViewer's single 48.dp bar remains
+ * the only header, placing archive breadcrumbs, search, and extraction cleanly in a 46.dp bottom dock.
  */
 @Composable
 fun ArchiveFullPageView(
@@ -107,195 +107,134 @@ fun ArchiveFullPageView(
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.surface)
     ) {
-        // Inline breadcrumb strip ONLY when drilled into a subfolder inside the archive
-        if (currentInnerPath.isNotEmpty()) {
-            Surface(
-                color = MaterialTheme.colorScheme.surfaceContainerLowest,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(38.dp)
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .horizontalScroll(rememberScrollState())
-                        .padding(horizontal = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Surface(
-                        onClick = { currentInnerPath = "" },
-                        shape = RoundedCornerShape(50),
-                        color = MaterialTheme.colorScheme.surfaceContainerHigh
-                    ) {
-                        Text(
-                            text = "Root",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Medium,
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                        )
-                    }
-                    val segments = currentInnerPath.trim('/').split('/').filter { it.isNotEmpty() }
-                    segments.forEachIndexed { idx, seg ->
-                        Icon(
-                            Icons.Default.ChevronRight,
-                            contentDescription = null,
-                            modifier = Modifier.size(15.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        val targetPath = segments.take(idx + 1).joinToString("/") + "/"
-                        val isCurrent = idx == segments.lastIndex
-                        Surface(
-                            onClick = { currentInnerPath = targetPath },
-                            shape = RoundedCornerShape(50),
-                            color = if (isCurrent) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh
-                        ) {
-                            Text(
-                                text = seg,
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Normal,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                            )
-                        }
-                    }
+        // Full-Height Archive Entry List (Zero stacked top summary card)
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+        ) {
+            if (isLoading) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
                 }
-            }
-            HorizontalDivider(
-                thickness = 0.5.dp,
-                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)
-            )
-        }
-
-        // Full-height entry list
-        Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-            when {
-                isLoading -> {
-                    Column(
-                        modifier = Modifier.align(Alignment.Center),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        CircularProgressIndicator()
-                        Spacer(modifier = Modifier.height(10.dp))
-                        Text("Inspecting archive...", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-                currentEntries.isEmpty() -> {
-                    Column(
-                        modifier = Modifier.align(Alignment.Center),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
+            } else if (currentEntries.isEmpty()) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Icon(
                             Icons.Default.FolderZip,
                             contentDescription = null,
                             modifier = Modifier.size(44.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = if (searchQuery.isNotBlank()) "No matching entries" else "Empty or unsupported archive",
-                            style = MaterialTheme.typography.bodySmall,
+                            text = if (searchQuery.isNotBlank()) "No matching entries" else "Empty archive",
+                            style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
-                else -> {
-                    LazyColumn(
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        if (currentInnerPath.isNotEmpty() && searchQuery.isBlank()) {
-                            item(key = "archive_up_row") {
-                                Surface(
-                                    shape = RoundedCornerShape(12.dp),
-                                    color = MaterialTheme.colorScheme.surfaceContainerLow,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable {
-                                            val trimmed = currentInnerPath.removeSuffix("/")
-                                            val lastSlash = trimmed.lastIndexOf('/')
-                                            currentInnerPath = if (lastSlash < 0) "" else trimmed.substring(0, lastSlash + 1)
-                                        }
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Icon(Icons.Default.ArrowUpward, contentDescription = "Up", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
-                                        Spacer(modifier = Modifier.width(12.dp))
-                                        Text("Parent Folder", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
-                                    }
-                                }
-                            }
-                        }
-
-                        items(
-                            items = currentEntries,
-                            key = { it.providerId }
-                        ) { entry ->
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    if (currentInnerPath.isNotEmpty() && searchQuery.isBlank()) {
+                        item(key = "archive_up_row") {
                             Surface(
-                                shape = RoundedCornerShape(12.dp),
+                                shape = RoundedCornerShape(10.dp),
                                 color = MaterialTheme.colorScheme.surfaceContainerLow,
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clickable {
-                                        if (entry.isDirectory) {
-                                            val sep = entry.providerId.indexOf("::")
-                                            val nextPath = if (sep >= 0) entry.providerId.substring(sep + 2) else "${currentInnerPath}${entry.name}/"
-                                            currentInnerPath = if (nextPath.endsWith("/")) nextPath else "$nextPath/"
-                                            searchQuery = ""
-                                        } else {
-                                            appState.viewingFile = entry
-                                        }
+                                        val trimmed = currentInnerPath.removeSuffix("/")
+                                        val lastSlash = trimmed.lastIndexOf('/')
+                                        currentInnerPath = if (lastSlash < 0) "" else trimmed.substring(0, lastSlash + 1)
                                     }
                             ) {
                                 Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 14.dp, vertical = 9.dp),
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(32.dp)
-                                            .clip(CircleShape)
-                                            .background(
-                                                if (entry.isDirectory) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
-                                                else MaterialTheme.colorScheme.surfaceContainerHigh
-                                            ),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(
-                                            imageVector = if (entry.isDirectory) Icons.Default.Folder else Icons.AutoMirrored.Filled.InsertDriveFile,
-                                            contentDescription = null,
-                                            tint = if (entry.isDirectory) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-                                            modifier = Modifier.size(17.dp)
-                                        )
-                                    }
-                                    Spacer(modifier = Modifier.width(12.dp))
-                                    Text(
-                                        text = entry.name,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        fontWeight = if (entry.isDirectory) FontWeight.SemiBold else FontWeight.Normal,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.weight(1f)
+                                    Icon(
+                                        Icons.Default.ArrowUpward,
+                                        contentDescription = "Up",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(18.dp)
                                     )
-                                    Spacer(modifier = Modifier.width(12.dp))
-                                    Text(
-                                        text = if (entry.isDirectory) "Folder" else appState.formatSize(entry.length),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Text("..", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
+                                }
+                            }
+                        }
+                    }
+
+                    items(
+                        items = currentEntries,
+                        key = { it.providerId }
+                    ) { entry ->
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainerLow,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
                                     if (entry.isDirectory) {
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Icon(
-                                            Icons.Default.ChevronRight,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            modifier = Modifier.size(16.dp)
-                                        )
+                                        val sep = entry.providerId.indexOf("::")
+                                        val nextPath = if (sep >= 0) entry.providerId.substring(sep + 2) else "${currentInnerPath}${entry.name}/"
+                                        currentInnerPath = if (nextPath.endsWith("/")) nextPath else "$nextPath/"
+                                        searchQuery = ""
+                                    } else {
+                                        appState.viewingFile = entry
                                     }
+                                }
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 9.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(34.dp)
+                                        .clip(CircleShape)
+                                        .background(
+                                            if (entry.isDirectory) MaterialTheme.colorScheme.primaryContainer
+                                            else MaterialTheme.colorScheme.surfaceContainerHigh
+                                        ),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = if (entry.isDirectory) Icons.Default.Folder else Icons.AutoMirrored.Filled.InsertDriveFile,
+                                        contentDescription = null,
+                                        tint = if (entry.isDirectory) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Text(
+                                    text = entry.name,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = if (entry.isDirectory) FontWeight.SemiBold else FontWeight.Normal,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Text(
+                                    text = if (entry.isDirectory) "Folder" else appState.formatSize(entry.length),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                if (entry.isDirectory) {
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Icon(
+                                        Icons.Default.ChevronRight,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(18.dp)
+                                    )
                                 }
                             }
                         }
@@ -304,55 +243,99 @@ fun ArchiveFullPageView(
             }
         }
 
-        // Compact 44.dp Bottom Action & Filter Strip
+        // Sleek 46.dp Bottom Archive Dock (Breadcrumbs + Filter + Extract)
         HorizontalDivider(
             thickness = 0.5.dp,
-            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.28f)
         )
         Surface(
             color = MaterialTheme.colorScheme.surfaceContainerLow,
+            tonalElevation = 0.dp,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(44.dp)
+                .height(46.dp)
         ) {
             Row(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(horizontal = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .horizontalScroll(rememberScrollState()),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Surface(
+                        onClick = { currentInnerPath = "" },
+                        shape = RoundedCornerShape(50),
+                        color = if (currentInnerPath.isEmpty()) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+                        modifier = Modifier.height(28.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 10.dp)) {
+                            Text(
+                                text = "Root ($totalFilesCount files • ${appState.formatSize(totalUncompressedBytes)})",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+
+                    val segments = currentInnerPath.trim('/').split('/').filter { it.isNotEmpty() }
+                    segments.forEachIndexed { idx, seg ->
+                        Icon(
+                            Icons.Default.ChevronRight,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        val targetPath = segments.take(idx + 1).joinToString("/") + "/"
+                        Surface(
+                            onClick = { currentInnerPath = targetPath },
+                            shape = RoundedCornerShape(50),
+                            color = if (idx == segments.lastIndex) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+                            modifier = Modifier.height(28.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 10.dp)) {
+                                Text(seg, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Medium)
+                            }
+                        }
+                    }
+                }
+
                 TonalSearchPill(
                     value = searchQuery,
                     onValueChange = { searchQuery = it },
-                    placeholder = "Filter entries",
-                    modifier = Modifier.weight(1f).widthIn(max = 260.dp),
+                    placeholder = "Filter",
+                    modifier = Modifier.widthIn(min = 120.dp, max = 200.dp),
                     testTagName = "archive_filter_input"
                 )
 
-                Text(
-                    text = "$totalFilesCount files • $totalFoldersCount folders • ${appState.formatSize(totalUncompressedBytes)}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false)
-                )
-
-                FilledTonalButton(
+                Button(
                     onClick = { extractArchive(toSeparateFolder = true) },
                     enabled = !isExtracting,
                     shape = RoundedCornerShape(50),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
                     modifier = Modifier.height(32.dp)
                 ) {
                     if (isExtracting) {
-                        CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(14.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.onPrimary
+                        )
                     } else {
                         Icon(Icons.Default.Unarchive, contentDescription = null, modifier = Modifier.size(15.dp))
                     }
-                    Spacer(modifier = Modifier.width(5.dp))
-                    Text(if (isExtracting) "Extracting" else "Extract", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = if (isExtracting) "Extracting" else "Extract",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold
+                    )
                 }
             }
         }

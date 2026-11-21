@@ -129,6 +129,13 @@ object SyncPlayManager {
     @Volatile
     var hostPlayerCommandListener: ((action: String, positionMs: Long, speed: Float, delayMs: Long) -> Unit)? = null
 
+    /**
+     * Optional observer notified whenever the SyncPlay room activates, updates, or stops
+     * (used by OmniOSStateEngine to inject/update/remove the locked fullscreen SyncPlay window).
+     */
+    @Volatile
+    var onRoomStateChangedListener: ((SyncPlayRoomState) -> Unit)? = null
+
     init {
         scope.launch {
             while (isActive) {
@@ -187,8 +194,11 @@ object SyncPlayManager {
             FtpBucketManager.addItem(context, file)
         } catch (_: Exception) {}
 
-        if (autoStartServer && (!ServerManager.state.value.isHttpRunning || !ServerManager.state.value.isFtpRunning)) {
-            ServerManager.startCoordinated(context, startHttp = true, startFtp = true)
+        val serverSnapshot = ServerManager.state.value
+        if (autoStartServer && !serverSnapshot.isCastingRunning) {
+            if (!serverSnapshot.isFtpRunning || !serverSnapshot.isHttpTransportRunning) {
+                ServerManager.startCoordinated(context, startHttp = true, startFtp = true)
+            }
         }
 
         val eventMsg = "${timeStamp()} Host loaded \"${file.name}\" (${formatBytes(file.length())}) • PIN Protected"
@@ -228,6 +238,7 @@ object SyncPlayManager {
             }
         }
 
+        onRoomStateChangedListener?.invoke(_roomState.value)
         scope.launch {
             broadcastStateFrame("LOAD")
         }
@@ -298,6 +309,7 @@ object SyncPlayManager {
                 )
             }
         }
+        onRoomStateChangedListener?.invoke(_roomState.value)
         scope.launch {
             broadcastStateFrame("STOP")
         }
