@@ -90,6 +90,7 @@ fun OmniOSFullscreenSurface(
     val isFullScreenBarHidden by SettingsManager.isFullScreenTabBarHidden
 
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
+    var lastRequestedUrl by remember { mutableStateOf(url) }
     var isLoading by remember(url) { mutableStateOf(true) }
     var loadError by remember(url) { mutableStateOf<String?>(null) }
     var startupRetryCount by remember(url) { mutableStateOf(0) }
@@ -160,14 +161,15 @@ fun OmniOSFullscreenSurface(
                             error: WebResourceError?
                         ) {
                             if (request?.isForMainFrame == true) {
-                                if (isLocalLoopback && startupRetryCount < 8) {
+                                val maxRetries = if (isLocalLoopback) 8 else 3
+                                if (startupRetryCount < maxRetries) {
                                     startupRetryCount++
                                     isLoading = true
                                     view?.postDelayed({
                                         if (webViewRef != null) {
                                             view.loadUrl(url)
                                         }
-                                    }, 350L)
+                                    }, if (isLocalLoopback) 350L else 500L)
                                 } else {
                                     isLoading = false
                                     loadError = error?.description?.toString() ?: "Unable to connect to OmniOS host"
@@ -179,11 +181,16 @@ fun OmniOSFullscreenSurface(
                         enqueueOmniOSDownload(ctx, dlUrl, userAgent, contentDisposition, mimeType)
                     }
                     webViewRef = this
+                    lastRequestedUrl = url
                     loadUrl(url)
                 }
             },
             update = { wv ->
-                if (wv.url != url && loadError == null && isLoading) {
+                if (lastRequestedUrl != url) {
+                    lastRequestedUrl = url
+                    loadError = null
+                    isLoading = true
+                    startupRetryCount = 0
                     wv.loadUrl(url)
                 }
             }
@@ -260,6 +267,7 @@ fun OmniOSFullscreenSurface(
                             onClick = {
                                 loadError = null
                                 isLoading = true
+                                startupRetryCount = 0
                                 webViewRef?.loadUrl(url)
                             },
                             modifier = Modifier
@@ -311,6 +319,7 @@ fun OmniOSFullscreenSurface(
                             onClick = {
                                 loadError = null
                                 isLoading = true
+                                startupRetryCount = 0
                                 webViewRef?.reload()
                             },
                             modifier = Modifier

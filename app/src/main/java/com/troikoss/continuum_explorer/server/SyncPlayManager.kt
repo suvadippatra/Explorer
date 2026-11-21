@@ -486,8 +486,16 @@ object SyncPlayManager {
             when (obj.optString("type").uppercase(Locale.ROOT)) {
                 "PING" -> {
                     val clientSendMs = obj.optLong("clientSendMs", serverRecvMs)
-                    val reportedRtt = obj.optLong("lastRttMs", peer.rttMs)
-                    val reportedOffset = obj.optLong("lastOffsetMs", peer.clockOffsetMs)
+                    val reportedRtt = when {
+                        obj.has("lastRttMs") -> obj.optLong("lastRttMs", peer.rttMs)
+                        obj.has("rttMs") -> obj.optLong("rttMs", peer.rttMs)
+                        else -> peer.rttMs
+                    }
+                    val reportedOffset = when {
+                        obj.has("lastOffsetMs") -> obj.optLong("lastOffsetMs", peer.clockOffsetMs)
+                        obj.has("clockOffsetMs") -> obj.optLong("clockOffsetMs", peer.clockOffsetMs)
+                        else -> peer.clockOffsetMs
+                    }
                     val bufferReady = obj.optBoolean("bufferReady", peer.isBufferedReady)
 
                     peer.rttMs = reportedRtt.coerceIn(0L, 10_000L)

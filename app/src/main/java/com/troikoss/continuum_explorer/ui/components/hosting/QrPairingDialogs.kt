@@ -465,6 +465,8 @@ private fun CameraQrPreviewSurface(
     val lifecycleOwner = LocalLifecycleOwner.current
     val analysisExecutor = remember { Executors.newSingleThreadExecutor() }
     val scannedOnce = remember { AtomicBoolean(false) }
+    val isDisposed = remember { AtomicBoolean(false) }
+    var boundCameraProvider by remember { mutableStateOf<ProcessCameraProvider?>(null) }
     val scanner = remember {
         BarcodeScanning.getClient(
             BarcodeScannerOptions.Builder()
@@ -475,6 +477,11 @@ private fun CameraQrPreviewSurface(
 
     DisposableEffect(Unit) {
         onDispose {
+            isDisposed.set(true)
+            try {
+                boundCameraProvider?.unbindAll()
+            } catch (_: Exception) {}
+            boundCameraProvider = null
             try {
                 scanner.close()
             } catch (_: Exception) {}
@@ -490,8 +497,11 @@ private fun CameraQrPreviewSurface(
             }
             val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
             cameraProviderFuture.addListener({
+                if (isDisposed.get()) return@addListener
                 try {
                     val cameraProvider = cameraProviderFuture.get()
+                    if (isDisposed.get()) return@addListener
+                    boundCameraProvider = cameraProvider
                     val preview = Preview.Builder().build().also {
                         it.surfaceProvider = previewView.surfaceProvider
                     }
@@ -501,7 +511,7 @@ private fun CameraQrPreviewSurface(
                         .also { imageAnalysis ->
                             imageAnalysis.setAnalyzer(analysisExecutor) { imageProxy ->
                                 val mediaImage = imageProxy.image
-                                if (mediaImage != null && !scannedOnce.get()) {
+                                if (mediaImage != null && !scannedOnce.get() && !isDisposed.get()) {
                                     val inputImage = InputImage.fromMediaImage(
                                         mediaImage,
                                         imageProxy.imageInfo.rotationDegrees
@@ -509,7 +519,7 @@ private fun CameraQrPreviewSurface(
                                     scanner.process(inputImage)
                                         .addOnSuccessListener { barcodes ->
                                             val raw = barcodes.firstOrNull { !it.rawValue.isNullOrBlank() }?.rawValue
-                                            if (raw != null && scannedOnce.compareAndSet(false, true)) {
+                                            if (raw != null && !isDisposed.get() && scannedOnce.compareAndSet(false, true)) {
                                                 ContextCompat.getMainExecutor(context).execute {
                                                     onCodeDetected(raw)
                                                 }

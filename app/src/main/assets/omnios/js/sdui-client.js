@@ -82,7 +82,8 @@ window.OmniOS = window.OmniOS || {};
 
     detectEnvironment() {
       const params = new URLSearchParams(window.location.search);
-      const isReceiver = params.get('mode') === 'receiver' ||
+      const modeParam = (params.get('mode') || '').toLowerCase();
+      const isReceiver = ['receiver', 'app_receiver', 'builtin_screen', 'wired_display'].includes(modeParam) ||
                          params.get('receiver') === 'true' ||
                          params.get('cast') === 'true' ||
                          window.AndroidReceiverBridge !== undefined ||
@@ -1146,7 +1147,13 @@ window.OmniOS = window.OmniOS || {};
         badgeEl.textContent = 'Connected';
         pingTimer = setInterval(() => {
           if (spWs.readyState === WebSocket.OPEN) {
-            spWs.send(JSON.stringify({ type: 'PING', clientSendMs: Date.now(), rttMs: this.lastRtt, clockOffsetMs, bufferReady: true }));
+            spWs.send(JSON.stringify({
+              type: 'PING',
+              clientSendMs: Date.now(),
+              lastRttMs: this.lastRtt,
+              lastOffsetMs: clockOffsetMs,
+              bufferReady: true
+            }));
           }
         }, 2500);
         spWs.send(JSON.stringify({ type: 'PING', clientSendMs: Date.now(), bufferReady: true }));

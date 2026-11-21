@@ -14,6 +14,8 @@ import android.util.Log
 import android.view.Display
 import android.view.ViewGroup
 import android.webkit.WebChromeClient
+import android.webkit.WebResourceError
+import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -229,7 +231,27 @@ object OmniOSDisplayProjectionManager {
                     displayZoomControls = false
                     cacheMode = WebSettings.LOAD_NO_CACHE
                 }
-                webViewClient = WebViewClient()
+                var retries = 0
+                webViewClient = object : WebViewClient() {
+                    override fun onPageFinished(view: WebView?, url: String?) {
+                        retries = 0
+                    }
+
+                    override fun onReceivedError(
+                        view: WebView?,
+                        request: WebResourceRequest?,
+                        error: WebResourceError?
+                    ) {
+                        if (request?.isForMainFrame == true && retries < 6 && webView != null) {
+                            retries++
+                            view?.postDelayed({
+                                if (webView != null) {
+                                    view.loadUrl(targetUrl)
+                                }
+                            }, 350L)
+                        }
+                    }
+                }
                 webChromeClient = WebChromeClient()
                 loadUrl(targetUrl)
             }

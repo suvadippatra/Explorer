@@ -150,12 +150,19 @@ fun FtpServerSettingsPanel(
     // Initial tab follows active exclusive mode if already running
     var selectedTab by remember {
         mutableIntStateOf(
-            when (unifiedState.activeHostingMode) {
-                ActiveHostingMode.HTTP -> 1
-                ActiveHostingMode.CASTING -> 2
+            when {
+                unifiedState.isSyncPlayCompanionActive -> 0
+                unifiedState.activeHostingMode == ActiveHostingMode.HTTP -> 1
+                unifiedState.activeHostingMode == ActiveHostingMode.CASTING -> 2
                 else -> 0
             }
         )
+    }
+
+    LaunchedEffect(unifiedState.isSyncPlayCompanionActive) {
+        if (unifiedState.isSyncPlayCompanionActive) {
+            selectedTab = 0
+        }
     }
 
     // Persisted FTP & HTTP settings

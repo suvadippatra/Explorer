@@ -161,7 +161,7 @@ object OmniOSStateEngine {
         // Re-inject locked SyncPlay window if a SyncPlay session is already active
         val room = SyncPlayManager.roomState.value
         if (room.isActive) {
-            syncWithSyncPlayState(room)
+            syncWithSyncPlayState(room, force = true)
         }
     }
 
@@ -191,8 +191,8 @@ object OmniOSStateEngine {
      * When SyncPlay is active during Casting, opens/updates a maximized SyncPlay window
      * that can be minimized to the dock but CANNOT be closed by receivers.
      */
-    fun syncWithSyncPlayState(roomState: SyncPlayRoomState) {
-        if (!ServerManager.state.value.isCastingRunning) return
+    fun syncWithSyncPlayState(roomState: SyncPlayRoomState, force: Boolean = false) {
+        if (!force && !ServerManager.state.value.isCastingRunning && !OmniOSHostServer.isRunning) return
 
         val patches = JSONArray()
         if (roomState.isActive) {

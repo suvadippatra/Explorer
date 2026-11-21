@@ -115,7 +115,8 @@ fun HostingCastingTab(
     var selectedRole by remember { mutableIntStateOf(0) }
     var showQrScanner by remember { mutableStateOf(false) }
     var mobileAdminExpanded by remember { mutableStateOf(false) }
-    var manualPeerInput by remember { mutableStateOf("") }
+    var manualReceiverInput by remember { mutableStateOf("") }
+    var manualHostInput by remember { mutableStateOf("") }
 
     val discoveredHosts by OmniOSDiscoveryManager.discoveredHosts.collectAsState()
     val discoveredReceivers by OmniOSDiscoveryManager.discoveredReceivers.collectAsState()
@@ -138,6 +139,7 @@ fun HostingCastingTab(
         OmniOSDisplayProjectionManager.refreshExternalDisplays()
         if (selectedRole == 0) {
             OmniOSDiscoveryManager.stopDiscoveringHosts()
+            OmniOSPairingManager.stopReceiverListener()
             OmniOSDiscoveryManager.startDiscoveringReceivers(context)
         } else {
             OmniOSDiscoveryManager.stopDiscoveringReceivers()
@@ -767,8 +769,8 @@ fun HostingCastingTab(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 OutlinedTextField(
-                                    value = manualPeerInput,
-                                    onValueChange = { manualPeerInput = it },
+                                    value = manualReceiverInput,
+                                    onValueChange = { manualReceiverInput = it },
                                     singleLine = true,
                                     placeholder = { Text("Receiver IP:8091", fontFamily = FontFamily.Monospace) },
                                     modifier = Modifier
@@ -778,7 +780,7 @@ fun HostingCastingTab(
                                 FilledTonalButton(
                                     onClick = {
                                         val parsed = OmniOSPairingManager.parseQrOrManualAddress(
-                                            rawInput = manualPeerInput,
+                                            rawInput = manualReceiverInput,
                                             defaultRole = OmniOSQrRole.RECEIVER,
                                             defaultPort = OmniOSPairingManager.DEFAULT_RECEIVER_LISTENER_PORT
                                         )
@@ -794,7 +796,7 @@ fun HostingCastingTab(
                                             Toast.makeText(context, "Enter valid IP", Toast.LENGTH_SHORT).show()
                                         }
                                     },
-                                    enabled = manualPeerInput.isNotBlank(),
+                                    enabled = manualReceiverInput.isNotBlank(),
                                     shape = RoundedCornerShape(12.dp),
                                     modifier = Modifier
                                         .height(52.dp)
@@ -1058,8 +1060,8 @@ fun HostingCastingTab(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         OutlinedTextField(
-                            value = manualPeerInput,
-                            onValueChange = { manualPeerInput = it },
+                            value = manualHostInput,
+                            onValueChange = { manualHostInput = it },
                             singleLine = true,
                             placeholder = { Text("Host IP:8080", fontFamily = FontFamily.Monospace) },
                             modifier = Modifier
@@ -1069,7 +1071,7 @@ fun HostingCastingTab(
                         Button(
                             onClick = {
                                 val parsed = OmniOSPairingManager.parseQrOrManualAddress(
-                                    rawInput = manualPeerInput,
+                                    rawInput = manualHostInput,
                                     defaultRole = OmniOSQrRole.HOST,
                                     defaultPort = ServerManager.DEFAULT_CASTING_PORT
                                 )
@@ -1083,7 +1085,7 @@ fun HostingCastingTab(
                                     Toast.makeText(context, "Enter valid IP", Toast.LENGTH_SHORT).show()
                                 }
                             },
-                            enabled = manualPeerInput.isNotBlank(),
+                            enabled = manualHostInput.isNotBlank(),
                             shape = RoundedCornerShape(12.dp),
                             modifier = Modifier
                                 .height(52.dp)

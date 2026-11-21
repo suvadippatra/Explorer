@@ -42,8 +42,10 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -401,6 +403,16 @@ private fun HttpLivePreviewCard(
                 contentAlignment = Alignment.Center
             ) {
                 if (isHttpRunning) {
+                    var previewWebView by remember { mutableStateOf<WebView?>(null) }
+                    DisposableEffect(Unit) {
+                        onDispose {
+                            try {
+                                previewWebView?.stopLoading()
+                                previewWebView?.destroy()
+                            } catch (_: Exception) {}
+                            previewWebView = null
+                        }
+                    }
                     AndroidView(
                         modifier = Modifier.fillMaxSize(),
                         factory = { ctx ->
@@ -418,6 +430,7 @@ private fun HttpLivePreviewCard(
                                 }
                                 webViewClient = WebViewClient()
                                 webChromeClient = WebChromeClient()
+                                previewWebView = this
                                 loadUrl(previewUrl)
                             }
                         },
