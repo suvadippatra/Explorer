@@ -102,7 +102,23 @@ window.OmniOS = window.OmniOS || {};
       const trigger = document.getElementById('os-menu-trigger');
       if (trigger && OmniOS.icons && typeof OmniOS.icons.getSystemLogo === 'function') {
         const theme = this.serverState.adminConfig.theme || 'dex';
-        trigger.innerHTML = OmniOS.icons.getSystemLogo(theme, 18);
+        trigger.innerHTML = OmniOS.icons.getSystemLogo(theme, 16);
+      }
+      this.applyWallpaper(this.serverState.adminConfig.theme || 'dex');
+    }
+
+    applyWallpaper(theme) {
+      const img = this.dom.wallpaperImg || document.getElementById('wallpaper-img');
+      if (!img) return;
+      const valid = ['dex', 'macos', 'windows', 'linux'].includes(theme) ? theme : 'dex';
+      const targetSrc = `assets/wallpapers/${valid}.jpg`;
+      if (img.getAttribute('src') !== targetSrc) {
+        img.classList.add('swapping');
+        setTimeout(() => {
+          img.setAttribute('src', targetSrc);
+          img.onload = () => img.classList.remove('swapping');
+          setTimeout(() => img.classList.remove('swapping'), 250);
+        }, 120);
       }
     }
 
@@ -110,9 +126,6 @@ window.OmniOS = window.OmniOS || {};
       const b = Math.max(15, Math.min(100, val || 100));
       this.serverState.quickPanel.brightness = b;
       document.documentElement.style.setProperty('--display-brightness', b);
-      if (this.dom.desktop) {
-        this.dom.desktop.style.filter = `brightness(${b / 100})`;
-      }
     }
 
     applyDarkMode(enabled) {
@@ -127,11 +140,16 @@ window.OmniOS = window.OmniOS || {};
       this.dom.desktop = document.getElementById('desktop');
       this.dom.windowContainer = document.getElementById('window-container');
       this.dom.dock = document.getElementById('dock');
+      this.dom.dockApps = document.getElementById('dock-apps');
       this.dom.topbar = document.getElementById('topbar');
       this.dom.quickPanel = document.getElementById('quick-panel');
       this.dom.notificationCenter = document.getElementById('notification-center');
       this.dom.disconnectBarrier = document.getElementById('omnios-disconnect-barrier');
       this.dom.rttBadge = document.getElementById('rtt-status-badge');
+      this.dom.tbRttBadge = document.getElementById('tb-rtt-badge');
+      this.dom.wallpaperImg = document.getElementById('wallpaper-img');
+      this.dom.launcherOverlay = document.getElementById('launcher-overlay');
+      this.dom.launcherGrid = document.getElementById('launcher-grid');
     }
 
     initTouch() {
@@ -148,7 +166,19 @@ window.OmniOS = window.OmniOS || {};
       window.addEventListener('pointerup', (e) => this.handleWindowPointerUp(e));
       this.startClock();
 
+      const toggleFullscreen = () => {
+        if (!document.fullscreenElement) {
+          document.documentElement.requestFullscreen?.().catch(() => {});
+        } else {
+          document.exitFullscreen?.().catch(() => {});
+        }
+      };
+
       document.getElementById('quick-panel-trigger')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.toggleQuickPanel();
+      });
+      document.getElementById('tb-quick-panel-trigger')?.addEventListener('click', (e) => {
         e.stopPropagation();
         this.toggleQuickPanel();
       });
@@ -157,24 +187,92 @@ window.OmniOS = window.OmniOS || {};
         e.stopPropagation();
         this.toggleNotificationCenter();
       });
+      document.getElementById('tb-notif-trigger')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.toggleNotificationCenter();
+      });
+      document.getElementById('tb-clock-btn')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.toggleNotificationCenter();
+      });
+      document.getElementById('topbar-clock-center')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.toggleNotificationCenter();
+      });
 
-      this.dom.desktop?.addEventListener('click', () => this.closePopups());
+      document.getElementById('topbar-fullscreen-btn')?.addEventListener('click', toggleFullscreen);
+      document.getElementById('tb-fullscreen-btn')?.addEventListener('click', toggleFullscreen);
 
-      document.getElementById('topbar-fullscreen-btn')?.addEventListener('click', () => {
-        if (!document.fullscreenElement) {
-          document.documentElement.requestFullscreen?.().catch(() => {});
-        } else {
-          document.exitFullscreen?.().catch(() => {});
+      document.getElementById('tb-launcher-btn')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.toggleLauncher();
+      });
+      document.getElementById('os-menu-trigger')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.toggleLauncher();
+      });
+      document.getElementById('launcher-close-btn')?.addEventListener('click', () => this.closePopups());
+      this.dom.launcherOverlay?.addEventListener('click', (e) => {
+        if (e.target === this.dom.launcherOverlay) this.closePopups();
+      });
+
+      // DeX navigation bar buttons
+      document.getElementById('dex-nav-home')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.closePopups();
+        for (const [winId, win] of Object.entries(this.serverState.windows)) {
+          if (!win.isMinimized) {
+            this.send(OmniOSProtocol.OPCODES.WINDOW_ACTION, { action: 'minimize', winId });
+          }
         }
       });
+
+      document.getElementById('dex-nav-back')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const focused = Object.entries(this.serverState.windows).find(([, w]) => w.isFocused && !w.isMinimized)
+          || Object.entries(this.serverState.windows).find(([, w]) => !w.isMinimized);
+        if (focused) {
+          this.send(OmniOSProtocol.OPCODES.WINDOW_ACTION, { action: 'minimize', winId: focused[0] });
+        }
+      });
+
+      document.getElementById('dex-nav-recents')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const visible = Object.entries(this.serverState.windows);
+        if (visible.length === 0) {
+          this.toggleLauncher();
+          return;
+        }
+        visible.forEach(([winId, win], idx) => {
+          if (win.isMinimized) {
+            this.send(OmniOSProtocol.OPCODES.WINDOW_ACTION, { action: 'restore', winId });
+          }
+          const offset = idx * 34;
+          this.send(OmniOSProtocol.OPCODES.WINDOW_ACTION, {
+            action: 'move',
+            winId,
+            x: 48 + offset,
+            y: 32 + offset
+          });
+        });
+      });
+
+      this.dom.desktop?.addEventListener('click', () => this.closePopups());
     }
 
     startClock() {
-      const clockEl = document.getElementById('topbar-clock');
+      const topClock = document.getElementById('topbar-clock');
+      const topClockCenter = document.getElementById('topbar-clock-center');
+      const tbTime = document.getElementById('tb-clock-time');
+      const tbDate = document.getElementById('tb-clock-date');
       const update = () => {
-        if (!clockEl) return;
         const now = new Date();
-        clockEl.textContent = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const dateStr = now.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+        if (topClock) topClock.textContent = timeStr;
+        if (topClockCenter) topClockCenter.textContent = `${dateStr}  ${timeStr}`;
+        if (tbTime) tbTime.textContent = timeStr;
+        if (tbDate) tbDate.textContent = dateStr;
       };
       update();
       setInterval(update, 1000);
@@ -308,9 +406,13 @@ window.OmniOS = window.OmniOS || {};
     }
 
     updateRttBadge() {
-      if (!this.dom.rttBadge) return;
       const quality = this.lastRtt < 25 ? 'optimal' : this.lastRtt < 70 ? 'good' : 'fair';
-      this.dom.rttBadge.innerHTML = `<span class="rtt-dot ${quality}"></span><span>RTT: ${this.lastRtt}ms</span>`;
+      if (this.dom.rttBadge) {
+        this.dom.rttBadge.innerHTML = `<span class="rtt-dot ${quality}"></span><span>${this.lastRtt}ms</span>`;
+      }
+      if (this.dom.tbRttBadge) {
+        this.dom.tbRttBadge.innerHTML = `<span class="rtt-dot ${quality}"></span><span>${this.lastRtt}ms</span>`;
+      }
     }
 
     applyFullSync(state) {
@@ -319,6 +421,7 @@ window.OmniOS = window.OmniOS || {};
         this.applyAdminConfig(state.adminConfig);
       }
       this.renderDock();
+      this.renderLauncher();
       this.renderWindows();
       this.renderNotifications();
       this.renderQuickPanel();
@@ -378,9 +481,11 @@ window.OmniOS = window.OmniOS || {};
         document.documentElement.setAttribute('data-theme', theme);
         document.body.setAttribute('data-theme', theme);
         this.updateTopbarLogo();
+        this.applyWallpaper(theme);
       }
 
       if (this.serverState.adminConfig.animationDuration !== undefined) {
+        document.documentElement.style.setProperty('--anim-duration', `${this.serverState.adminConfig.animationDuration}ms`);
         document.documentElement.style.setProperty('--os-anim-duration', `${this.serverState.adminConfig.animationDuration}ms`);
       }
 
@@ -393,6 +498,7 @@ window.OmniOS = window.OmniOS || {};
       }
 
       this.renderDock();
+      this.renderLauncher();
       this.renderDesktopShortcuts();
       this.patchOpenSettingsWindow();
     }
@@ -435,20 +541,26 @@ window.OmniOS = window.OmniOS || {};
 
       winEl.classList.toggle('minimized', Boolean(win.isMinimized));
       winEl.classList.toggle('maximized', Boolean(win.isMaximized));
+      winEl.classList.toggle('focused', Boolean(win.isFocused));
       winEl.classList.toggle('active', Boolean(win.isFocused));
 
+      if (win.isFocused) {
+        const activeTitle = document.getElementById('active-app-title');
+        if (activeTitle) activeTitle.textContent = win.title || 'OmniOS';
+      }
+
       // Lock close button if host marked window non-closable (e.g., active SyncPlay)
-      const closeBtn = winEl.querySelector('.win-close');
+      const closeBtn = winEl.querySelector('.ctrl-close');
       if (closeBtn) {
         const isClosable = win.closable !== false;
         closeBtn.style.display = isClosable ? '' : 'none';
         closeBtn.disabled = !isClosable;
       }
 
-      const titleText = winEl.querySelector('.window-title-text');
+      const titleText = winEl.querySelector('.win-title');
       if (titleText && win.title) titleText.textContent = win.title;
 
-      const bodyEl = winEl.querySelector('.window-content');
+      const bodyEl = winEl.querySelector('.win-body');
       if (bodyEl && (!bodyEl.hasChildNodes() || win.needsContentRefresh)) {
         this.renderAppContent(win.appId, winId, bodyEl, win.appData || {});
         win.needsContentRefresh = false;
@@ -457,26 +569,26 @@ window.OmniOS = window.OmniOS || {};
 
     createWindowShell(winId, win) {
       const el = document.createElement('div');
-      el.className = 'os-window glass-card';
+      el.className = 'os-window';
       el.setAttribute('data-win-id', winId);
       el.setAttribute('data-app-id', win.appId);
       const isClosable = win.closable !== false;
 
       el.innerHTML = `
-        <div class="window-titlebar">
-          <div class="window-controls">
-            <button class="win-btn win-close" title="Close" ${isClosable ? '' : 'style="display:none" disabled'}></button>
-            <button class="win-btn win-min" title="Minimize"></button>
-            <button class="win-btn win-max" title="Maximize"></button>
+        <div class="win-header">
+          <div class="win-title-group">
+            <span class="win-app-icon">${this.getAppIconSvg(win.appId, 16)}</span>
+            <span class="win-title">${this.escapeHtml(win.title || win.appId)}</span>
           </div>
-          <div class="window-title">
-            <span class="window-icon">${this.getAppIconSvg(win.appId, 16)}</span>
-            <span class="window-title-text">${this.escapeHtml(win.title || win.appId)}</span>
+          <div class="win-controls">
+            ${isClosable ? '' : '<span class="win-lock-pill">Host Locked</span>'}
+            <button class="win-ctrl ctrl-min" title="Minimize">&#x2212;</button>
+            <button class="win-ctrl ctrl-max" title="Maximize">&#x25A1;</button>
+            <button class="win-ctrl ctrl-close" title="Close" ${isClosable ? '' : 'style="display:none" disabled'}>&#x2715;</button>
           </div>
-          <div class="window-actions-extra">${isClosable ? '' : '<span style="font-size:10px;opacity:0.75;padding:2px 8px;border-radius:999px;background:rgba(239,68,68,0.22);color:#fca5a5;">Host Locked</span>'}</div>
         </div>
-        <div class="window-content"></div>
-        <div class="window-resize-handle"></div>
+        <div class="win-body"></div>
+        <div class="resize-handle rh-se"></div>
       `;
 
       el.addEventListener('pointerdown', (e) => {
@@ -484,31 +596,31 @@ window.OmniOS = window.OmniOS || {};
         this.send(OmniOSProtocol.OPCODES.WINDOW_ACTION, { action: 'focus', winId });
       });
 
-      el.querySelector('.win-close')?.addEventListener('click', (e) => {
+      el.querySelector('.ctrl-close')?.addEventListener('click', (e) => {
         e.stopPropagation();
         if (this.serverState.windows[winId]?.closable === false) return;
         this.send(OmniOSProtocol.OPCODES.WINDOW_ACTION, { action: 'close', winId });
       });
 
-      el.querySelector('.win-min')?.addEventListener('click', (e) => {
+      el.querySelector('.ctrl-min')?.addEventListener('click', (e) => {
         e.stopPropagation();
         this.send(OmniOSProtocol.OPCODES.WINDOW_ACTION, { action: 'minimize', winId });
       });
 
-      el.querySelector('.win-max')?.addEventListener('click', (e) => {
+      el.querySelector('.ctrl-max')?.addEventListener('click', (e) => {
         e.stopPropagation();
         this.send(OmniOSProtocol.OPCODES.WINDOW_ACTION, { action: 'maximize', winId });
       });
 
-      const titlebar = el.querySelector('.window-titlebar');
+      const titlebar = el.querySelector('.win-header');
       titlebar?.addEventListener('pointerdown', (e) => {
-        if (e.target.closest('.win-btn')) return;
+        if (e.target.closest('.win-ctrl')) return;
         if (el.classList.contains('maximized')) return;
         e.preventDefault();
         this.startWindowDrag(e, winId, el, 'move');
       });
 
-      el.querySelector('.window-resize-handle')?.addEventListener('pointerdown', (e) => {
+      el.querySelector('.resize-handle')?.addEventListener('pointerdown', (e) => {
         if (el.classList.contains('maximized')) return;
         e.preventDefault();
         e.stopPropagation();
@@ -555,8 +667,9 @@ window.OmniOS = window.OmniOS || {};
       const now = Date.now();
 
       if (s.mode === 'move') {
+        const minTop = ['dex', 'windows'].includes(this.serverState.adminConfig.theme) ? 0 : 28;
         const newX = Math.max(0, s.initialX + dx);
-        const newY = Math.max(30, s.initialY + dy);
+        const newY = Math.max(minTop, s.initialY + dy);
         s.winEl.style.left = `${newX}px`;
         s.winEl.style.top = `${newY}px`;
         if (now - s.lastSent > 33) {
@@ -666,7 +779,7 @@ window.OmniOS = window.OmniOS || {};
 
           grid.querySelectorAll('.fm-dl-btn').forEach(a => a.addEventListener('click', (e) => e.stopPropagation()));
           grid.querySelectorAll('.fm-item').forEach(item => {
-            item.addEventListener('dblclick', () => {
+            const openItem = () => {
               const p = item.getAttribute('data-path');
               const t = item.getAttribute('data-type');
               if (t === 'folder') {
@@ -679,6 +792,16 @@ window.OmniOS = window.OmniOS || {};
                   path: p
                 });
               }
+            };
+            let lastPointerType = 'mouse';
+            item.addEventListener('pointerdown', (e) => { lastPointerType = e.pointerType || 'mouse'; });
+            item.addEventListener('click', (e) => {
+              if (e.target.closest('.fm-dl-btn')) return;
+              if (lastPointerType === 'touch' || lastPointerType === 'pen') openItem();
+            });
+            item.addEventListener('dblclick', (e) => {
+              if (e.target.closest('.fm-dl-btn')) return;
+              openItem();
             });
           });
         } catch (err) {
@@ -1440,35 +1563,74 @@ window.OmniOS = window.OmniOS || {};
     patchOpenSettingsWindow() {
       const settingsWin = this.dom.windowContainer?.querySelector('[data-app-id="settings"]');
       if (settingsWin) {
-        const bodyEl = settingsWin.querySelector('.window-content');
+        const bodyEl = settingsWin.querySelector('.win-body');
         if (bodyEl) this.renderSettingsApp(settingsWin.getAttribute('data-win-id'), bodyEl, {});
       }
     }
 
     /* ==========================================================================
-       Dock & Desktop Icons Rendering (Admin Whitelist Filtered)
+       Dock, Launcher & Desktop Icons Rendering (Admin Whitelist Filtered)
        ========================================================================== */
 
     renderDock() {
-      if (!this.dom.dock) return;
+      const dockApps = this.dom.dockApps || document.getElementById('dock-apps');
+      if (!dockApps) return;
       const allowedApps = this.serverState.adminConfig.allowedApps || [];
       const runningAppIds = new Set(Object.values(this.serverState.windows).map(w => w.appId));
 
-      // Show admin-selected apps plus any active host-locked window (e.g., SyncPlay)
       const filtered = OMNIOS_APP_CATALOG.filter(app => allowedApps.includes(app.id) || runningAppIds.has(app.id));
 
-      this.dom.dock.innerHTML = filtered.map(app => `
-        <div class="dock-item" data-app-id="${app.id}" title="${this.escapeAttr(app.name)}">
-          <div class="dock-icon-wrapper">${this.getAppIconSvg(app.id, 42)}</div>
+      dockApps.innerHTML = filtered.map(app => `
+        <button class="dock-item" data-app-id="${app.id}" title="${this.escapeAttr(app.name)}">
+          <div class="dock-icon-wrap">${this.getAppIconSvg(app.id, 34)}</div>
+          <span class="dock-tooltip">${this.escapeHtml(app.name)}</span>
           <div class="dock-dot"></div>
-        </div>
+        </button>
       `).join('');
 
-      this.dom.dock.querySelectorAll('.dock-item').forEach(item => {
-        item.addEventListener('click', () => this.handleDockAppClick(item.getAttribute('data-app-id')));
+      dockApps.querySelectorAll('.dock-item').forEach(item => {
+        item.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this.closePopups();
+          this.handleDockAppClick(item.getAttribute('data-app-id'));
+        });
       });
 
       this.updateDockRunningIndicators();
+    }
+
+    renderLauncher() {
+      const grid = this.dom.launcherGrid || document.getElementById('launcher-grid');
+      if (!grid) return;
+      const allowedApps = this.serverState.adminConfig.allowedApps || [];
+      const filtered = OMNIOS_APP_CATALOG.filter(app => allowedApps.includes(app.id));
+
+      grid.innerHTML = filtered.map(app => `
+        <button class="launcher-app-tile" data-app-id="${app.id}">
+          <div class="dock-icon-wrap">${this.getAppIconSvg(app.id, 44)}</div>
+          <span class="launcher-app-name">${this.escapeHtml(app.name)}</span>
+        </button>
+      `).join('');
+
+      grid.querySelectorAll('.launcher-app-tile').forEach(tile => {
+        tile.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const appId = tile.getAttribute('data-app-id');
+          this.closePopups();
+          this.handleDockAppClick(appId);
+        });
+      });
+    }
+
+    toggleLauncher() {
+      const overlay = this.dom.launcherOverlay || document.getElementById('launcher-overlay');
+      if (!overlay) return;
+      const isHidden = overlay.classList.contains('hidden');
+      this.closePopups();
+      if (isHidden) {
+        this.renderLauncher();
+        overlay.classList.remove('hidden');
+      }
     }
 
     handleDockAppClick(appId) {
@@ -1488,10 +1650,16 @@ window.OmniOS = window.OmniOS || {};
     }
 
     updateDockRunningIndicators() {
-      if (!this.dom.dock) return;
-      const runningApps = new Set(Object.values(this.serverState.windows).map(w => w.appId));
-      this.dom.dock.querySelectorAll('.dock-item').forEach(item => {
-        item.classList.toggle('running', runningApps.has(item.getAttribute('data-app-id')));
+      const dockApps = this.dom.dockApps || document.getElementById('dock-apps');
+      if (!dockApps) return;
+      const windows = Object.values(this.serverState.windows);
+      const runningApps = new Set(windows.map(w => w.appId));
+      const focusedApp = windows.find(w => w.isFocused && !w.isMinimized)?.appId || null;
+
+      dockApps.querySelectorAll('.dock-item').forEach(item => {
+        const id = item.getAttribute('data-app-id');
+        item.classList.toggle('running', runningApps.has(id));
+        item.classList.toggle('active-win', id === focusedApp);
       });
     }
 
@@ -1503,14 +1671,27 @@ window.OmniOS = window.OmniOS || {};
       const filtered = OMNIOS_APP_CATALOG.filter(app => app.desktop && allowedApps.includes(app.id));
 
       desktopIconsContainer.innerHTML = filtered.map(app => `
-        <div class="desktop-shortcut" data-app-id="${app.id}">
-          <div class="shortcut-icon">${this.getAppIconSvg(app.id, 46)}</div>
-          <div class="shortcut-label">${this.escapeHtml(app.name)}</div>
-        </div>
+        <button class="desktop-icon" data-app-id="${app.id}">
+          <div class="desktop-icon-glyph">${this.getAppIconSvg(app.id, 44)}</div>
+          <div class="desktop-icon-label">${this.escapeHtml(app.name)}</div>
+        </button>
       `).join('');
 
-      desktopIconsContainer.querySelectorAll('.desktop-shortcut').forEach(sc => {
-        sc.addEventListener('dblclick', () => {
+      desktopIconsContainer.querySelectorAll('.desktop-icon').forEach(sc => {
+        let lastPointerType = 'mouse';
+        sc.addEventListener('pointerdown', (e) => {
+          lastPointerType = e.pointerType || 'mouse';
+        });
+        sc.addEventListener('click', (e) => {
+          e.stopPropagation();
+          desktopIconsContainer.querySelectorAll('.desktop-icon').forEach(el => el.classList.remove('selected'));
+          sc.classList.add('selected');
+          if (lastPointerType === 'touch' || lastPointerType === 'pen') {
+            this.send(OmniOSProtocol.OPCODES.WINDOW_ACTION, { action: 'open', appId: sc.getAttribute('data-app-id') });
+          }
+        });
+        sc.addEventListener('dblclick', (e) => {
+          e.stopPropagation();
           this.send(OmniOSProtocol.OPCODES.WINDOW_ACTION, { action: 'open', appId: sc.getAttribute('data-app-id') });
         });
       });
@@ -1587,11 +1768,21 @@ window.OmniOS = window.OmniOS || {};
     toggleQuickPanel() {
       this.dom.quickPanel?.classList.toggle('open');
       this.dom.notificationCenter?.classList.remove('open');
+      this.dom.launcherOverlay?.classList.add('hidden');
     }
 
     renderNotifications() {
       if (!this.dom.notificationCenter) return;
       const notifs = this.serverState.notifications || [];
+      const tbBadge = document.getElementById('tb-notif-badge');
+      const topDot = document.getElementById('topbar-notif-dot');
+      if (tbBadge) {
+        tbBadge.textContent = String(notifs.length);
+        tbBadge.classList.toggle('hidden', notifs.length === 0);
+      }
+      if (topDot) {
+        topDot.classList.toggle('empty', notifs.length === 0);
+      }
       this.dom.notificationCenter.innerHTML = `
         <div class="notif-center-root glass-panel p-4">
           <div class="flex items-center justify-between mb-4 pb-2 border-b">
@@ -1629,11 +1820,13 @@ window.OmniOS = window.OmniOS || {};
     toggleNotificationCenter() {
       this.dom.notificationCenter?.classList.toggle('open');
       this.dom.quickPanel?.classList.remove('open');
+      this.dom.launcherOverlay?.classList.add('hidden');
     }
 
     closePopups() {
       this.dom.quickPanel?.classList.remove('open');
       this.dom.notificationCenter?.classList.remove('open');
+      this.dom.launcherOverlay?.classList.add('hidden');
     }
 
     showNotificationToast(notif) {

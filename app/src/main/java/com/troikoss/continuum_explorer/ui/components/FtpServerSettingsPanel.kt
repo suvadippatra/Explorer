@@ -1,7 +1,13 @@
 package com.troikoss.continuum_explorer.ui.components
 
+import android.app.Activity
+import android.content.Context
+import android.media.projection.MediaProjectionManager
 import android.os.Environment
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -39,9 +45,6 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -57,6 +60,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
@@ -244,8 +249,23 @@ fun FtpServerSettingsPanel(
         }
     }
     val httpWebUrl = remember(serverIp, httpPort) { "http://$serverIp:$httpPort" }
-    val syncPlayWebUrl = remember(httpWebUrl) { "$httpWebUrl/?tab=syncplay" }
+    val syncPlayWebUrl = remember(httpWebUrl) { "$httpWebUrl/?portal=1&tab=syncplay" }
+    val screenShareWebUrl = remember(httpWebUrl) { "$httpWebUrl/?portal=1&tab=screen" }
     val castWebUrl = remember(serverIp, castPort) { "http://$serverIp:$castPort" }
+
+    val screenCaptureLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK && result.data != null) {
+            if (!unifiedState.isHttpTransportRunning || !unifiedState.isFtpRunning) {
+                ServerManager.startFtpServer(context, withSyncPlayCompanion = true)
+            }
+            ContinuumHubService.startScreenCast(context, result.resultCode, result.data!!)
+            Toast.makeText(context, "Screen Share started", Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(context, "Screen capture permission denied", Toast.LENGTH_SHORT).show()
+        }
+    }
 
     fun saveFtpSettings(reloadFtpIfActive: Boolean = false) {
         val p = portInput.toIntOrNull()?.coerceIn(1024, 65535) ?: 2121
@@ -370,35 +390,146 @@ fun FtpServerSettingsPanel(
         )
     }
 
+    val isFtpModeOn = unifiedState.isFtpRunning || unifiedState.isScreenCasting || unifiedState.isSyncPlayCompanionActive
+    val isHttpModeOn = unifiedState.isHttpRunning
+    val isCastModeOn = unifiedState.isCastingRunning
+    val activeModeTag = when {
+        isCastModeOn -> "CAST ON"
+        isHttpModeOn -> "HTTP ON"
+        isFtpModeOn -> "FTP ON"
+        else -> null
+    }
+    val liveGreen = Color(0xFF10B981)
+
     @Composable
-    fun HostingSegmentedTabs(modifier: Modifier = Modifier) {
-        SingleChoiceSegmentedButtonRow(modifier = modifier) {
-            SegmentedButton(
-                selected = selectedTab == 0,
-                onClick = { selectedTab = 0 },
-                shape = SegmentedButtonDefaults.itemShape(index = 0, count = 3),
-                icon = { Icon(Icons.Default.FolderShared, contentDescription = null, modifier = Modifier.size(16.dp)) },
-                modifier = Modifier.testTag("hosting_tab_ftp")
+    fun HostingModeButton(
+        label: String,
+        icon: ImageVector,
+        selected: Boolean,
+        isRunning: Boolean,
+        isWide: Boolean,
+        testTag: String,
+        onClick: () -> Unit,
+        modifier: Modifier = Modifier
+    ) {
+        val bgColor = when {
+            selected -> cs.secondaryContainer
+            isRunning -> liveGreen.copy(alpha = 0.12f)
+            else -> Color.Transparent
+        }
+        val fgColor = when {
+            selected -> cs.onSecondaryContainer
+            isRunning -> cs.onSurface
+            else -> cs.onSurfaceVariant
+        }
+        val border = when {
+            isRunning -> BorderStroke(1.dp, liveGreen.copy(alpha = if (selected) 0.7f else 0.45f))
+            selected -> BorderStroke(1.dp, cs.outlineVariant.copy(alpha = 0.45f))
+            else -> null
+        }
+
+        Surface(
+            onClick = onClick,
+            shape = RoundedCornerShape(12.dp),
+            color = bgColor,
+            border = border,
+            modifier = modifier
+                .heightIn(min = 48.dp)
+                .testTag(testTag)
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = if (isWide) 10.dp else 6.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
             ) {
-                Text("FTP Hosting", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Box(contentAlignment = Alignment.TopEnd) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = if (isRunning && !selected) liveGreen else fgColor,
+                        modifier = Modifier.size(if (isWide) 18.dp else 16.dp)
+                    )
+                    if (isRunning) {
+                        Box(
+                            modifier = Modifier
+                                .size(7.dp)
+                                .clip(CircleShape)
+                                .background(liveGreen)
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.width(if (isWide) 6.dp else 4.dp))
+                Text(
+                    text = label,
+                    style = if (isWide) MaterialTheme.typography.labelLarge else MaterialTheme.typography.labelMedium,
+                    fontWeight = if (selected || isRunning) FontWeight.SemiBold else FontWeight.Medium,
+                    color = fgColor,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                if (isRunning) {
+                    Spacer(modifier = Modifier.width(if (isWide) 6.dp else 4.dp))
+                    Surface(
+                        shape = RoundedCornerShape(999.dp),
+                        color = liveGreen
+                    ) {
+                        Text(
+                            text = "ON",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White,
+                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                        )
+                    }
+                }
             }
-            SegmentedButton(
-                selected = selectedTab == 1,
-                onClick = { selectedTab = 1 },
-                shape = SegmentedButtonDefaults.itemShape(index = 1, count = 3),
-                icon = { Icon(Icons.Default.Language, contentDescription = null, modifier = Modifier.size(16.dp)) },
-                modifier = Modifier.testTag("hosting_tab_http")
+        }
+    }
+
+    @Composable
+    fun HostingSegmentedTabs(isWide: Boolean, modifier: Modifier = Modifier) {
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            color = cs.surfaceContainerHigh,
+            modifier = modifier
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("HTTP Hosting", maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-            SegmentedButton(
-                selected = selectedTab == 2,
-                onClick = { selectedTab = 2 },
-                shape = SegmentedButtonDefaults.itemShape(index = 2, count = 3),
-                icon = { Icon(Icons.Default.Cast, contentDescription = null, modifier = Modifier.size(16.dp)) },
-                modifier = Modifier.testTag("hosting_tab_casting")
-            ) {
-                Text("Casting", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                HostingModeButton(
+                    label = if (isWide) "FTP Hosting" else "FTP",
+                    icon = Icons.Default.FolderShared,
+                    selected = selectedTab == 0,
+                    isRunning = isFtpModeOn,
+                    isWide = isWide,
+                    testTag = "hosting_tab_ftp",
+                    onClick = { selectedTab = 0 },
+                    modifier = Modifier.weight(1f)
+                )
+                HostingModeButton(
+                    label = if (isWide) "HTTP Hosting" else "HTTP",
+                    icon = Icons.Default.Language,
+                    selected = selectedTab == 1,
+                    isRunning = isHttpModeOn,
+                    isWide = isWide,
+                    testTag = "hosting_tab_http",
+                    onClick = { selectedTab = 1 },
+                    modifier = Modifier.weight(1f)
+                )
+                HostingModeButton(
+                    label = "Casting",
+                    icon = Icons.Default.Cast,
+                    selected = selectedTab == 2,
+                    isRunning = isCastModeOn,
+                    isWide = isWide,
+                    testTag = "hosting_tab_casting",
+                    onClick = { selectedTab = 2 },
+                    modifier = Modifier.weight(1f)
+                )
             }
         }
     }
@@ -429,7 +560,7 @@ fun FtpServerSettingsPanel(
                         modifier = Modifier
                             .size(8.dp)
                             .clip(CircleShape)
-                            .background(if (unifiedState.isAnyRunning) cs.primary else cs.outlineVariant)
+                            .background(if (activeModeTag != null) liveGreen else cs.outlineVariant)
                     )
                     Text(
                         text = "Hosting",
@@ -438,19 +569,27 @@ fun FtpServerSettingsPanel(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    if (unifiedState.isAnyRunning) {
-                        Text(
-                            text = uptimeFormatted,
-                            style = MaterialTheme.typography.labelSmall,
-                            fontFamily = FontFamily.Monospace,
-                            color = cs.primary
-                        )
+                    if (activeModeTag != null) {
+                        Surface(
+                            shape = RoundedCornerShape(999.dp),
+                            color = liveGreen.copy(alpha = 0.16f)
+                        ) {
+                            Text(
+                                text = "$activeModeTag • $uptimeFormatted",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.SemiBold,
+                                color = liveGreen,
+                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
+                                maxLines = 1
+                            )
+                        }
                     }
                 }
             },
             centerContent = {
                 if (isWide) {
-                    HostingSegmentedTabs(modifier = Modifier.widthIn(max = 460.dp))
+                    HostingSegmentedTabs(isWide = true, modifier = Modifier.widthIn(max = 520.dp))
                 }
             },
             actionsContent = {
@@ -531,7 +670,7 @@ fun FtpServerSettingsPanel(
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     if (!isWideScreen) {
-                        HostingSegmentedTabs(modifier = Modifier.fillMaxWidth())
+                        HostingSegmentedTabs(isWide = false, modifier = Modifier.fillMaxWidth())
                     }
 
                     if (unifiedState.lastGlobalError != null) {
@@ -557,6 +696,7 @@ fun FtpServerSettingsPanel(
                             liveSyncPosMs = liveSyncPosMs,
                             ftpUrl = ftpUrl,
                             syncPlayWebUrl = syncPlayWebUrl,
+                            screenShareWebUrl = screenShareWebUrl,
                             hostedMode = hostedMode,
                             portInput = portInput,
                             isAnonymousAccess = isAnonymousAccess,
@@ -608,6 +748,18 @@ fun FtpServerSettingsPanel(
                             onPickSyncPlayMedia = {
                                 syncPlayFromCasting = false
                                 showSyncPlayMediaPicker = true
+                            },
+                            onStartScreenShare = {
+                                try {
+                                    val projectionManager = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+                                    screenCaptureLauncher.launch(projectionManager.createScreenCaptureIntent())
+                                } catch (e: Exception) {
+                                    Toast.makeText(context, "Screen Share unavailable: ${e.message}", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            onStopScreenShare = {
+                                ContinuumHubService.stopScreenCast(context)
+                                Toast.makeText(context, "Screen Share stopped", Toast.LENGTH_SHORT).show()
                             }
                         )
 

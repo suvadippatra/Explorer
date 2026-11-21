@@ -1,12 +1,12 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="macos" data-mode="dark">
+<html lang="en" data-os="dex" data-theme="dex" data-mode="dark">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <title>OmniOS - Server-Authoritative Remote UI</title>
+  <title>OmniOS</title>
 
   <!-- Typography & Stylesheets -->
   <link rel="stylesheet" href="css/fonts.css" />
@@ -15,9 +15,15 @@
   <link rel="stylesheet" href="css/themes.css" />
   <link rel="stylesheet" href="css/sdui-extra.css" />
 </head>
-<body class="theme-macos dark-mode">
+<body class="dark-mode" data-theme="dex">
 
-  <!-- 1. Strict Disconnection Glass Barrier (Blocks interaction immediately upon disconnect) -->
+  <!-- 1. Pixel-Accurate Wallpaper Backdrop -->
+  <div class="wallpaper-layer">
+    <img id="wallpaper-img" class="wallpaper-img" src="assets/wallpapers/dex.jpg" alt="" />
+    <div class="wallpaper-vignette"></div>
+  </div>
+
+  <!-- 2. Strict Disconnection Glass Barrier -->
   <div id="omnios-disconnect-barrier">
     <div class="barrier-card">
       <div class="barrier-spinner"></div>
@@ -25,70 +31,128 @@
       <div class="barrier-desc" id="disconnect-status-text">Synchronizing with Android Host Server...</div>
       <div class="barrier-badge">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
-        <span>Server-Authoritative SDUI Mode</span>
+        <span>Server-Authoritative Desktop</span>
       </div>
     </div>
   </div>
 
-  <!-- 2. Transparent Touch / Pointer Capture Plane -->
+  <!-- 3. Host Touch Lock Barrier (pointer-events: none unless Host Admin disables touch) -->
   <div id="omnios-touch-plane"></div>
 
-  <!-- 3. Desktop Canvas & Wallpaper -->
-  <div id="desktop" class="desktop-canvas">
-    <!-- Desktop Shortcuts Grid -->
-    <div id="desktop-icons" class="desktop-icons-grid"></div>
-
-    <!-- Window Management Stage -->
-    <div id="window-container" class="window-stage"></div>
-  </div>
-
-  <!-- 4. Global Topbar / Taskbar -->
-  <header id="topbar" class="os-topbar glass-card">
-    <div class="topbar-left flex items-center gap-3">
-      <div class="os-logo" id="os-menu-trigger" title="OmniOS Host">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+  <!-- 4. Global Top Bar (Displayed in macOS & Linux themes; hidden in DeX & Windows themes) -->
+  <header id="topbar" class="top-bar">
+    <div class="top-bar-left">
+      <button class="top-btn top-brand-btn" id="os-menu-trigger" title="Applications">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
           <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2" fill="none"/>
           <path d="M12 6v6l4 2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
         </svg>
-      </div>
-      <span class="active-app-name font-bold text-xs" id="active-app-title">OmniOS</span>
+      </button>
+      <span class="active-app-name" id="active-app-title">OmniOS</span>
     </div>
 
-    <div class="topbar-right flex items-center gap-3">
-      <!-- Low-Latency RTT Badge -->
+    <div class="top-bar-center">
+      <button class="top-btn" id="topbar-clock-center" title="Notifications">12:00</button>
+    </div>
+
+    <div class="top-bar-right">
       <div id="rtt-status-badge">
         <span class="rtt-dot optimal"></span>
-        <span>RTT: --</span>
+        <span>-- ms</span>
       </div>
 
-      <!-- Quick Panel Trigger -->
-      <button class="topbar-icon-btn" id="quick-panel-trigger" title="Control Center">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line></svg>
+      <button class="top-btn" id="quick-panel-trigger" title="Control Center">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line></svg>
       </button>
 
-      <!-- Fullscreen Toggle (Hidden automatically on wireless displays and native app receivers) -->
-      <button class="topbar-icon-btn fullscreen-toggle-btn" id="topbar-fullscreen-btn" title="Toggle Fullscreen">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+      <button class="top-btn fullscreen-toggle-btn" id="topbar-fullscreen-btn" title="Toggle Fullscreen">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
       </button>
 
-      <!-- Notification Center Trigger -->
-      <button class="topbar-icon-btn" id="notif-center-trigger" title="Notifications">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>
+      <button class="top-btn" id="notif-center-trigger" title="Notifications">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>
+        <span class="notif-dot empty" id="topbar-notif-dot"></span>
       </button>
 
-      <!-- System Clock -->
-      <div class="topbar-clock font-semibold text-xs" id="topbar-clock">12:00</div>
+      <button class="top-btn" id="top-clock-right" title="Clock">
+        <span id="topbar-clock">12:00</span>
+      </button>
     </div>
   </header>
 
-  <!-- 5. Quick Panel Overlay -->
-  <div id="quick-panel"></div>
+  <!-- 5. Desktop Stage & Windows Layer -->
+  <div id="desktop" class="desktop" tabindex="0">
+    <div id="desktop-icons" class="desktop-icons"></div>
+    <div id="window-container" class="windows-layer"></div>
+  </div>
 
-  <!-- 6. Notification Center Overlay -->
-  <div id="notification-center"></div>
+  <!-- 6. App Launcher Overlay -->
+  <div id="launcher-overlay" class="launcher-overlay hidden">
+    <div class="launcher-panel glass-panel">
+      <div class="launcher-header">
+        <span class="launcher-title">Applications</span>
+        <button class="os-btn small" id="launcher-close-btn" title="Close">✕</button>
+      </div>
+      <div id="launcher-grid" class="launcher-grid"></div>
+    </div>
+  </div>
 
-  <!-- 7. Dynamic App Dock -->
-  <nav id="dock" class="os-dock glass-card"></nav>
+  <!-- 7. Quick Panel Overlay -->
+  <div id="quick-panel" class="control-center"></div>
+
+  <!-- 8. Notification Center Overlay -->
+  <div id="notification-center" class="notification-center"></div>
+
+  <!-- 9. Pixel-Accurate Taskbar / Dock (DeX, Windows 11, macOS, Linux GNOME) -->
+  <nav id="dock" class="taskbar">
+    <div class="tb-left">
+      <button class="tb-launcher-btn" id="tb-launcher-btn" title="Apps">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+          <circle cx="5" cy="5" r="2.2"/><circle cx="12" cy="5" r="2.2"/><circle cx="19" cy="5" r="2.2"/>
+          <circle cx="5" cy="12" r="2.2"/><circle cx="12" cy="12" r="2.2"/><circle cx="19" cy="12" r="2.2"/>
+          <circle cx="5" cy="19" r="2.2"/><circle cx="12" cy="19" r="2.2"/><circle cx="19" cy="19" r="2.2"/>
+        </svg>
+      </button>
+      <div class="dex-nav-buttons">
+        <button class="dex-nav-btn" id="dex-nav-recents" title="Tile Windows">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/></svg>
+        </button>
+        <button class="dex-nav-btn" id="dex-nav-home" title="Show Desktop">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="7"/></svg>
+        </button>
+        <button class="dex-nav-btn" id="dex-nav-back" title="Minimize Active">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <div id="dock-apps" class="dock-apps"></div>
+
+    <div class="tb-right">
+      <div id="tb-rtt-badge" class="tb-rtt-pill" title="Host Latency">
+        <span class="rtt-dot optimal"></span>
+        <span id="tb-rtt-text">--</span>
+      </div>
+
+      <button class="tb-tray-btn fullscreen-toggle-btn" id="tb-fullscreen-btn" title="Fullscreen">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+      </button>
+
+      <button class="tb-tray-btn" id="tb-quick-panel-trigger" title="Quick Settings">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line></svg>
+      </button>
+
+      <button class="tb-tray-btn" id="tb-notif-trigger" title="Notifications">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>
+        <span class="notif-badge hidden" id="tb-notif-badge">0</span>
+      </button>
+
+      <button class="tb-clock-btn" id="tb-clock-btn" title="Clock & Notifications">
+        <span id="tb-clock-time" style="font-weight:600;">12:00</span>
+        <span id="tb-clock-date" style="font-size:0.68rem;opacity:0.72;">Mon</span>
+      </button>
+    </div>
+  </nav>
 
   <!-- Script Pipeline -->
   <script src="js/protocol.js"></script>

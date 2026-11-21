@@ -61,7 +61,7 @@ jobs:
         with:
           gradle-version: '9.3.1'
 
-      - name: Resolve App Version (Base 0.0.1 -> 0.0.x+1)
+      - name: Resolve App Version (Monotonic versionCode & Aligned Release Tag)
         id: version_step
         run: |
           RAW_INPUT="${{ inputs.release_tag }}"
@@ -72,11 +72,19 @@ jobs:
           elif [[ "$RAW_INPUT" =~ ^[0-9]+$ ]]; then
             NEXT_PATCH=$((RAW_INPUT + 1))
             VERSION_NAME="0.0.${NEXT_PATCH}"
-            VERSION_CODE="${NEXT_PATCH}"
+            VERSION_CODE=$(( NEXT_PATCH > RUN_NUM ? NEXT_PATCH : RUN_NUM ))
           else
             CLEAN_VER="${RAW_INPUT#v}"
             VERSION_NAME="${CLEAN_VER}"
-            VERSION_CODE="${RUN_NUM}"
+            if [[ "$CLEAN_VER" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+              MAJ="${BASH_REMATCH[1]}"
+              MIN="${BASH_REMATCH[2]}"
+              PAT="${BASH_REMATCH[3]}"
+              SEMVER_CODE=$(( MAJ * 10000 + MIN * 100 + PAT ))
+              VERSION_CODE=$(( SEMVER_CODE > RUN_NUM ? SEMVER_CODE : RUN_NUM ))
+            else
+              VERSION_CODE="${RUN_NUM}"
+            fi
           fi
           echo "VERSION_NAME=${VERSION_NAME}" >> $GITHUB_ENV
           echo "VERSION_CODE=${VERSION_CODE}" >> $GITHUB_ENV
@@ -106,16 +114,18 @@ jobs:
             echo "STORE_PASSWORD=${STORE_PASSWORD_SECRET}" >> $GITHUB_ENV
             echo "KEY_PASSWORD=${KEY_PASSWORD_SECRET}" >> $GITHUB_ENV
           else
-            keytool -genkeypair -v \
+            # Reuse the deterministic repository keystore so every release shares the exact same
+            # signing certificate and updates in-place without Android package conflicts.
+            cp debug.keystore my-upload-key.jks
+            keytool -changealias \
               -keystore my-upload-key.jks \
-              -storepass androidrelease \
-              -alias upload \
-              -keypass androidrelease \
-              -keyalg RSA -keysize 2048 -validity 10000 \
-              -dname "CN=Continuum Explorer,O=OpenSource,C=US"
+              -storepass android \
+              -alias androiddebugkey \
+              -destalias upload \
+              -keypass android
             echo "KEYSTORE_PATH=${GITHUB_WORKSPACE}/my-upload-key.jks" >> $GITHUB_ENV
-            echo "STORE_PASSWORD=androidrelease" >> $GITHUB_ENV
-            echo "KEY_PASSWORD=androidrelease" >> $GITHUB_ENV
+            echo "STORE_PASSWORD=android" >> $GITHUB_ENV
+            echo "KEY_PASSWORD=android" >> $GITHUB_ENV
           fi
 
       - name: Execute Gradle Build for Selected Architecture(s)

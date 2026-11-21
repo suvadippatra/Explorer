@@ -29,8 +29,11 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Replay10
+import androidx.compose.material.icons.filled.ScreenShare
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.StopScreenShare
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.VideoLibrary
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -71,6 +74,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.troikoss.continuum_explorer.managers.FtpBucketManager
 import com.troikoss.continuum_explorer.managers.FtpHostedMode
+import com.troikoss.continuum_explorer.managers.SettingsManager
 import com.troikoss.continuum_explorer.server.SyncPlayManager
 import com.troikoss.continuum_explorer.server.SyncPlayRoomState
 import com.troikoss.continuum_explorer.server.UnifiedServerState
@@ -89,6 +93,7 @@ fun HostingFtpTab(
     liveSyncPosMs: Long,
     ftpUrl: String,
     syncPlayWebUrl: String,
+    screenShareWebUrl: String,
     hostedMode: FtpHostedMode,
     portInput: String,
     isAnonymousAccess: Boolean,
@@ -110,7 +115,9 @@ fun HostingFtpTab(
     onAllowUploadsChange: (Boolean) -> Unit,
     onUploadPasswordChange: (String) -> Unit,
     onSelectUploadFolder: () -> Unit,
-    onPickSyncPlayMedia: () -> Unit
+    onPickSyncPlayMedia: () -> Unit,
+    onStartScreenShare: () -> Unit,
+    onStopScreenShare: () -> Unit
 ) {
     val leftPane: @Composable () -> Unit = {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -146,14 +153,24 @@ fun HostingFtpTab(
     }
 
     val rightPane: @Composable () -> Unit = {
-        SyncPlayControlCard(
-            syncState = syncState,
-            livePositionMs = liveSyncPosMs,
-            syncPlayWebUrl = syncPlayWebUrl,
-            isCastingContext = false,
-            onPickMediaFile = onPickSyncPlayMedia,
-            onShowSyncQr = { onShowQr("SyncPlay QR", syncPlayWebUrl, syncPlayWebUrl) }
-        )
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            FtpScreenShareCard(
+                isScreenCasting = unifiedState.isScreenCasting,
+                screenShareWebUrl = screenShareWebUrl,
+                onStartScreenShare = onStartScreenShare,
+                onStopScreenShare = onStopScreenShare,
+                onShowQr = { onShowQr("Screen Share QR", screenShareWebUrl, screenShareWebUrl) }
+            )
+
+            SyncPlayControlCard(
+                syncState = syncState,
+                livePositionMs = liveSyncPosMs,
+                syncPlayWebUrl = syncPlayWebUrl,
+                isCastingContext = false,
+                onPickMediaFile = onPickSyncPlayMedia,
+                onShowSyncQr = { onShowQr("SyncPlay QR", syncPlayWebUrl, syncPlayWebUrl) }
+            )
+        }
     }
 
     if (isWideScreen) {
@@ -507,6 +524,259 @@ private fun FtpUploadsCard(
                         .fillMaxWidth()
                         .testTag("ftp_upload_password_input")
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun FtpScreenShareCard(
+    isScreenCasting: Boolean,
+    screenShareWebUrl: String,
+    onStartScreenShare: () -> Unit,
+    onStopScreenShare: () -> Unit,
+    onShowQr: () -> Unit
+) {
+    val context = LocalContext.current
+    @Suppress("DEPRECATION")
+    val clipboard = LocalClipboardManager.current
+    val cs = MaterialTheme.colorScheme
+
+    var showTuning by remember { mutableStateOf(false) }
+    val resolution by SettingsManager.screenCastResolution
+    val fps by SettingsManager.screenCastFps
+    val quality by SettingsManager.screenCastQuality
+    val rotation by SettingsManager.screenCastRotation
+    val audio by SettingsManager.screenCastAudio
+
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = cs.surfaceContainerLow,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(9.dp)
+                            .clip(CircleShape)
+                            .background(if (isScreenCasting) cs.primary else cs.outlineVariant)
+                    )
+                    Text(
+                        text = "Screen Share",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = cs.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    if (isScreenCasting) {
+                        Text(
+                            text = "LIVE",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            color = cs.primary
+                        )
+                    }
+                }
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    IconButton(
+                        onClick = { showTuning = !showTuning },
+                        modifier = Modifier.testTag("ftp_screen_share_tune_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Tune,
+                            contentDescription = "Screen Share Tuning",
+                            tint = if (showTuning) cs.primary else cs.onSurfaceVariant
+                        )
+                    }
+                    if (isScreenCasting) {
+                        FilledTonalButton(
+                            onClick = onStopScreenShare,
+                            colors = ButtonDefaults.filledTonalButtonColors(
+                                containerColor = cs.errorContainer,
+                                contentColor = cs.onErrorContainer
+                            ),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier
+                                .height(48.dp)
+                                .testTag("ftp_screen_share_button")
+                        ) {
+                            Icon(Icons.Default.StopScreenShare, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Stop")
+                        }
+                    } else {
+                        Button(
+                            onClick = onStartScreenShare,
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier
+                                .height(48.dp)
+                                .testTag("ftp_screen_share_button")
+                        ) {
+                            Icon(Icons.Default.ScreenShare, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Share")
+                        }
+                    }
+                }
+            }
+
+            if (isScreenCasting) {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = cs.surfaceContainer,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = screenShareWebUrl,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontFamily = FontFamily.Monospace,
+                            color = cs.primary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                        IconButton(
+                            onClick = {
+                                clipboard.setText(AnnotatedString(screenShareWebUrl))
+                                Toast.makeText(context, "Copied Screen Share URL", Toast.LENGTH_SHORT).show()
+                            },
+                            modifier = Modifier.testTag("ftp_screen_share_copy_button")
+                        ) {
+                            Icon(Icons.Default.ContentCopy, contentDescription = "Copy Screen Share URL", modifier = Modifier.size(16.dp))
+                        }
+                        IconButton(
+                            onClick = onShowQr,
+                            modifier = Modifier.testTag("ftp_screen_share_qr_button")
+                        ) {
+                            Icon(Icons.Default.QrCode2, contentDescription = "Screen Share QR", modifier = Modifier.size(16.dp))
+                        }
+                        IconButton(
+                            onClick = {
+                                try {
+                                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(screenShareWebUrl)))
+                                } catch (_: Exception) {}
+                            },
+                            modifier = Modifier.testTag("ftp_screen_share_open_button")
+                        ) {
+                            Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = "Open Screen Share", modifier = Modifier.size(16.dp))
+                        }
+                    }
+                }
+            }
+
+            if (showTuning) {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = cs.surfaceContainer,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            listOf("480p", "720p", "1080p").forEach { res ->
+                                FilterChip(
+                                    selected = resolution == res,
+                                    onClick = {
+                                        SettingsManager.setScreenCastParams(context, res, fps, rotation, audio, quality)
+                                    },
+                                    label = { Text(res) },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            listOf(0, 90, 180, 270).forEach { deg ->
+                                FilterChip(
+                                    selected = rotation == deg,
+                                    onClick = {
+                                        SettingsManager.setScreenCastParams(context, resolution, fps, deg, audio, quality)
+                                    },
+                                    label = { Text("${deg}°") },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                        }
+
+                        Column {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("FPS", style = MaterialTheme.typography.bodySmall)
+                                Text(
+                                    text = "$fps fps",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = cs.primary
+                                )
+                            }
+                            Slider(
+                                value = fps.toFloat(),
+                                onValueChange = {
+                                    SettingsManager.setScreenCastParams(context, resolution, it.roundToInt(), rotation, audio, quality)
+                                },
+                                valueRange = 5f..30f
+                            )
+                        }
+
+                        Column {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("Quality", style = MaterialTheme.typography.bodySmall)
+                                Text(
+                                    text = "$quality%",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = cs.primary
+                                )
+                            }
+                            Slider(
+                                value = quality.toFloat(),
+                                onValueChange = {
+                                    SettingsManager.setScreenCastParams(context, resolution, fps, rotation, audio, it.roundToInt())
+                                },
+                                valueRange = 30f..95f
+                            )
+                        }
+                    }
+                }
             }
         }
     }

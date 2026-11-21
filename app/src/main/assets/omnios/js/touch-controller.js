@@ -1,7 +1,7 @@
 /**
  * OmniOS - Touch & Pointer Controller
- * Handles high-frequency touch interactions on wireless displays, touchscreens, and web clients.
- * Provides immediate local tactile feedback and compact binary dispatching.
+ * Observes pointer/touch events passively without blocking native DOM clicks, taps,
+ * scrolling, or window interactions. Only intercepts input when Host Admin locks touch.
  */
 
 window.OmniOS = window.OmniOS || {};
@@ -11,7 +11,7 @@ window.OmniOS = window.OmniOS || {};
 
   class TouchController {
     constructor() {
-      this.container = null;
+      this.lockBarrier = null;
       this.sendCallback = null;
       this.touchEnabled = true;
       this.activePointers = new Map();
@@ -19,30 +19,31 @@ window.OmniOS = window.OmniOS || {};
       this.pendingMoves = new Map();
       this.feedbackLayer = null;
       this.hudToast = null;
+      this.hudTimer = null;
 
-      this.onPointerDown = this.handlePointerDown.bind(this);
+      this.onDocPointerDown = this.handleDocumentPointerDown.bind(this);
+      this.onBarrierPointerDown = this.handleBlockedPointerDown.bind(this);
       this.onPointerMove = this.handlePointerMove.bind(this);
       this.onPointerUp = this.handlePointerUp.bind(this);
       this.onPointerCancel = this.handlePointerCancel.bind(this);
     }
 
-    init(containerEl, sendCallback) {
-      this.container = containerEl || document.body;
+    init(lockBarrierEl, sendCallback) {
+      this.lockBarrier = lockBarrierEl || document.getElementById('omnios-touch-plane');
       this.sendCallback = sendCallback;
 
-      // Create tactile feedback layer (for ultra-fast local visual echo)
       this.createFeedbackLayer();
 
-      // Attach pointer events to container
-      this.container.addEventListener('pointerdown', this.onPointerDown, { passive: false });
-      window.addEventListener('pointermove', this.onPointerMove, { passive: false });
-      window.addEventListener('pointerup', this.onPointerUp, { passive: false });
-      window.addEventListener('pointercancel', this.onPointerCancel, { passive: false });
+      // Passive capture on document so ALL native taps/clicks/scrolls/drags work cleanly
+      document.addEventListener('pointerdown', this.onDocPointerDown, { capture: true, passive: true });
+      window.addEventListener('pointermove', this.onPointerMove, { passive: true });
+      window.addEventListener('pointerup', this.onPointerUp, { passive: true });
+      window.addEventListener('pointercancel', this.onPointerCancel, { passive: true });
 
-      // Prevent default pull-to-refresh or gesture bounce
-      this.container.addEventListener('touchstart', (e) => {
-        if (e.touches.length > 1) e.preventDefault();
-      }, { passive: false });
+      // Lock barrier intercepts touches ONLY when body.touch-disabled-mode enables its pointer-events
+      if (this.lockBarrier) {
+        this.lockBarrier.addEventListener('pointerdown', this.onBarrierPointerDown, { passive: false });
+      }
     }
 
     createFeedbackLayer() {
@@ -61,7 +62,6 @@ window.OmniOS = window.OmniOS || {};
       }
       this.feedbackLayer = layer;
 
-      // HUD Toast for when Admin disables touch
       let toast = document.getElementById('touch-disabled-hud');
       if (!toast) {
         toast = document.createElement('div');
@@ -135,43 +135,54 @@ window.OmniOS = window.OmniOS || {};
         position: absolute;
         left: ${clientX}px;
         top: ${clientY}px;
-        width: 14px;
-        height: 14px;
-        margin-left: -7px;
-        margin-top: -7px;
+        width: 12px;
+        height: 12px;
+        margin-left: -6px;
+        margin-top: -6px;
         border-radius: 50%;
-        background: rgba(255, 255, 255, 0.6);
-        box-shadow: 0 0 16px rgba(0, 122, 255, 0.8), 0 0 28px rgba(0, 122, 255, 0.4);
+        background: rgba(255, 255, 255, 0.45);
+        box-shadow: 0 0 12px rgba(10, 132, 255, 0.65);
         pointer-events: none;
         transform: scale(1);
-        opacity: 0.95;
-        transition: transform 0.45s cubic-bezier(0.1, 0.8, 0.2, 1), opacity 0.45s ease-out;
+        opacity: 0.75;
+        transition: transform 0.36s cubic-bezier(0.1, 0.8, 0.2, 1), opacity 0.36s ease-out;
       `;
       this.feedbackLayer.appendChild(ripple);
 
       requestAnimationFrame(() => {
-        ripple.style.transform = 'scale(4.5)';
+        ripple.style.transform = 'scale(3.4)';
         ripple.style.opacity = '0';
       });
 
       setTimeout(() => {
         if (ripple.parentNode) ripple.parentNode.removeChild(ripple);
-      }, 500);
+      }, 420);
     }
 
     getNormalizedCoordinates(clientX, clientY) {
-      const rect = this.container.getBoundingClientRect();
-      const normX = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-      const normY = Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
-      return { normX, normY };
+      const w = Math.max(1, window.innerWidth);
+      const h = Math.max(1, window.innerHeight);
+      return {
+        normX: Math.max(0, Math.min(1, clientX / w)),
+        normY: Math.max(0, Math.min(1, clientY / h))
+      };
     }
 
-    handlePointerDown(e) {
+    handleBlockedPointerDown(e) {
       if (!this.touchEnabled) {
+        e.preventDefault();
+        e.stopPropagation();
         this.showDisabledHud();
-        setTimeout(() => this.hideDisabledHud(), 1800);
-        return;
+        if (this.hudTimer) clearTimeout(this.hudTimer);
+        this.hudTimer = setTimeout(() => {
+          if (!this.touchEnabled) return;
+          this.hideDisabledHud();
+        }, 1800);
       }
+    }
+
+    handleDocumentPointerDown(e) {
+      if (!this.touchEnabled) return;
 
       this.activePointers.set(e.pointerId, {
         startX: e.clientX,
@@ -181,12 +192,12 @@ window.OmniOS = window.OmniOS || {};
         time: Date.now()
       });
 
-      this.showTouchRipple(e.clientX, e.clientY);
-
-      const { normX, normY } = this.getNormalizedCoordinates(e.clientX, e.clientY);
+      if (e.pointerType === 'touch' || e.pointerType === 'pen') {
+        this.showTouchRipple(e.clientX, e.clientY);
+      }
 
       if (this.sendCallback) {
-        // Send compact binary touch packet
+        const { normX, normY } = this.getNormalizedCoordinates(e.clientX, e.clientY);
         const buffer = OmniOSProtocol.encodeBinaryTouch(
           OmniOSProtocol.OPCODES.TOUCH_DOWN,
           e.pointerId,
@@ -206,14 +217,8 @@ window.OmniOS = window.OmniOS || {};
       ptr.lastY = e.clientY;
 
       const { normX, normY } = this.getNormalizedCoordinates(e.clientX, e.clientY);
+      this.pendingMoves.set(e.pointerId, { normX, normY, time: Date.now() });
 
-      this.pendingMoves.set(e.pointerId, {
-        normX,
-        normY,
-        time: Date.now()
-      });
-
-      // Frame-rate throttle dispatch using requestAnimationFrame
       if (!this.rafPending) {
         this.rafPending = true;
         requestAnimationFrame(() => {
@@ -249,9 +254,8 @@ window.OmniOS = window.OmniOS || {};
 
       if (!this.touchEnabled) return;
 
-      const { normX, normY } = this.getNormalizedCoordinates(e.clientX, e.clientY);
-
       if (this.sendCallback) {
+        const { normX, normY } = this.getNormalizedCoordinates(e.clientX, e.clientY);
         const buffer = OmniOSProtocol.encodeBinaryTouch(
           OmniOSProtocol.OPCODES.TOUCH_UP,
           e.pointerId,
@@ -281,8 +285,9 @@ window.OmniOS = window.OmniOS || {};
     }
 
     destroy() {
-      if (this.container) {
-        this.container.removeEventListener('pointerdown', this.onPointerDown);
+      document.removeEventListener('pointerdown', this.onDocPointerDown, { capture: true });
+      if (this.lockBarrier) {
+        this.lockBarrier.removeEventListener('pointerdown', this.onBarrierPointerDown);
       }
       window.removeEventListener('pointermove', this.onPointerMove);
       window.removeEventListener('pointerup', this.onPointerUp);
